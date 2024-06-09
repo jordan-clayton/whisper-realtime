@@ -1,0 +1,23 @@
+[package]
+name = "whisper_realtime_gui"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cpal = "0.15.3"
+iced = "0.12.1"
+packer = "0.5"
+whisper-rs = { version = "0.11.1", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
+
+[target.aarch64-apple-darwin]
+rustflags = "-lc++ -l framework=Accelerate"
+
+[features]
+default = []
+cuda = ["whisper-rs/cuda"]
+coreml = ["whisper-rs/coreml"]
+opencl = ["whisper-rs/opencl"]
+
+
