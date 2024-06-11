@@ -1,5 +1,5 @@
-// TODO: Downloading trait.
-// TODO: File load trait.
+// TODO: Pathing to store models.
+#[derive(Copy, Clone)]
 pub enum Model {
     TinyEn,
     Tiny,
@@ -15,6 +15,7 @@ pub enum Model {
 }
 
 impl Model {
+    // TODO: modify this once downloading is finished.
     pub fn file_path(&self) -> &str {
         match self {
             Self::TinyEn => "/assets/models/tiny.en.bin",
@@ -31,7 +32,11 @@ impl Model {
         }
     }
     pub fn is_downloaded(&self) -> bool {
-        std::fs::metadata(self.file_path())?.is_file()
+        let path = std::fs::metadata(self.file_path());
+        match path {
+            Ok(_) => path.unwrap().is_file(),
+            Err(_) => false,
+        }
     }
     pub fn download(&self) {
         if self.is_downloaded() {

@@ -9,6 +9,7 @@ edition = "2021"
 cpal = "0.15.3"
 iced = "0.12.1"
 packer = "0.5"
+tokio = "1.38.0"
 whisper-rs = { version = "0.11.1", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
 
 [target.aarch64-apple-darwin]
