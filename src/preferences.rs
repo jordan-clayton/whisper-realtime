@@ -1,32 +1,23 @@
-//TODO: Implement serialization
-use crate::model::Model;
+use serde::{Deserialize, Serialize};
 
-pub struct Preferences {
-    pub gui_prefs: GUIPreferences,
-    pub trans_prefs: TranscriberPreferences,
-}
+use crate::model::ModelType;
 
-impl Default for Preferences {
-    fn default() -> Self {
-        Preferences {
-            gui_prefs: GUIPreferences::default(),
-            trans_prefs: TranscriberPreferences::default(),
-        }
-    }
-}
-
-struct GUIPreferences {}
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GUIPreferences {}
 impl Default for GUIPreferences {
     fn default() -> Self {
         GUIPreferences {}
     }
 }
-struct TranscriberPreferences {
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Configs {
+    pub input_device_name: Option<String>,
     pub n_threads: std::ffi::c_int,
     pub set_translate: bool,
-    pub set_language: Option<&'static str>,
+    pub set_language: Option<String>,
     pub use_gpu: bool,
-    pub model: Model,
+    pub model: ModelType,
     // Stdout only.
     pub print_special: bool,
     pub print_progress: bool,
@@ -34,14 +25,15 @@ struct TranscriberPreferences {
     pub print_timestamps: bool,
 }
 
-impl Default for TranscriberPreferences {
+impl Default for Configs {
     fn default() -> Self {
-        TranscriberPreferences {
+        Configs {
+            input_device_name: Some(String::from("default")),
             n_threads: 4,
             set_translate: false,
-            set_language: Some("en"),
+            set_language: Some(String::from("en")),
             use_gpu: true,
-            model: Model::default(),
+            model: ModelType::default(),
             print_special: false,
             print_progress: false,
             print_realtime: false,

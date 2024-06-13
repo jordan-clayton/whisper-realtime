@@ -1,7 +1,7 @@
 use crate::traits::Queue;
 
-#[derive()]
-pub struct RingBuffer<T: Default> {
+#[derive(Clone)]
+pub struct RingBuffer<T: Default + Clone> {
     head: usize,
     tail: usize,
     count: usize,
