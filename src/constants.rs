@@ -3,12 +3,13 @@ const SAMPLE_RATE: f64 = 16000f64;
 
 pub const N_SAMPLES_KEEP: usize = ((1e-3 * KEEP_MS) * SAMPLE_RATE) as usize;
 
-// TODO: Figure out a default input buffer size.
-// Currently: 2048 bytes -> 512 f32 samples.
-pub const INPUT_BUFFER_CAPACITY: usize = 2048;
+pub const N_SAMPLES_30S: usize = ((1e-3 * 30000.0) * SAMPLE_RATE) as usize;
+pub const INPUT_BUFFER_CAPACITY: usize = N_SAMPLES_30S;
+pub const AUDIO_BUFFER_CAPACITY: usize = N_SAMPLES_30S;
 
 // TODO: figure out an output buffer size.
-pub const OUTPUT_BUFFER_CAPACITY: usize = 2048;
+
+pub const OUTPUT_BUFFER_CAPACITY: usize = N_SAMPLES_30S;
 
 pub const MAX_QUEUE_ERRORS: usize = 5;
 

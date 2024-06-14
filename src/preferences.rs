@@ -10,7 +10,7 @@ impl Default for GUIPreferences {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Configs {
     pub input_device_name: Option<String>,
     pub n_threads: std::ffi::c_int,

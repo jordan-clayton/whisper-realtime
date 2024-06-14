@@ -17,6 +17,7 @@ whisper-rs = { version = "0.11.1", features = ["whisper-cpp-log", "whisper-cpp-t
 log = "0.4.21"
 egui = "0.27.2"
 bbqueue-sync = "0.5.1"
+ctrlc = "3.4.4"
 
 [target.aarch64-apple-darwin]
 rustflags = "-lc++ -l framework=Accelerate"

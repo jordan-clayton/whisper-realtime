@@ -20,11 +20,11 @@ impl Default for Model {
 }
 
 impl Model {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
-    fn new_with_model_type(m_type: ModelType) -> Self {
+    pub fn new_with_model_type(m_type: ModelType) -> Self {
         let p_dir =
             directories::ProjectDirs::from("com", "Jordan", "WhisperGUI").expect("no home folder");
         let path = p_dir.data_dir().to_path_buf();
@@ -34,14 +34,14 @@ impl Model {
         }
     }
 
-    fn new_with_data_dir(path: std::path::PathBuf) -> Self {
+    pub fn new_with_data_dir(path: std::path::PathBuf) -> Self {
         Model {
             model_type: ModelType::default(),
             data_directory: path,
         }
     }
 
-    fn new_with_type_and_dir(m_type: ModelType, path: std::path::PathBuf) -> Self {
+    pub fn new_with_type_and_dir(m_type: ModelType, path: std::path::PathBuf) -> Self {
         Model {
             model_type: m_type,
             data_directory: path,

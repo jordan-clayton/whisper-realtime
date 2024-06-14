@@ -6,13 +6,11 @@
 // -> These new functions probably need to be handled separately
 // for realtime/static.
 pub trait Transcriber<'a: 'b, 'b> {
+    // This is difficult to do on a thread -> Might be wisest to refactor it to use a message queue
     fn process_audio(&'a mut self) -> String;
-    // TODO: this could be moved to a transcriber impl
     fn convert_input_audio(input: &[u8], sample_format: cpal::SampleFormat) -> Vec<f32>;
-    // TODO: this could be moved to a transcriber impl
-    fn convert_to_i16_sample(byte_chunks: usize, buffer: &Vec<u8>) -> Vec<f32>;
-    // TODO: this could be moved to a transcriber impl
-    fn set_full_params<'b, 'a: 'b>(
+    // fn convert_to_i16_sample(byte_chunks: usize, buffer: &Vec<u8>) -> Vec<f32>;
+    fn set_full_params(
         full_params: &mut whisper_rs::FullParams<'b, 'b>,
         prefs: &'a crate::preferences::Configs,
         tokens: Option<&'b Vec<std::ffi::c_int>>,
