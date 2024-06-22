@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 // TODO: async downloading & GUI refactor.
 pub struct Model {
-    model_type: ModelType,
+    pub model_type: ModelType,
     data_directory: std::path::PathBuf,
 }
 
@@ -82,7 +82,7 @@ impl Model {
                 url.push_str("large-v2.bin");
             }
             ModelType::LargeV3 => {
-                url.push_str("large.bin");
+                url.push_str("large-v3.bin");
             }
         };
         url

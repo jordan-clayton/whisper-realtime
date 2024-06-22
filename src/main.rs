@@ -1,11 +1,14 @@
-use std::io::Write;
+use std::io::{stdout, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::{sleep, spawn};
+use std::time::Duration;
 
 use bbqueue_sync::BBBuffer;
 use cpal::traits::StreamTrait;
 use directories::ProjectDirs;
 
+use crate::ring_buffer::AudioRingBuffer;
 use crate::traits::Transcriber;
 
 mod constants;
@@ -27,21 +30,26 @@ fn main() {
     let mut wg_configs: preferences::Configs = serialize::load_configs(&proj_dir);
     let mut wg_prefs: preferences::GUIPreferences = serialize::load_prefs(&proj_dir);
 
-    //TODO: migrate testing code once GUI
-    // println!("Hello World");
+    let device = String::from("jack");
+    if wg_configs.input_device_name.is_none()
+        || wg_configs.input_device_name.clone().unwrap() != device
+    {
+        wg_configs.input_device_name = Some(device);
+    }
 
     // Download the model.
-
     let data_dir = proj_dir.data_local_dir();
 
-    let model = model::Model::new_with_data_dir(data_dir.to_path_buf());
-
-    // Rn, going with default, tiny model.
+    let mut model = model::Model::new_with_data_dir(data_dir.to_path_buf());
+    model.model_type = model::ModelType::MediumEn;
+    // Large model
     if !model.is_downloaded() {
         println!("Downloading model:");
         model.download();
         println!("Model downloaded");
     }
+
+    // TODO: refactor to use a ringbuffer.
 
     // Not sure whether to clone or just move
     let model = Arc::new(model);
@@ -51,6 +59,13 @@ fn main() {
     let configs: Arc<preferences::Configs> = Arc::new(wg_configs.clone());
     let c_configs = configs.clone();
 
+    // Audio buffer
+
+    let audio = AudioRingBuffer::new(constants::INPUT_BUFFER_CAPACITY);
+    let audio_p = Arc::new(audio);
+    let audio_p_mic = audio_p.clone();
+
+    // TOO MANY BUFFERS
     // Mic Channels
     let (mic_producer, mic_consumer) = MIC_DATA_BUFFER
         .try_split()
@@ -88,7 +103,7 @@ fn main() {
     // State flags.
     let is_ready = Arc::new(AtomicBool::new(true));
     let c_is_ready = is_ready.clone();
-    let is_running = Arc::new(AtomicBool::new(false));
+    let is_running = Arc::new(AtomicBool::new(true));
     let c_is_running = is_running.clone();
 
     let c_interrupt_is_running = is_running.clone();
@@ -96,11 +111,12 @@ fn main() {
     // Register SIGINT handler to stop the transcription.
 
     ctrlc::set_handler(move || {
-        c_interrupt_is_running.store(false, Ordering::Relaxed);
+        println!("Interrupt received");
+        c_interrupt_is_running.store(false, Ordering::SeqCst);
     })
     .expect("failed to set SIGINT handler");
 
-    let transcription_thread = std::thread::spawn(move || {
+    let transcription_thread = spawn(move || {
         let mut whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
         whisper_ctx_params.use_gpu = c_configs.use_gpu;
 
@@ -113,15 +129,19 @@ fn main() {
         .expect("Failed to load model");
 
         let state = ctx.create_state().expect("failed to create state");
+        let name = &c_configs;
+        let name = name.input_device_name.clone().unwrap();
 
+        // TODO: send audio_p_mic to the microphone stream fn
         let (stream, sample_format) =
-            microphone::create_microphone_stream(c_mic_p, c_mic_err_p, None, None);
+            microphone::create_microphone_stream(c_mic_p, c_mic_err_p, None, Some(&name));
 
         stream.play().expect("failed to start mic stream");
         let mut transcriber = transcriber::RealtimeTranscriber::new_with_configs(
             state,
             &sample_format,
             c_mic_c,
+            audio_p,
             c_mic_err_c,
             c_trans_p,
             c_trans_err_p,
@@ -147,11 +167,12 @@ fn main() {
     });
 
     // Normally this would go on a separate thread, this is just for testing.
+    // TODO: Get the lock for stdout before the loop to hog it
     let mut output_buffer: Vec<String> = vec![];
-    println!("Transcription: ");
     loop {
         let running = is_running.load(Ordering::Relaxed);
         if !running {
+            println!("Reading stopped");
             break;
         }
 
@@ -179,9 +200,12 @@ fn main() {
             let text_chunk = String::from_utf8(byte_string).expect("failed to parse bytestring");
             print!("{}", text_chunk);
             output_buffer.push(text_chunk);
-            std::io::stdout().flush().ok().unwrap();
             audio.release(used_bytes)
+        } else {
+            sleep(Duration::from_millis(100));
         }
+
+        stdout().flush().unwrap();
     }
 
     let transcription = transcription_thread.join();
@@ -208,13 +232,12 @@ fn main() {
     // Free the thread output buffer
     let trans_data_read = trans_c.read();
     if let Ok(mut trans_grant) = trans_data_read {
-        let input_buf = trans_grant.buf().clone();
+        let input_buf = trans_grant.buf();
         let mut byte_string: Vec<u8> = vec![];
         byte_string.extend_from_slice(input_buf);
         let text_chunk = String::from_utf8(byte_string).expect("failed to parse bytestring");
-        print!("{}", text_chunk);
+        // print!("{}", text_chunk);
         output_buffer.push(text_chunk);
-        std::io::stdout().flush().unwrap();
         trans_grant.to_release(input_buf.len());
     }
 

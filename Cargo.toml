@@ -18,14 +18,18 @@ log = "0.4.21"
 egui = "0.27.2"
 bbqueue-sync = "0.5.1"
 ctrlc = "3.4.4"
+webrtc-vad = "0.4.0"
+voice_activity_detector = "0.1.0"
 
 [target.aarch64-apple-darwin]
 rustflags = "-lc++ -l framework=Accelerate"
+
 
 [features]
 default = []
 cuda = ["whisper-rs/cuda"]
 coreml = ["whisper-rs/coreml"]
 opencl = ["whisper-rs/opencl"]
+jack = ["cpal/jack"]
 
 

@@ -13,12 +13,14 @@ use crate::constants;
 //     pub error_buffer: Consumer<'static, { constants::CPAL_ERROR_BUFFER_CAPACITY }>,
 // }
 
+// TODO: Refactor to use ringbuffer
+
 pub fn create_microphone_stream(
     mic_producer: Arc<Producer<'static, { constants::INPUT_BUFFER_CAPACITY }>>,
     error_producer: Arc<Producer<'static, { constants::CPAL_ERROR_BUFFER_CAPACITY }>>,
     device_host: Option<cpal::Host>,
     input_device_name: Option<&String>,
-) -> (cpal::Stream, cpal::SampleFormat) {
+) -> (cpal::Stream, SampleFormat) {
     let host: cpal::Host = if device_host.is_some() {
         device_host.unwrap()
     } else {
@@ -34,6 +36,7 @@ pub fn create_microphone_stream(
             if device.is_some() {
                 device
             } else {
+                println!("Did not find {}", &input_device_name.unwrap());
                 host.default_input_device()
             }
         } else {
@@ -44,6 +47,8 @@ pub fn create_microphone_stream(
     }
     .expect("failed to find input device");
 
+    println!("device: {}", &device.name().unwrap());
+
     let mut supported_configs_range = device
         .supported_input_configs()
         .expect("config query error");
@@ -52,9 +57,15 @@ pub fn create_microphone_stream(
         .expect("no supported configs")
         .with_max_sample_rate();
     let mut config: cpal::StreamConfig = supported_config.clone().into();
-    let buffer_size = cpal::BufferSize::Fixed(constants::AUDIO_BUFFER_CAPACITY as cpal::FrameCount);
+    // TODO: This does not need to be fixed
+    let buffer_size = cpal::BufferSize::Fixed(4096);
+
+    // TODO: SAMPLE_RATE should probably be the same as WHISPER.
+    config.sample_rate = cpal::SampleRate(48000);
     config.buffer_size = buffer_size;
+    // TODO: this needs to be f32.
     let sample_format = supported_config.sample_format();
+    println!("Sample format: {}", sample_format);
 
     let d_send = mic_producer.clone();
     let e_send = error_producer.clone();
