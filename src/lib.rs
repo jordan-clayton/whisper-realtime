@@ -5,4 +5,7 @@ pub mod preferences;
 pub mod traits;
 pub mod transcriber;
 
-pub mod ring_buffer;
+pub mod audio_ring_buffer;
+
+pub mod errors;
+mod recorder;

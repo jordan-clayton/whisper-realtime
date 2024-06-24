@@ -24,9 +24,5 @@ pub const OUTPUT_BUFFER_CAPACITY: usize = 2048 * std::mem::size_of::<char>();
 
 pub const MAX_QUEUE_ERRORS: usize = 5;
 
-// This is 120 bytes -> Consider refactoring.
-pub const CPAL_ERROR_BUFFER_CAPACITY: usize =
-    std::mem::size_of::<cpal::StreamError>() * MAX_QUEUE_ERRORS;
-
 // Not sure how big to make this.
 pub const ERROR_BUFFER_CAPACITY: usize = 2048;
