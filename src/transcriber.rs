@@ -92,11 +92,11 @@ impl RealtimeTranscriber {
         audio_data: &Vec<T>,
         last_ms: usize,
     ) -> bool {
-        let n_samples = audio_data.len();
-        let n_samples_last = (constants::SAMPLE_RATE * last_ms as f64 / 1000f64) as usize;
-        if n_samples_last >= n_samples {
-            return false;
-        }
+        // let n_samples = audio_data.len();
+        // let n_samples_last = (constants::SAMPLE_RATE * last_ms as f64 / 1000f64) as usize;
+        // if n_samples_last >= n_samples {
+        //     return false;
+        // }
 
         let samples = audio_data.clone();
 
@@ -106,8 +106,8 @@ impl RealtimeTranscriber {
     }
 }
 
-// TODO: check for vad speed, if too slow, go with modified old impl.
-// TODO: SPAWN THE THREAD IN HERE
+// TODO: Implement without vad - is too slow & resulting in duplicated data.
+// More sophisticated VAD with higher threshold would probably work out better.
 impl Transcriber for RealtimeTranscriber {
     fn process_audio(&mut self, state: &mut WhisperState) -> String {
         // Check to see if mod has been initialized.
@@ -128,6 +128,7 @@ impl Transcriber for RealtimeTranscriber {
 
         println!("Start Speaking: ");
 
+        let mut pause_detected = true;
         loop {
             let running = self.running.clone().load(Ordering::Relaxed);
             if !running {
@@ -150,9 +151,17 @@ impl Transcriber for RealtimeTranscriber {
                 .expect("failed to convert new samples to mono");
 
             if Self::is_voice_detected(&mut self.vad, &new_samples, 1000) {
-                self.audio.get_audio(10000, &mut audio_samples);
+                self.audio
+                    .get_audio(constants::AUDIO_CHUNK_SIZE, &mut audio_samples);
+                pause_detected = false;
             } else {
                 sleep(Duration::from_millis(constants::PAUSE_DURATION));
+                if !pause_detected {
+                    pause_detected = true;
+                    self.data_sender
+                        .send(Ok(String::from("\n")))
+                        .expect("Failed to send transcription");
+                }
                 continue;
             }
 

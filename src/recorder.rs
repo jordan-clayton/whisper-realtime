@@ -8,7 +8,12 @@ impl<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> AudioCallback 
     type Channel = T;
 
     fn callback(&mut self, input: &mut [T]) {
-        self.sender.send(input.to_vec()).unwrap();
+        // TODO: this occasionally panics.
+        // This needs to block if/when a channel is full
+        // Pushing data to the ringbuffer blocks on the mutex and this doesn't block.
+        self.sender
+            .send(input.to_vec())
+            .expect("Failed to send data");
     }
 }
 

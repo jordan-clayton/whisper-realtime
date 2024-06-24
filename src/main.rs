@@ -115,16 +115,17 @@ fn main() {
     let transcription_thread = scope(|s| {
         mic_stream.resume();
         let _audio_thread = s.spawn(move || loop {
+            // Check whether running
+            if !c_is_running_audio_receiver.load(Ordering::Acquire) {
+                break;
+            }
             // Wait on a message.
             let output = a_receiver.recv();
 
             // Check for RecvError -> No senders
-            // Issue borrowing as mutable. Figure this out.
             match output {
                 Ok(mut audio_data) => {
-                    // Push the audio to the ringbuffer.
-                    // TODO: refactor to "push_audio"
-                    // TODO: finish refactor to atomics to avoid need for mut.
+                    // This
                     audio_p_mic.push_audio(&mut audio_data);
                 }
                 // When there are no more senders, this loop will break.
@@ -149,6 +150,11 @@ fn main() {
 
         let _print_thread = s.spawn(move || {
             loop {
+                // Check whether running
+                if !c_is_running_data_receiver.load(Ordering::Acquire) {
+                    break;
+                }
+
                 // Wait on a message.
                 let output = o_receiver.recv();
 

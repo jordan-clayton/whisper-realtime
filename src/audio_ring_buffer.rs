@@ -90,7 +90,6 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
         }
     }
 
-    // TODO: refactor to use atomics.
     pub fn get_audio(&self, ms: usize, result: &mut Vec<T>) {
         let mut ms = ms.clone();
         if ms == 0 {

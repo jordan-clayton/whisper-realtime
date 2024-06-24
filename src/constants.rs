@@ -10,7 +10,11 @@ pub const N_SAMPLES_2S: usize = ((1e-3 * 2000.0) * SAMPLE_RATE) as usize;
 // Total length is 10s
 pub const INPUT_BUFFER_CAPACITY: usize = 10000;
 
-pub const VOICE_THRESHOLD: f32 = 0.5;
+// TODO: Figure out a microphone buffer size
+
+pub const AUDIO_CHUNK_SIZE: usize = 5000;
+
+pub const VOICE_THRESHOLD: f32 = 0.75;
 
 pub const PAUSE_DURATION: u64 = 100;
 
