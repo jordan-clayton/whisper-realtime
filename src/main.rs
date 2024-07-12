@@ -1,11 +1,12 @@
 use std::io::{stdout, Write};
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Sender, sync_channel};
 use std::thread::scope;
 
 use directories::ProjectDirs;
-use sdl2::audio::{AudioCallback, AudioDevice};
+use sdl2::audio::AudioDevice;
 
 use crate::audio_ring_buffer::AudioRingBuffer;
 use crate::errors::TranscriptionError;
@@ -23,24 +24,24 @@ mod serialize;
 mod traits;
 mod transcriber;
 
+// TODO: factor this out into a test
+// TODO: refactor into transcriber lib - move serialization/prefs to gui.
 fn main() {
     let proj_dir = ProjectDirs::from("com", "Jordan", "WhisperGUI").expect("No home folder");
     let mut wg_configs: preferences::Configs = serialize::load_configs(&proj_dir);
     let mut wg_prefs: preferences::GUIPreferences = serialize::load_prefs(&proj_dir);
 
-    // TODO: remove this.
-    let device = String::from("jack");
-    if wg_configs.input_device_name.is_none()
-        || wg_configs.input_device_name.clone().unwrap() != device
-    {
-        wg_configs.input_device_name = Some(device);
-    }
+    // if wg_configs.input_device_name.is_none()
+    //     || wg_configs.input_device_name.clone().unwrap() != device
+    // {
+    //     wg_configs.input_device_name = Some(device);
+    // }
 
     // Download the model.
     let data_dir = proj_dir.data_local_dir();
 
     let mut model = model::Model::new_with_data_dir(data_dir.to_path_buf());
-    model.model_type = model::ModelType::MediumEn;
+    model.model_type = model::ModelType::LargeV3;
     // Large model
     if !model.is_downloaded() {
         println!("Downloading model:");
@@ -57,23 +58,23 @@ fn main() {
     let c_configs = configs.clone();
 
     // Audio buffer
-
     let audio: AudioRingBuffer<f32> = AudioRingBuffer::new(constants::INPUT_BUFFER_CAPACITY);
     let audio_p = Arc::new(audio);
     let mut audio_p_mic = audio_p.clone();
 
     // Input sender
-    let (a_sender, a_receiver) = channel();
+    let (a_sender, a_receiver) = sync_channel(constants::INPUT_BUFFER_CAPACITY);
 
     // Output sender
     let (o_sender, o_receiver) = channel();
-    let o_sender_p: Arc<Sender<Result<String, TranscriptionError>>> = Arc::new(o_sender);
+    let o_sender_p: Arc<Sender<Result<(String, bool), TranscriptionError>>> = Arc::new(o_sender);
 
     // State flags.
     let is_ready = Arc::new(AtomicBool::new(true));
     let c_is_ready = is_ready.clone();
     let is_running = Arc::new(AtomicBool::new(true));
     let c_is_running = is_running.clone();
+    let c_is_running_recorder_thread = is_running.clone();
     let c_is_running_audio_receiver = is_running.clone();
     let c_is_running_data_receiver = is_running.clone();
     let c_interrupt_is_running = is_running.clone();
@@ -95,8 +96,12 @@ fn main() {
     );
 
     // Setup
-    let mic_stream: AudioDevice<Recorder<f32>> =
-        microphone::build_audio_stream(&audio_subsystem, &desired_audio_spec, a_sender);
+    let mic_stream: AudioDevice<Recorder<f32>> = microphone::build_audio_stream(
+        &audio_subsystem,
+        &desired_audio_spec,
+        a_sender,
+        c_is_running_recorder_thread,
+    );
 
     // Model params
     let mut whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
@@ -112,8 +117,12 @@ fn main() {
 
     let mut state = ctx.create_state().expect("failed to create state");
 
+    let mut output_buffer: Vec<String> = vec![];
+
     let transcription_thread = scope(|s| {
         mic_stream.resume();
+        // TODO: this thread should also have an audio-buffer to capture the recording
+        // So that the user can transcribe the audio separately.
         let _audio_thread = s.spawn(move || loop {
             // Check whether running
             if !c_is_running_audio_receiver.load(Ordering::Acquire) {
@@ -148,7 +157,7 @@ fn main() {
             output
         });
 
-        let _print_thread = s.spawn(move || {
+        let print_thread = s.spawn(move || {
             loop {
                 // Check whether running
                 if !c_is_running_data_receiver.load(Ordering::Acquire) {
@@ -161,28 +170,55 @@ fn main() {
                 // Check for RecvError -> No senders
                 match output {
                     Ok(op) => match op {
-                        Ok(text) => {
-                            print!("{}", &text);
+                        Ok(text_pkg) => {
+                            if text_pkg.1 {
+                                output_buffer.push(text_pkg.0);
+                            } else {
+                                let last_index = output_buffer.len() - 1;
+                                output_buffer[last_index] = text_pkg.0;
+                            }
                         }
                         Err(err) => {
                             eprintln!("TranscriptionError: {}", err.cause());
+                            c_is_running_data_receiver.store(false, Ordering::SeqCst);
                         }
                     },
                     // When there are no more senders, this loop will break.
-                    Err(_e) => {
+                    Err(e) => {
+                        eprintln!("RecvError: {}", e);
                         c_is_running_data_receiver.store(false, Ordering::SeqCst);
                         break;
                     }
                 }
+                // Clear stdout:
+                clear_stdout();
+
+                // Print the current output buffer.
+                println!("Transcription:");
+                for text_chunk in &output_buffer {
+                    print!("{}", text_chunk);
+                }
                 stdout().flush().unwrap();
             }
+            output_buffer.join("").clone()
         });
-        transcription_thread.join()
+        let tt = transcription_thread.join();
+        let pt = print_thread.join();
+        (tt, pt)
     });
 
     mic_stream.pause();
 
-    let transcription = transcription_thread.expect("transcription thread panicked");
+    let transcription = transcription_thread
+        .0
+        .expect("transcription thread panicked");
+    let rt_transcription = transcription_thread.1.expect("print thread panicked");
+
+    // Comparison - for testing.
+
+    clear_stdout();
+    println!("Final Transcription (print thread):");
+    println!("{}", &rt_transcription);
 
     println!();
 
@@ -191,4 +227,12 @@ fn main() {
 
     serialize::save_configs(&proj_dir, &wg_configs);
     serialize::save_prefs(&proj_dir, &wg_prefs)
+}
+
+// TODO: factor out to test.
+fn clear_stdout() {
+    Command::new("cls")
+        .status()
+        .or_else(|_| Command::new("clear").status())
+        .expect("Failed to clear stdout");
 }

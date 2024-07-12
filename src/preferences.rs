@@ -12,6 +12,7 @@ impl Default for GUIPreferences {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Configs {
+    // TODO: This needs to gooo
     pub input_device_name: Option<String>,
     pub n_threads: std::ffi::c_int,
     pub set_translate: bool,

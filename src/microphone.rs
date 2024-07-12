@@ -1,3 +1,7 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::SyncSender;
+
 use sdl2::audio::{AudioDevice, AudioFormatNum, AudioSpecDesired};
 use sdl2::AudioSubsystem;
 
@@ -24,14 +28,15 @@ pub fn get_desired_audio_spec(
 pub fn build_audio_stream<T: Default + Clone + Copy + Send + AudioFormatNum + 'static>(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
-    sender: std::sync::mpsc::Sender<Vec<T>>,
+    sender: SyncSender<Vec<T>>,
+    is_running: Arc<AtomicBool>,
 ) -> AudioDevice<Recorder<T>> {
     audio_subsystem
         .open_capture(
             // Device - should be default, SDL should change if the user changes devices in their sysprefs.
             None,
             desired_spec,
-            |_spec| Recorder { sender },
+            |_spec| Recorder { sender, is_running },
         )
         .expect("failed to build audio stream")
 }

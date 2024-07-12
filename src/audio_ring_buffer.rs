@@ -147,4 +147,47 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
         self.head.store(0, Ordering::SeqCst);
         self.audio_len.store(0, Ordering::SeqCst);
     }
+
+    pub fn clear_n_samples(&self, ms: usize) {
+        let mut ms = ms.clone();
+        if ms == 0 {
+            let this_ms = self.len_ms.load(Ordering::Acquire);
+            ms = this_ms;
+        }
+
+        let mut n_samples = (ms as f64 * constants::SAMPLE_RATE / 1000f64) as usize;
+        let audio_len = self.audio_len.load(Ordering::Acquire);
+        if n_samples > audio_len {
+            n_samples = audio_len;
+        }
+
+        let head_pos = self.head.load(Ordering::Acquire);
+        let buffer_len = self.buffer_len.load(Ordering::Acquire);
+
+        let mut start_pos: i64 =
+            head_pos as i64 - n_samples as i64 + constants::N_SAMPLES_KEEP as i64;
+
+        if start_pos < 0 {
+            start_pos += buffer_len as i64;
+        }
+
+        let start_pos = start_pos as usize;
+
+        let mut buffer = self.buffer.lock().unwrap();
+        if start_pos + n_samples > buffer_len {
+            let to_endpoint = buffer_len - start_pos;
+
+            // Zero-out first half
+            let stream = &mut buffer[start_pos..start_pos + to_endpoint];
+            stream.iter_mut().for_each(|m| *m = T::default());
+
+            // Zero-out second half
+            let remaining_samples = n_samples - to_endpoint;
+            let stream = &mut buffer[0..remaining_samples];
+            stream.iter_mut().for_each(|m| *m = T::default());
+        } else {
+            let stream = &mut buffer[start_pos..start_pos + n_samples];
+            stream.iter_mut().for_each(|m| *m = T::default());
+        }
+    }
 }

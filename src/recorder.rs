@@ -1,19 +1,26 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use sdl2::audio::{AudioCallback, AudioDevice, AudioFormatNum};
 
 pub struct Recorder<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> {
-    pub sender: std::sync::mpsc::Sender<Vec<T>>,
+    pub sender: std::sync::mpsc::SyncSender<Vec<T>>,
+    pub is_running: Arc<AtomicBool>,
 }
 
 impl<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> AudioCallback for Recorder<T> {
     type Channel = T;
 
     fn callback(&mut self, input: &mut [T]) {
-        // TODO: this occasionally panics.
         // This needs to block if/when a channel is full
         // Pushing data to the ringbuffer blocks on the mutex and this doesn't block.
-        self.sender
-            .send(input.to_vec())
-            .expect("Failed to send data");
+        //
+        let success = self.sender.send(input.to_vec());
+
+        if let Err(e) = success {
+            eprintln!("SendError: {}", e);
+            self.is_running.store(false, Ordering::SeqCst);
+        }
     }
 }
 

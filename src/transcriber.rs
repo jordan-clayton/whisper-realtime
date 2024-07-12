@@ -15,19 +15,19 @@ use crate::errors::TranscriptionError;
 use crate::preferences::Configs;
 use crate::traits::Transcriber;
 
+// TODO: consider adding a full audio buffer to capture the entire recording -> Then allow user re-transcribe postwise.
 #[derive()]
 pub struct RealtimeTranscriber {
     configs: Arc<Configs>,
     audio: Arc<AudioRingBuffer<f32>>,
     // This might be wise to factor out.
     output_buffer: Vec<String>,
+
+    //full_audio_buffer: Vec<f32>,
+
     // To send data to the G/UI
-    data_sender: Arc<Sender<Result<String, TranscriptionError>>>,
+    data_sender: Arc<Sender<Result<(String, bool), TranscriptionError>>>,
     token_buffer: Vec<std::ffi::c_int>,
-    // State is created before the transcriber is constructed.
-    // The model is loaded into the ctx passed to the whisper state.
-    // Transcriber state flags.
-    // Ready -> selected Model is downloaded.
     ready: Arc<AtomicBool>,
     running: Arc<AtomicBool>,
     vad: VoiceActivityDetector,
@@ -36,7 +36,7 @@ pub struct RealtimeTranscriber {
 impl RealtimeTranscriber {
     pub fn new(
         audio: Arc<AudioRingBuffer<f32>>,
-        data_sender: Arc<Sender<Result<String, TranscriptionError>>>,
+        data_sender: Arc<Sender<Result<(String, bool), TranscriptionError>>>,
         running: Arc<AtomicBool>,
         ready: Arc<AtomicBool>,
     ) -> Self {
@@ -62,7 +62,7 @@ impl RealtimeTranscriber {
 
     pub fn new_with_configs(
         audio: Arc<AudioRingBuffer<f32>>,
-        data_sender: Arc<Sender<Result<String, TranscriptionError>>>,
+        data_sender: Arc<Sender<Result<(String, bool), TranscriptionError>>>,
         running: Arc<AtomicBool>,
         ready: Arc<AtomicBool>,
         configs: Arc<Configs>,
@@ -90,7 +90,7 @@ impl RealtimeTranscriber {
     fn is_voice_detected<T: voice_activity_detector::Sample>(
         vad: &mut VoiceActivityDetector,
         audio_data: &Vec<T>,
-        last_ms: usize,
+        // last_ms: usize,
     ) -> bool {
         // let n_samples = audio_data.len();
         // let n_samples_last = (constants::SAMPLE_RATE * last_ms as f64 / 1000f64) as usize;
@@ -106,9 +106,8 @@ impl RealtimeTranscriber {
     }
 }
 
-// TODO: Implement without vad - is too slow & resulting in duplicated data.
-// More sophisticated VAD with higher threshold would probably work out better.
 impl Transcriber for RealtimeTranscriber {
+    // TODO: factor out output buffer redundancy.
     fn process_audio(&mut self, state: &mut WhisperState) -> String {
         // Check to see if mod has been initialized.
         let ready = self.ready.clone().load(Ordering::Relaxed);
@@ -118,10 +117,8 @@ impl Transcriber for RealtimeTranscriber {
 
         let mut t_last = std::time::Instant::now();
 
-        // This should probably hold fewer than 30seconds for realtime.
         let mut audio_samples: Vec<f32> = vec![0f32; constants::N_SAMPLES_30S];
-        // if no vad, hold an audio_samples_old vector to append to the audio.
-        let mut audio_samples_new: Vec<f32> = vec![0f32; constants::N_SAMPLES_30S];
+        let mut audio_samples_vad: Vec<f32> = vec![0f32; constants::N_SAMPLES_30S];
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         Self::set_full_params(&mut params, &self.configs, None);
@@ -129,6 +126,8 @@ impl Transcriber for RealtimeTranscriber {
         println!("Start Speaking: ");
 
         let mut pause_detected = true;
+        let mut phrase_finished = false;
+
         loop {
             let running = self.running.clone().load(Ordering::Relaxed);
             if !running {
@@ -140,28 +139,50 @@ impl Transcriber for RealtimeTranscriber {
             let t_now = std::time::Instant::now();
 
             let diff = t_now - t_last;
-            if diff.as_millis() < 2000 {
+            let millis = diff.as_millis();
+
+            if millis < constants::VAD_CHUNK_SIZE as u128 {
                 sleep(Duration::from_millis(constants::PAUSE_DURATION));
+                continue;
             }
 
-            self.audio.get_audio(2000, &mut audio_samples_new);
+            // Perhaps this might be better if it were lower.
+            if millis >= constants::PHRASE_TIMEOUT as u128 {
+                phrase_finished = true;
+            }
+
+            self.audio
+                .get_audio(constants::VAD_CHUNK_SIZE, &mut audio_samples_vad);
 
             // Vad is mono only.
-            let new_samples = whisper_rs::convert_stereo_to_mono_audio(&audio_samples_new)
+            let new_samples = whisper_rs::convert_stereo_to_mono_audio(&audio_samples_vad)
                 .expect("failed to convert new samples to mono");
 
-            if Self::is_voice_detected(&mut self.vad, &new_samples, 1000) {
+            if Self::is_voice_detected(
+                &mut self.vad,
+                &new_samples,
+                // 1000
+            ) {
                 self.audio
                     .get_audio(constants::AUDIO_CHUNK_SIZE, &mut audio_samples);
+
                 pause_detected = false;
             } else {
-                sleep(Duration::from_millis(constants::PAUSE_DURATION));
                 if !pause_detected {
                     pause_detected = true;
+                    phrase_finished = true;
+                    self.output_buffer.push(String::from("\n"));
                     self.data_sender
-                        .send(Ok(String::from("\n")))
+                        .send(Ok((String::from("\n"), true)))
                         .expect("Failed to send transcription");
+
+                    // Clear the previous 10s of the audio (keep a small amount to seed the model).
+                    // self.audio.clear_n_samples(constants::AUDIO_CHUNK_SIZE);
+                    // Clear the audio buffer
+                    self.audio.clear();
                 }
+
+                sleep(Duration::from_millis(constants::PAUSE_DURATION));
                 continue;
             }
 
@@ -214,13 +235,26 @@ impl Transcriber for RealtimeTranscriber {
             let text = text.join("");
             let text = text.trim();
             let text_string = String::from(text);
-            self.output_buffer.push(text_string.clone());
+
+            let push_new_audio = phrase_finished || self.output_buffer.is_empty();
+
+            if push_new_audio {
+                self.output_buffer.push(text_string.clone());
+                phrase_finished = false;
+            } else {
+                let last_index = self.output_buffer.len() - 1;
+                self.output_buffer[last_index] = text_string.clone();
+            }
 
             // Send the new text to the G/UI.
             self.data_sender
-                .send(Ok(text_string))
+                .send(Ok((text_string, push_new_audio)))
                 .expect("Failed to send transcription");
         }
+
+        // TODO: -> set up a "finalizing" step wherein the entire audio capture is re-transcribed
+        // for better accuracy?
+
         self.output_buffer.join("").clone()
     }
 
