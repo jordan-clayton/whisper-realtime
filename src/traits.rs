@@ -11,7 +11,7 @@ pub trait Transcriber {
     // fn convert_to_i16_sample(byte_chunks: usize, buffer: &Vec<u8>) -> Vec<f32>;
     fn set_full_params<'a>(
         full_params: &mut whisper_rs::FullParams<'a, 'a>,
-        prefs: &'a crate::preferences::Configs,
+        prefs: &'a crate::configs::Configs,
         tokens: Option<&'a Vec<std::ffi::c_int>>,
     );
 }

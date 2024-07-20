@@ -13,10 +13,11 @@ pub struct AudioRingBuffer<T: Default + Clone + Copy + AudioFormatNum + 'static>
     buffer: Mutex<Vec<T>>,
 }
 
-// This is not ideal, but the ring-buffer should be thread-safe
+// The ring buffer should be thread safe.
 unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Sync for AudioRingBuffer<T> {}
 unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Send for AudioRingBuffer<T> {}
 
+// TODO: refactor hardcoded constants into parameters & add to the struct.
 impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
     pub fn new(len_ms: usize) -> Self {
         let buffer_size = (len_ms / 1000) as f64 * constants::SAMPLE_RATE;
@@ -53,7 +54,6 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
         let mut buffer = self.buffer.lock().expect("failed to get buffer");
         let head_pos = self.head.load(Ordering::Acquire);
         if head_pos + n_samples > buffer_len {
-            // Check: this might have an off-by-one error
             let offset = buffer_len - head_pos;
             // memcpy stuff
 

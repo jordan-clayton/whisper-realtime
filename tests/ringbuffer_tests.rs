@@ -2,8 +2,8 @@
 mod ringbuffer_tests {
     use std::sync::atomic::Ordering;
 
-    use whisper_realtime_gui::audio_ring_buffer::AudioRingBuffer;
-    use whisper_realtime_gui::constants;
+    use whisper_realtime::audio_ring_buffer::AudioRingBuffer;
+    use whisper_realtime::constants;
 
     #[test]
     fn test_copy_buffer_lengths() {

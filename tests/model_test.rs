@@ -1,7 +1,7 @@
 // Model unit test
 #[cfg(test)]
 mod model_tests {
-    use whisper_realtime_gui::model::Model;
+    use whisper_realtime::model::Model;
 
     #[test]
     fn test_model_file_path() {

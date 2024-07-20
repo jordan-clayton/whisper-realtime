@@ -5,56 +5,33 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender, sync_channel};
 use std::thread::scope;
 
-use directories::ProjectDirs;
 use sdl2::audio::AudioDevice;
 
-use crate::audio_ring_buffer::AudioRingBuffer;
-use crate::errors::TranscriptionError;
-use crate::recorder::Recorder;
-use crate::traits::Transcriber;
+use whisper_realtime::{configs, constants, microphone, model};
+use whisper_realtime::audio_ring_buffer::AudioRingBuffer;
+use whisper_realtime::errors::TranscriptionError;
+use whisper_realtime::recorder::Recorder;
+use whisper_realtime::traits::Transcriber;
+use whisper_realtime::transcriber::realtime_transcriber;
 
-mod audio_ring_buffer;
-mod constants;
-mod errors;
-mod microphone;
-mod model;
-mod preferences;
-mod recorder;
-mod serialize;
-mod traits;
-mod transcriber;
-
-// TODO: factor this out into a test
-// TODO: refactor into transcriber lib - move serialization/prefs to gui.
+// TODO: add an option to re-transcribe statically using the captured audio
 fn main() {
-    let proj_dir = ProjectDirs::from("com", "Jordan", "WhisperGUI").expect("No home folder");
-    let mut wg_configs: preferences::Configs = serialize::load_configs(&proj_dir);
-    let mut wg_prefs: preferences::GUIPreferences = serialize::load_prefs(&proj_dir);
-
-    // if wg_configs.input_device_name.is_none()
-    //     || wg_configs.input_device_name.clone().unwrap() != device
-    // {
-    //     wg_configs.input_device_name = Some(device);
-    // }
-
     // Download the model.
-    let data_dir = proj_dir.data_local_dir();
-
-    let mut model = model::Model::new_with_data_dir(data_dir.to_path_buf());
-    model.model_type = model::ModelType::LargeV3;
-    // Large model
+    let mut proj_dir = std::env::current_dir().unwrap();
+    proj_dir.push("data");
+    let mut model = model::Model::new_with_data_dir(proj_dir.to_path_buf());
+    model.model_type = model::ModelType::MediumEn;
     if !model.is_downloaded() {
         println!("Downloading model:");
         model.download();
         println!("Model downloaded");
     }
 
-    // Not sure whether to clone or just move
     let model = Arc::new(model);
     let c_model = model.clone();
 
-    // Configs ptr
-    let configs: Arc<preferences::Configs> = Arc::new(wg_configs.clone());
+    // Configs ptr -> This should just be the default.
+    let configs: Arc<configs::Configs> = Arc::new(configs::Configs::default());
     let c_configs = configs.clone();
 
     // Audio buffer
@@ -79,14 +56,14 @@ fn main() {
     let c_is_running_data_receiver = is_running.clone();
     let c_interrupt_is_running = is_running.clone();
 
-    // Register SIGINT handler to stop the transcription.
+    // Use CTRL-C to stop the transcription.
     ctrlc::set_handler(move || {
         println!("Interrupt received");
         c_interrupt_is_running.store(false, Ordering::SeqCst);
     })
     .expect("failed to set SIGINT handler");
 
-    // SDL context
+    // SDL
     let ctx = sdl2::init().expect("Failed to initialize sdl");
     let audio_subsystem = ctx.audio().expect("Failed to initialize audio");
     let desired_audio_spec = microphone::get_desired_audio_spec(
@@ -121,20 +98,15 @@ fn main() {
 
     let transcription_thread = scope(|s| {
         mic_stream.resume();
-        // TODO: this thread should also have an audio-buffer to capture the recording
-        // So that the user can transcribe the audio separately.
         let _audio_thread = s.spawn(move || loop {
-            // Check whether running
             if !c_is_running_audio_receiver.load(Ordering::Acquire) {
                 break;
             }
-            // Wait on a message.
             let output = a_receiver.recv();
 
             // Check for RecvError -> No senders
             match output {
                 Ok(mut audio_data) => {
-                    // This
                     audio_p_mic.push_audio(&mut audio_data);
                 }
                 // When there are no more senders, this loop will break.
@@ -146,7 +118,7 @@ fn main() {
         });
 
         let transcription_thread = s.spawn(move || {
-            let mut transcriber = transcriber::RealtimeTranscriber::new_with_configs(
+            let mut transcriber = realtime_transcriber::RealtimeTranscriber::new_with_configs(
                 audio_p,
                 o_sender_p,
                 c_is_running,
@@ -159,12 +131,10 @@ fn main() {
 
         let print_thread = s.spawn(move || {
             loop {
-                // Check whether running
                 if !c_is_running_data_receiver.load(Ordering::Acquire) {
                     break;
                 }
 
-                // Wait on a message.
                 let output = o_receiver.recv();
 
                 // Check for RecvError -> No senders
@@ -190,10 +160,8 @@ fn main() {
                         break;
                     }
                 }
-                // Clear stdout:
                 clear_stdout();
 
-                // Print the current output buffer.
                 println!("Transcription:");
                 for text_chunk in &output_buffer {
                     print!("{}", text_chunk);
@@ -214,7 +182,7 @@ fn main() {
         .expect("transcription thread panicked");
     let rt_transcription = transcription_thread.1.expect("print thread panicked");
 
-    // Comparison - for testing.
+    // Comparison
 
     clear_stdout();
     println!("Final Transcription (print thread):");
@@ -224,12 +192,8 @@ fn main() {
 
     println!("Final Transcription (returned):");
     println!("{}", &transcription);
-
-    serialize::save_configs(&proj_dir, &wg_configs);
-    serialize::save_prefs(&proj_dir, &wg_prefs)
 }
 
-// TODO: factor out to test.
 fn clear_stdout() {
     Command::new("cls")
         .status()

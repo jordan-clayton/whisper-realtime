@@ -10,20 +10,17 @@ use voice_activity_detector::VoiceActivityDetector;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperError, WhisperState};
 
 use crate::audio_ring_buffer::AudioRingBuffer;
+use crate::configs::Configs;
 use crate::constants;
 use crate::errors::TranscriptionError;
-use crate::preferences::Configs;
 use crate::traits::Transcriber;
 
-// TODO: consider adding a full audio buffer to capture the entire recording -> Then allow user re-transcribe postwise.
-#[derive()]
+// TODO: refactor the hardcoded constants into RealtimeConfigs
 pub struct RealtimeTranscriber {
     configs: Arc<Configs>,
     audio: Arc<AudioRingBuffer<f32>>,
     // This might be wise to factor out.
     output_buffer: Vec<String>,
-
-    //full_audio_buffer: Vec<f32>,
 
     // To send data to the G/UI
     data_sender: Arc<Sender<Result<(String, bool), TranscriptionError>>>,
@@ -92,12 +89,6 @@ impl RealtimeTranscriber {
         audio_data: &Vec<T>,
         // last_ms: usize,
     ) -> bool {
-        // let n_samples = audio_data.len();
-        // let n_samples_last = (constants::SAMPLE_RATE * last_ms as f64 / 1000f64) as usize;
-        // if n_samples_last >= n_samples {
-        //     return false;
-        // }
-
         let samples = audio_data.clone();
 
         let probability = vad.predict(samples);
@@ -107,8 +98,8 @@ impl RealtimeTranscriber {
 }
 
 impl Transcriber for RealtimeTranscriber {
-    // TODO: factor out output buffer redundancy.
-    fn process_audio(&mut self, state: &mut WhisperState) -> String {
+    // Ideally this should be run on its own thread.
+    fn process_audio(&mut self, whisper_state: &mut WhisperState) -> String {
         // Check to see if mod has been initialized.
         let ready = self.ready.clone().load(Ordering::Relaxed);
         if !ready {
@@ -188,6 +179,7 @@ impl Transcriber for RealtimeTranscriber {
 
             t_last = t_now;
 
+            // TODO: Parameterize sampling strategy?
             let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
             // let token_buffer = self.token_buffer.clone();
             // Self::set_full_params(&mut params, &self.configs, Some(&token_buffer));
@@ -196,7 +188,7 @@ impl Transcriber for RealtimeTranscriber {
             let new_audio_samples = whisper_rs::convert_stereo_to_mono_audio(&audio_samples)
                 .expect("failed to convert to mono");
 
-            let result = state.full(params, &new_audio_samples);
+            let result = whisper_state.full(params, &new_audio_samples);
 
             if let Err(e) = result {
                 match e {
@@ -211,21 +203,20 @@ impl Transcriber for RealtimeTranscriber {
                                 "Model Failure",
                             ))))
                             .expect("Failed to send error");
-                        // println!("error: {}", e);
-                        // self.running.store(false, Ordering::Relaxed);
-                        // continue;
                     }
                 }
             }
 
-            let num_segments = state.full_n_segments().expect("failed to get segments");
+            let num_segments = whisper_state
+                .full_n_segments()
+                .expect("failed to get segments");
             if num_segments == 0 {
                 continue;
             }
             let mut text: Vec<String> = vec![];
 
             for i in 0..num_segments {
-                let segment = state
+                let segment = whisper_state
                     .full_get_segment_text(i)
                     .expect("failed to get segment");
 
@@ -251,9 +242,6 @@ impl Transcriber for RealtimeTranscriber {
                 .send(Ok((text_string, push_new_audio)))
                 .expect("Failed to send transcription");
         }
-
-        // TODO: -> set up a "finalizing" step wherein the entire audio capture is re-transcribed
-        // for better accuracy?
 
         self.output_buffer.join("").clone()
     }
@@ -286,7 +274,6 @@ impl Transcriber for RealtimeTranscriber {
     //     .collect();
     //
     // self.token_buffer = new_tokens;
-    // TODO: refactor these?
     fn set_full_params<'a>(
         full_params: &mut FullParams<'a, 'a>,
         prefs: &'a Configs,

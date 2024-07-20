@@ -1,5 +1,5 @@
 [package]
-name = "whisper_realtime_gui"
+name = "whisper_realtime"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,15 +8,11 @@ edition = "2021"
 [dependencies]
 bson = "2.11.0"
 directories = "5.0.1"
-packer = "0.5"
-serde = { version = "1.0.203", features = ["derive"] }
-tokio = "1.38.0"
+serde = { version = "1.0.204", features = ["derive"] }
 ureq = "2.9.7"
 whisper-rs = { version = "0.11.1", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
 log = "0.4.21"
-egui = "0.27.2"
 ctrlc = "3.4.4"
-#webrtc-vad = "0.4.0"
 voice_activity_detector = "0.1.0"
 sdl2 = "0.37.0"
 

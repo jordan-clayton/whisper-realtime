@@ -24,6 +24,7 @@ impl<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> AudioCallback 
     }
 }
 
+// These are currently unused. TODO: remove.
 pub struct MicWrapper<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> {
     pub mic: AudioDevice<Recorder<T>>,
 }

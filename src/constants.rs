@@ -9,24 +9,12 @@ pub const N_SAMPLES_2S: usize = ((1e-3 * 2000.0) * SAMPLE_RATE) as usize;
 
 // Total length is 10s
 pub const INPUT_BUFFER_CAPACITY: usize = 10000;
-
-// TODO: Some of these could and should be parameters to allow customization
+// This is currently set at 10 mins.
+pub const REALTIME_AUDIO_TIMEOUT: u128 = std::time::Duration::new(10 * 60, 0).as_millis();
+// TODO: Some of these should be parameters.
 pub const AUDIO_CHUNK_SIZE: usize = 10000;
 pub const VAD_CHUNK_SIZE: usize = 300;
-pub const PHRASE_TIMEOUT: usize = 5000;
-
+pub const PHRASE_TIMEOUT: usize = 3000;
 pub const VOICE_THRESHOLD: f32 = 0.65;
-
 pub const PAUSE_DURATION: u64 = 100;
-
-pub const TEST_DURATION: usize = 2000;
 pub const SAMPLE_DURATION: usize = 10000;
-pub const AUDIO_BUFFER_CAPACITY: usize = N_SAMPLES_30S * std::mem::size_of::<f32>();
-
-// 2048 characters?
-pub const OUTPUT_BUFFER_CAPACITY: usize = 2048 * std::mem::size_of::<char>();
-
-pub const MAX_QUEUE_ERRORS: usize = 5;
-
-// Not sure how big to make this.
-pub const ERROR_BUFFER_CAPACITY: usize = 2048;

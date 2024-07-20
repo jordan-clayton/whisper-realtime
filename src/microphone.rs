@@ -28,7 +28,7 @@ pub fn get_desired_audio_spec(
 pub fn build_audio_stream<T: Default + Clone + Copy + Send + AudioFormatNum + 'static>(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
-    sender: SyncSender<Vec<T>>,
+    text_sender: SyncSender<Vec<T>>,
     is_running: Arc<AtomicBool>,
 ) -> AudioDevice<Recorder<T>> {
     audio_subsystem
@@ -36,7 +36,10 @@ pub fn build_audio_stream<T: Default + Clone + Copy + Send + AudioFormatNum + 's
             // Device - should be default, SDL should change if the user changes devices in their sysprefs.
             None,
             desired_spec,
-            |_spec| Recorder { sender, is_running },
+            |_spec| Recorder {
+                sender: text_sender,
+                is_running,
+            },
         )
         .expect("failed to build audio stream")
 }

@@ -1,3 +1,5 @@
+use std::error::Error;
+
 #[derive(Debug, Clone)]
 pub struct TranscriptionError {
     reason: String,
@@ -17,6 +19,8 @@ impl TranscriptionError {
         self.reason.clone()
     }
 }
+
+impl Error for TranscriptionError {}
 
 impl std::fmt::Display for TranscriptionError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
