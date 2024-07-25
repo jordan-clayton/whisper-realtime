@@ -1,9 +1,8 @@
-use serde::{Deserialize, Serialize};
-
 use crate::model::ModelType;
 
 // TODO: separate WhisperRS configs & add Realtime Configs
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[cfg_attr(feature = "use_serde", derive(serde::Deserialize, serde::Serialize))]
+#[derive(Clone, Debug)]
 pub struct Configs {
     pub n_threads: std::ffi::c_int,
     pub set_translate: bool,

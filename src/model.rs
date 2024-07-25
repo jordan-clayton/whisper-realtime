@@ -1,5 +1,4 @@
 use log::info;
-use serde::{Deserialize, Serialize};
 
 // TODO: async downloading & GUI refactor.
 pub struct Model {
@@ -198,7 +197,8 @@ impl Model {
     }
 }
 
-#[derive(Copy, Clone, Serialize, Deserialize, Debug)]
+#[cfg_attr(feature = "use_serde", derive(serde::Deserialize, serde::Serialize))]
+#[derive(Copy, Clone, Debug)]
 pub enum ModelType {
     TinyEn,
     Tiny,

@@ -1,10 +1,12 @@
 // TODO: Downloading trait?
+//
+//
+// NOTE: MIGRATE BELOW TO GUI.
 // TODO: File load trait?
 // TODO: Deleting models trait?
-// ^^ These have implementations - generalize
 
-// -> These new functions probably need to be handled separately
-// for realtime/static.
+
+// TODO: migrate to transcriber mod.
 pub trait Transcriber {
     fn process_audio(&mut self, whisper_state: &mut whisper_rs::WhisperState) -> String;
     // fn convert_input_audio(input: &[u8], sample_format: cpal::SampleFormat) -> Vec<f32>;
@@ -16,6 +18,11 @@ pub trait Transcriber {
     );
 }
 
+pub trait Downloader {
+
+}
+
+// TODO: remove, is currently unusued.
 pub trait Queue<T> {
     fn new() -> Self;
     fn with_capacity(size: usize) -> Self;

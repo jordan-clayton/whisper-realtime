@@ -6,9 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# TODO: move to GUI?
 bson = "2.11.0"
 directories = "5.0.1"
-serde = { version = "1.0.204", features = ["derive"] }
+serde = { version = "1.0.204", features = ["derive"], optional = true}
+# TODO: swap to reqwest
 ureq = "2.9.7"
 whisper-rs = { version = "0.11.1", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
 log = "0.4.21"
@@ -16,14 +18,28 @@ ctrlc = "3.4.4"
 voice_activity_detector = "0.1.0"
 sdl2 = "0.37.0"
 
+# Cmake is required. Download with homebrew or from cmake.org and add to $PATH.
 [target.aarch64-apple-darwin]
 rustflags = "-lc++ -l framework=Accelerate"
 
+[target.x86_64-pc-windows-gnu]
+linker = "C:\\msys64\\ucrt64\\bin\\gcc.exe"
+ar = "C:\\msys64\\ucrt64\\bin\\ar.exe"
+
+# See: https://github.com/tazz4843/whisper-rs/blob/master/BUILDING.md for building on windows
+# using MSVSC++
 
 [features]
 default = []
+use_serde = ["serde"]
 cuda = ["whisper-rs/cuda"]
+openblas = ["whisper-rs/openblas"]
+# Linux only
+hipblas = ["whisper-rs/hipblas"]
 coreml = ["whisper-rs/coreml"]
+metal = ["whisper-rs/metal"]
 opencl = ["whisper-rs/opencl"]
+
+
 
 

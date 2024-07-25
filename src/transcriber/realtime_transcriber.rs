@@ -15,6 +15,12 @@ use crate::constants;
 use crate::errors::TranscriptionError;
 use crate::traits::Transcriber;
 
+/// This implementation is a modified port of the whisper.cpp stream example, see: 
+/// https://github.com/ggerganov/whisper.cpp/blob/master/examples/stream/stream.cpp
+///
+/// Realtime on CPU has not yet been tested and may or may not be feasible. 
+/// Building with GPU support is currently recommended.
+
 // TODO: refactor the hardcoded constants into RealtimeConfigs
 pub struct RealtimeTranscriber {
     configs: Arc<Configs>,
@@ -24,6 +30,7 @@ pub struct RealtimeTranscriber {
 
     // To send data to the G/UI
     data_sender: Arc<Sender<Result<(String, bool), TranscriptionError>>>,
+    // TODO: re-implement use of token buffer once optional VAD has been reimplemented.
     token_buffer: Vec<std::ffi::c_int>,
     ready: Arc<AtomicBool>,
     running: Arc<AtomicBool>,
@@ -97,10 +104,10 @@ impl RealtimeTranscriber {
     }
 }
 
+// TODO: re-implement non-vad use & parameterize VAD use.
 impl Transcriber for RealtimeTranscriber {
     // Ideally this should be run on its own thread.
     fn process_audio(&mut self, whisper_state: &mut WhisperState) -> String {
-        // Check to see if mod has been initialized.
         let ready = self.ready.clone().load(Ordering::Relaxed);
         if !ready {
             return String::from("");
@@ -179,7 +186,8 @@ impl Transcriber for RealtimeTranscriber {
 
             t_last = t_now;
 
-            // TODO: Parameterize sampling strategy?
+            // NOTE: Greedy Best Of is currently the only strategy implemented.
+            // TODO: Once support for other sampling strategies, parameterize.
             let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
             // let token_buffer = self.token_buffer.clone();
             // Self::set_full_params(&mut params, &self.configs, Some(&token_buffer));
@@ -246,7 +254,9 @@ impl Transcriber for RealtimeTranscriber {
         self.output_buffer.join("").clone()
     }
 
-    // TODO: If not using vad: bring this code back
+    // TODO: Refactor this code back in to parameterize VAD use.
+    //
+    //
     // Keep a small amount of audio data for word boundaries.
     // let keep_from =
     //     std::cmp::max(0, self.audio_buffer.len() - constants::N_SAMPLES_KEEP - 1);
