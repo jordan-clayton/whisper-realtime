@@ -7,6 +7,7 @@ use sdl2::AudioSubsystem;
 
 use crate::recorder::Recorder;
 
+// Struct def'n
 // AudioSpecDesired {
 //     freq: Option<i32>, WHISPER_SAMPLE_RATE as i32,
 //     channels: Option<u8>, 1

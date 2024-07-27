@@ -1,5 +1,6 @@
 #![allow(clippy::uninlined_format_args)]
 
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -12,8 +13,8 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperError, WhisperState};
 use crate::audio_ring_buffer::AudioRingBuffer;
 use crate::configs::Configs;
 use crate::constants;
-use crate::errors::TranscriptionError;
-use crate::traits::Transcriber;
+use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
+use super::transcriber::Transcriber;
 
 /// This implementation is a modified port of the whisper.cpp stream example, see: 
 /// https://github.com/ggerganov/whisper.cpp/blob/master/examples/stream/stream.cpp
@@ -29,7 +30,7 @@ pub struct RealtimeTranscriber {
     output_buffer: Vec<String>,
 
     // To send data to the G/UI
-    data_sender: Arc<Sender<Result<(String, bool), TranscriptionError>>>,
+    data_sender: Arc<Sender<Result<(String, bool), WhisperRealtimeError>>>,
     // TODO: re-implement use of token buffer once optional VAD has been reimplemented.
     token_buffer: Vec<std::ffi::c_int>,
     ready: Arc<AtomicBool>,
@@ -40,14 +41,14 @@ pub struct RealtimeTranscriber {
 impl RealtimeTranscriber {
     pub fn new(
         audio: Arc<AudioRingBuffer<f32>>,
-        data_sender: Arc<Sender<Result<(String, bool), TranscriptionError>>>,
+        data_sender: Arc<Sender<Result<(String, bool), WhisperRealtimeError>>>,
         running: Arc<AtomicBool>,
         ready: Arc<AtomicBool>,
     ) -> Self {
         let output_buffer: Vec<String> = vec![];
         let token_buffer: Vec<std::ffi::c_int> = vec![];
         let vad = VoiceActivityDetector::builder()
-            .sample_rate(constants::SAMPLE_RATE as i64)
+            .sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
             .chunk_size(1024usize)
             .build()
             .expect("failed to build voice activity detector");
@@ -66,7 +67,7 @@ impl RealtimeTranscriber {
 
     pub fn new_with_configs(
         audio: Arc<AudioRingBuffer<f32>>,
-        data_sender: Arc<Sender<Result<(String, bool), TranscriptionError>>>,
+        data_sender: Arc<Sender<Result<(String, bool), WhisperRealtimeError>>>,
         running: Arc<AtomicBool>,
         ready: Arc<AtomicBool>,
         configs: Arc<Configs>,
@@ -74,7 +75,7 @@ impl RealtimeTranscriber {
         let output_buffer: Vec<String> = vec![];
         let token_buffer: Vec<std::ffi::c_int> = vec![];
         let vad = VoiceActivityDetector::builder()
-            .sample_rate(constants::SAMPLE_RATE as i64)
+            .sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
             .chunk_size(1024usize)
             .build()
             .expect("failed to build voice activity detector");
@@ -94,13 +95,14 @@ impl RealtimeTranscriber {
     fn is_voice_detected<T: voice_activity_detector::Sample>(
         vad: &mut VoiceActivityDetector,
         audio_data: &Vec<T>,
+        voice_threshold: f32,
         // last_ms: usize,
     ) -> bool {
         let samples = audio_data.clone();
 
         let probability = vad.predict(samples);
 
-        return probability > constants::VOICE_THRESHOLD;
+        return probability > voice_threshold;
     }
 }
 
@@ -121,15 +123,21 @@ impl Transcriber for RealtimeTranscriber {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         Self::set_full_params(&mut params, &self.configs, None);
 
+        // TODO: Refactor to either set a flag or send a message.
         println!("Start Speaking: ");
 
         let mut pause_detected = true;
         let mut phrase_finished = false;
 
+        let mut total_time: u128 = 0;
+
         loop {
             let running = self.running.clone().load(Ordering::Relaxed);
             if !running {
-                println!("End transcription");
+
+                self.data_sender
+                    .send(Ok((String::from("\nEnd Transcription\n"), true)))
+                    .expect("Failed to send transcription");
                 break;
             }
 
@@ -138,19 +146,20 @@ impl Transcriber for RealtimeTranscriber {
 
             let diff = t_now - t_last;
             let millis = diff.as_millis();
+            total_time += millis;
 
-            if millis < constants::VAD_CHUNK_SIZE as u128 {
+            if millis < self.configs.vad_sample_ms as u128 {
                 sleep(Duration::from_millis(constants::PAUSE_DURATION));
                 continue;
             }
 
             // Perhaps this might be better if it were lower.
-            if millis >= constants::PHRASE_TIMEOUT as u128 {
+            if millis >= self.configs.phrase_timeout as u128 {
                 phrase_finished = true;
             }
 
             self.audio
-                .get_audio(constants::VAD_CHUNK_SIZE, &mut audio_samples_vad);
+                .get_audio(self.configs.vad_sample_ms, &mut audio_samples_vad);
 
             // Vad is mono only.
             let new_samples = whisper_rs::convert_stereo_to_mono_audio(&audio_samples_vad)
@@ -159,10 +168,11 @@ impl Transcriber for RealtimeTranscriber {
             if Self::is_voice_detected(
                 &mut self.vad,
                 &new_samples,
+                self.configs.voice_threshold,
                 // 1000
             ) {
                 self.audio
-                    .get_audio(constants::AUDIO_CHUNK_SIZE, &mut audio_samples);
+                    .get_audio(self.configs.audio_sample_ms, &mut audio_samples);
 
                 pause_detected = false;
             } else {
@@ -186,9 +196,8 @@ impl Transcriber for RealtimeTranscriber {
 
             t_last = t_now;
 
-            // NOTE: Greedy Best Of is currently the only strategy implemented.
-            // TODO: Once support for other sampling strategies, parameterize.
             let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+            // TODO: Non-Vad implementation -> Bring these back.
             // let token_buffer = self.token_buffer.clone();
             // Self::set_full_params(&mut params, &self.configs, Some(&token_buffer));
             Self::set_full_params(&mut params, &self.configs, None);
@@ -200,16 +209,19 @@ impl Transcriber for RealtimeTranscriber {
 
             if let Err(e) = result {
                 match e {
+                    //TODO: This can/should be removed; the model doesn't run if there's no voice.
                     WhisperError::NoSamples => {
-                        println!("no samples");
+                        eprintln!("no samples");
+                        std::io::stdout().flush().unwrap();
                         t_last = t_now;
                         continue;
                     }
                     _ => {
                         self.data_sender
-                            .send(Err(TranscriptionError::new_with_reason(String::from(
-                                "Model Failure",
-                            ))))
+                            .send(Err(
+                            WhisperRealtimeError::new(WhisperRealtimeErrorType::TranscriptionError, String::from("Model Failure"))
+
+                            ))
                             .expect("Failed to send error");
                     }
                 }
@@ -249,6 +261,12 @@ impl Transcriber for RealtimeTranscriber {
             self.data_sender
                 .send(Ok((text_string, push_new_audio)))
                 .expect("Failed to send transcription");
+
+            // set the flag if over timeout.
+
+            if total_time > self.configs.realtime_timeout {
+
+            }
         }
 
         self.output_buffer.join("").clone()
@@ -284,32 +302,4 @@ impl Transcriber for RealtimeTranscriber {
     //     .collect();
     //
     // self.token_buffer = new_tokens;
-    fn set_full_params<'a>(
-        full_params: &mut FullParams<'a, 'a>,
-        prefs: &'a Configs,
-        tokens: Option<&'a Vec<std::ffi::c_int>>,
-    ) {
-        let lang = prefs.set_language.as_ref();
-
-        full_params.set_n_threads(prefs.n_threads);
-        full_params.set_n_threads(prefs.n_threads);
-        full_params.set_translate(prefs.set_translate);
-
-        if lang.is_some() {
-            full_params.set_language(Some(lang.unwrap().as_str()));
-        } else {
-            full_params.set_language(Some("auto"))
-        }
-
-        // // Stdio only
-        full_params.set_print_special(prefs.print_special);
-        full_params.set_print_progress(prefs.print_progress);
-        full_params.set_print_realtime(prefs.print_realtime);
-        full_params.set_print_timestamps(prefs.print_timestamps);
-
-        if tokens.is_some() {
-            let token_buffer = tokens.unwrap();
-            full_params.set_tokens(&token_buffer)
-        }
-    }
 }

@@ -17,10 +17,9 @@ pub struct AudioRingBuffer<T: Default + Clone + Copy + AudioFormatNum + 'static>
 unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Sync for AudioRingBuffer<T> {}
 unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Send for AudioRingBuffer<T> {}
 
-// TODO: refactor hardcoded constants into parameters & add to the struct.
 impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
     pub fn new(len_ms: usize) -> Self {
-        let buffer_size = (len_ms / 1000) as f64 * constants::SAMPLE_RATE;
+        let buffer_size = (len_ms / 1000) as f64 * constants::WHISPER_SAMPLE_RATE;
         let buffer_size = buffer_size as usize;
         let buffer_len = AtomicUsize::new(buffer_size);
         let head = AtomicUsize::new(0);
@@ -99,7 +98,7 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
 
         result.clear();
 
-        let mut n_samples = (ms as f64 * constants::SAMPLE_RATE / 1000f64) as usize;
+        let mut n_samples = (ms as f64 * constants::WHISPER_SAMPLE_RATE / 1000f64) as usize;
         let audio_len = self.audio_len.load(Ordering::Acquire);
         if n_samples > audio_len {
             n_samples = audio_len;
@@ -155,7 +154,7 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
             ms = this_ms;
         }
 
-        let mut n_samples = (ms as f64 * constants::SAMPLE_RATE / 1000f64) as usize;
+        let mut n_samples = (ms as f64 * constants::WHISPER_SAMPLE_RATE / 1000f64) as usize;
         let audio_len = self.audio_len.load(Ordering::Acquire);
         if n_samples > audio_len {
             n_samples = audio_len;

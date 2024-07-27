@@ -9,13 +9,12 @@ use sdl2::audio::AudioDevice;
 
 use whisper_realtime::{configs, constants, microphone, model};
 use whisper_realtime::audio_ring_buffer::AudioRingBuffer;
-use whisper_realtime::errors::TranscriptionError;
+use whisper_realtime::errors::WhisperRealtimeError;
 use whisper_realtime::recorder::Recorder;
-use whisper_realtime::traits::Transcriber;
 use whisper_realtime::transcriber::realtime_transcriber;
 use whisper_realtime::transcriber::static_transcriber;
+use whisper_realtime::transcriber::transcriber::Transcriber;
 
-// TODO: add an option to re-transcribe statically using the captured audio
 fn main() {
     // Download the model.
     let mut proj_dir = std::env::current_dir().unwrap();
@@ -45,7 +44,7 @@ fn main() {
 
     // Output sender
     let (o_sender, o_receiver) = channel();
-    let o_sender_p: Arc<Sender<Result<(String, bool), TranscriptionError>>> = Arc::new(o_sender);
+    let o_sender_p: Arc<Sender<Result<(String, bool), WhisperRealtimeError>>> = Arc::new(o_sender);
 
     // State flags.
     let is_ready = Arc::new(AtomicBool::new(true));
@@ -68,7 +67,7 @@ fn main() {
     let ctx = sdl2::init().expect("Failed to initialize sdl");
     let audio_subsystem = ctx.audio().expect("Failed to initialize audio");
     let desired_audio_spec = microphone::get_desired_audio_spec(
-        Some(constants::SAMPLE_RATE as i32),
+        Some(constants::WHISPER_SAMPLE_RATE as i32),
         Some(1),
         Some(1024),
     );
@@ -97,20 +96,20 @@ fn main() {
 
     let mut text_output_buffer: Vec<String> = vec![];
 
-
-
     // Optional store + re-transcription.
     // Get input for stdin.
+    println!();
     print!("Would you like to store audio and re-transcribe once realtime has finished? y/n: ");
+    stdout().flush().unwrap();
     let mut confirm_buffer = String::new();
-    let read_success =  std::io::stdin().read_line(&mut confirm_buffer);
+    let read_success = std::io::stdin().read_line(&mut confirm_buffer);
 
     let static_audio_buffer: Option<Vec<f32>> = if let Ok(_b) = read_success {
-        confirm_buffer = confirm_buffer.to_lowercase();
-        if confirm_buffer == String::from("y"){
+        confirm_buffer = confirm_buffer.trim().to_lowercase();
+        if confirm_buffer == "y" {
+            println!("Confirmed. Recording audio.");
             Some(vec![])
-        }
-        else {
+        } else {
             None
         }
     } else {
@@ -120,10 +119,12 @@ fn main() {
     let static_audio_buffer_p = Arc::new(Mutex::new(static_audio_buffer));
     let static_audio_buffer_c = static_audio_buffer_p.clone();
 
-    let transcriber_thread= scope(|s| {
+    let transcriber_thread = scope(|s| {
         mic_stream.resume();
         let _audio_thread = s.spawn(move || {
-            let mut t_static_audio_buffer = static_audio_buffer_c.lock().expect("Failed to get audio storage mutex");
+            let mut t_static_audio_buffer = static_audio_buffer_c
+                .lock()
+                .expect("Failed to get audio storage mutex");
 
             loop {
                 if !c_is_running_audio_receiver.load(Ordering::Acquire) {
@@ -146,7 +147,8 @@ fn main() {
                         c_is_running_audio_receiver.store(false, Ordering::SeqCst);
                         break;
                     }
-            }}
+                }
+            }
         });
 
         let transcription_thread = s.spawn(move || {
@@ -209,9 +211,7 @@ fn main() {
 
     mic_stream.pause();
 
-    let transcription = transcriber_thread
-        .0
-        .expect("transcription thread panicked");
+    let transcription = transcriber_thread.0.expect("transcription thread panicked");
     let rt_transcription = transcriber_thread.1.expect("print thread panicked");
 
     // Comparison
@@ -226,28 +226,30 @@ fn main() {
     println!("{}", &transcription);
 
     // Static audio transcription:
-   
-    let static_audio_buffer = static_audio_buffer_p.lock().expect("Failed to get static audio mutex");
 
-    if static_audio_buffer.is_some(){
-         
+    let static_audio_buffer = static_audio_buffer_p
+        .lock()
+        .expect("Failed to get static audio mutex");
+
+    if static_audio_buffer.is_some() {
         let audio_recording = static_audio_buffer.to_owned().unwrap();
 
         let audio_recording = Arc::new(Mutex::new(audio_recording));
         let configs = configs.clone();
-        
-        let mut static_transcriber = static_transcriber::StaticTranscriber::new_with_configs(audio_recording, configs);
 
-        // new state.
-    let mut state = ctx.create_state().expect("failed to create state for static re-transcription");
+        let mut static_transcriber =
+            static_transcriber::StaticTranscriber::new_with_configs(audio_recording, configs);
+
+        // new state for static re-transcription.
+        let mut state = ctx
+            .create_state()
+            .expect("failed to create state for static re-transcription");
 
         let output = static_transcriber.process_audio(&mut state);
-        
+        clear_stdout();
         println!("Static re-transcription:");
         println!("{}", &output);
-
     }
-
 }
 
 fn clear_stdout() {

@@ -9,3 +9,4 @@ pub mod audio_ring_buffer;
 
 pub mod errors;
 pub mod recorder;
+mod downloader;

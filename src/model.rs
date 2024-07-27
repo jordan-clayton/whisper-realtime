@@ -8,10 +8,6 @@ pub struct Model {
 
 impl Default for Model {
     fn default() -> Self {
-        // let p_dir =
-        //     directories::ProjectDirs::from("com", "Jordan", "WhisperGUI").expect("no home folder");
-        // let path = p_dir.data_dir().to_path_buf();
-
         let mut path = std::env::current_dir().unwrap();
         path.push("data");
         Model {
@@ -21,15 +17,18 @@ impl Default for Model {
     }
 }
 
+// TODO: abstract out download fn to a trait.
+
 impl Model {
     pub fn new() -> Self {
         Self::default()
     }
 
+    // This defaults to the local directory/data
     pub fn new_with_model_type(m_type: ModelType) -> Self {
-        let p_dir =
-            directories::ProjectDirs::from("com", "Jordan", "WhisperGUI").expect("no home folder");
-        let path = p_dir.data_dir().to_path_buf();
+        let mut path = std::env::current_dir().unwrap();
+        path.push("data");
+
         Model {
             model_type: m_type,
             data_directory: path,
@@ -151,6 +150,7 @@ impl Model {
     // TODO: Get the progress on this.
 
     // Ideally, this should be run on a thread.
+    // TODO: Refactor as a Downloader impl
     pub fn download(&self) {
         if self.is_downloaded() {
             return;

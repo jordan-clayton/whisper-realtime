@@ -1,14 +1,13 @@
 use std::error::Error;
-use std::ffi::c_int;
 use std::sync::{Arc, Mutex};
 
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
 use crate::configs::Configs;
-use crate::errors::TranscriptionError;
-use crate::traits::Transcriber;
+use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
+use super::transcriber::Transcriber;
 
-// TODO: Determine whether to use generics or require f32.
+// NOTE: At this time only f32 is supported. i16 may be implemented at a later time.
 pub struct StaticTranscriber {
     configs: Arc<Configs>,
     audio: Arc<Mutex<Vec<f32>>>,
@@ -55,7 +54,7 @@ impl Transcriber for StaticTranscriber {
 
         if num_segments == 0 {
             let error =
-                TranscriptionError::new_with_reason(String::from("Zero segments transcribed"));
+                WhisperRealtimeError::new(WhisperRealtimeErrorType::TranscriptionError, String::from("Zero segments transcribed"));
 
             return Self::send_error_string(&error);
         };
@@ -69,39 +68,11 @@ impl Transcriber for StaticTranscriber {
             text.push(segment);
         }
 
-        let text = text.join("");
+        // Static segments are generally "longer" and thus are separated by newline.
+        let text = text.join("\n");
         let text = text.trim();
         let text_string = String::from(text);
 
         text_string.clone()
-    }
-
-    fn set_full_params<'a>(
-        full_params: &mut FullParams<'a, 'a>,
-        prefs: &'a Configs,
-        tokens: Option<&'a Vec<c_int>>,
-    ) {
-        let lang = prefs.set_language.as_ref();
-
-        full_params.set_n_threads(prefs.n_threads);
-        full_params.set_n_threads(prefs.n_threads);
-        full_params.set_translate(prefs.set_translate);
-
-        if lang.is_some() {
-            full_params.set_language(Some(lang.unwrap().as_str()));
-        } else {
-            full_params.set_language(Some("auto"))
-        }
-
-        // // Stdio only
-        full_params.set_print_special(prefs.print_special);
-        full_params.set_print_progress(prefs.print_progress);
-        full_params.set_print_realtime(prefs.print_realtime);
-        full_params.set_print_timestamps(prefs.print_timestamps);
-
-        if tokens.is_some() {
-            let token_buffer = tokens.unwrap();
-            full_params.set_tokens(&token_buffer)
-        }
     }
 }

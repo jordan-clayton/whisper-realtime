@@ -2,14 +2,12 @@
 name = "whisper_realtime"
 version = "0.1.0"
 edition = "2021"
+# TODO LICENSE, DESCRIPTION, DOCS, REPO
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# TODO: move to GUI?
-bson = "2.11.0"
-directories = "5.0.1"
-serde = { version = "1.0.204", features = ["derive"], optional = true}
+serde = { version = "1.0.204", features = ["derive"], optional = true }
 # TODO: swap to reqwest
 ureq = "2.9.7"
 whisper-rs = { version = "0.11.1", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
@@ -17,6 +15,8 @@ log = "0.4.21"
 ctrlc = "3.4.4"
 voice_activity_detector = "0.1.0"
 sdl2 = "0.37.0"
+indicatif = "0.17.8"
+reqwest = "0.12.5"
 
 # Cmake is required. Download with homebrew or from cmake.org and add to $PATH.
 [target.aarch64-apple-darwin]
@@ -31,13 +31,16 @@ ar = "C:\\msys64\\ucrt64\\bin\\ar.exe"
 
 [features]
 default = []
+_gpu = []
 use_serde = ["serde"]
-cuda = ["whisper-rs/cuda"]
+cuda = ["whisper-rs/cuda", "_gpu"]
+# openblas is Windows only, cpu acceleration.
 openblas = ["whisper-rs/openblas"]
-# Linux only
-hipblas = ["whisper-rs/hipblas"]
+# Linux only - Not yet available in 0.11.1
+# ROCm support for AMD GPUs.
+# hipblas = ["whisper-rs/hipblas", "_gpu"]
 coreml = ["whisper-rs/coreml"]
-metal = ["whisper-rs/metal"]
+metal = ["whisper-rs/metal", "_gpu"]
 opencl = ["whisper-rs/opencl"]
 
 

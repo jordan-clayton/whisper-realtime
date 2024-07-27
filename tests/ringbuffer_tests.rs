@@ -10,7 +10,7 @@ mod ringbuffer_tests {
         // Full length
         let mut ring_buffer: AudioRingBuffer<f32> =
             AudioRingBuffer::new(constants::SAMPLE_DURATION);
-        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::SAMPLE_RATE;
+        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE;
         let sample_len = sample_len as usize;
 
         let mut samples = vec![0.5f32; sample_len];
@@ -21,7 +21,7 @@ mod ringbuffer_tests {
         // Half-length
         let mut ring_buffer: AudioRingBuffer<f32> =
             AudioRingBuffer::new(constants::SAMPLE_DURATION);
-        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::SAMPLE_RATE / 2f64;
+        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
         let sample_len = sample_len as usize;
 
         let mut samples = vec![0.5f32; sample_len];
@@ -40,7 +40,7 @@ mod ringbuffer_tests {
             AudioRingBuffer::new(constants::SAMPLE_DURATION);
 
         // Insert four seconds of audio data.
-        let sample_len = 4f64 * constants::SAMPLE_RATE;
+        let sample_len = 4f64 * constants::WHISPER_SAMPLE_RATE;
         let sample_len = sample_len as usize;
 
         let mut samples = vec![0.5f32; sample_len];
@@ -66,7 +66,7 @@ mod ringbuffer_tests {
         // Half-length
         let mut ring_buffer: AudioRingBuffer<f32> =
             AudioRingBuffer::new(constants::SAMPLE_DURATION);
-        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::SAMPLE_RATE / 2f64;
+        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
         let sample_len = sample_len as usize;
 
         let mut samples = vec![0.5f32; sample_len];
@@ -93,10 +93,10 @@ mod ringbuffer_tests {
         // Half-length
         let mut ring_buffer: AudioRingBuffer<f32> =
             AudioRingBuffer::new(constants::SAMPLE_DURATION);
-        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::SAMPLE_RATE / 2f64;
+        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
         let sample_len = sample_len as usize;
 
-        let expect_length = (2f64 * constants::SAMPLE_RATE) as usize;
+        let expect_length = (2f64 * constants::WHISPER_SAMPLE_RATE) as usize;
 
         let mut results_vec: [Vec<f32>; 3] = [vec![], vec![], vec![]];
         // This is expected to not panic.
