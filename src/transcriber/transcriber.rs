@@ -6,17 +6,17 @@ pub trait Transcriber {
         full_params: &mut whisper_rs::FullParams<'a, 'a>,
         prefs: &'a crate::configs::Configs,
         tokens: Option<&'a Vec<std::ffi::c_int>>,
-    ){
+    ) {
         let lang = prefs.set_language.as_ref();
 
         full_params.set_n_threads(prefs.n_threads);
         full_params.set_n_threads(prefs.n_threads);
         full_params.set_translate(prefs.set_translate);
 
-        if lang.is_some() {
-            full_params.set_language(Some(lang.unwrap().as_str()));
+        if let Some(language) = lang {
+            full_params.set_language(Some(language.as_str()));
         } else {
-            full_params.set_language(Some("auto"))
+            full_params.set_language(Some("auto"));
         }
 
         // // Stdio only
@@ -25,8 +25,7 @@ pub trait Transcriber {
         full_params.set_print_realtime(prefs.print_realtime);
         full_params.set_print_timestamps(prefs.print_timestamps);
 
-        if tokens.is_some() {
-            let token_buffer = tokens.unwrap();
+        if let Some(token_buffer) = tokens {
             full_params.set_tokens(&token_buffer);
         }
     }

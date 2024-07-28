@@ -1,3 +1,5 @@
+use std::fs;
+
 use log::info;
 
 // TODO: async downloading & GUI refactor.
@@ -16,8 +18,6 @@ impl Default for Model {
         }
     }
 }
-
-// TODO: abstract out download fn to a trait.
 
 impl Model {
     pub fn new() -> Self {
@@ -51,41 +51,7 @@ impl Model {
     pub fn url(&self) -> String {
         let mut url =
             String::from("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-");
-        match self.model_type {
-            ModelType::TinyEn => {
-                url.push_str("tiny.en.bin");
-            }
-            ModelType::Tiny => {
-                url.push_str("tiny.bin");
-            }
-            ModelType::BaseEn => {
-                url.push_str("base.en.bin");
-            }
-            ModelType::Base => {
-                url.push_str("base.bin");
-            }
-            ModelType::SmallEn => {
-                url.push_str("small.en.bin");
-            }
-            ModelType::Small => {
-                url.push_str("small.bin");
-            }
-            ModelType::MediumEn => {
-                url.push_str("medium.en.bin");
-            }
-            ModelType::Medium => {
-                url.push_str("medium.bin");
-            }
-            ModelType::LargeV1 => {
-                url.push_str("large-v1.bin");
-            }
-            ModelType::LargeV2 => {
-                url.push_str("large-v2.bin");
-            }
-            ModelType::LargeV3 => {
-                url.push_str("large-v3.bin");
-            }
-        };
+        url.push_str(self.model_file_name());
         url
     }
 
@@ -94,63 +60,43 @@ impl Model {
         buf.push("models");
         buf
     }
+
     pub fn file_path(&self) -> std::path::PathBuf {
         let mut buf = self.model_directory();
-        match self.model_type {
-            ModelType::TinyEn => {
-                buf.push("tiny.en.bin");
-            }
-            ModelType::Tiny => {
-                buf.push("tiny.bin");
-            }
-            ModelType::BaseEn => {
-                buf.push("base.en.bin");
-            }
-
-            ModelType::Base => {
-                buf.push("base.bin");
-            }
-            ModelType::SmallEn => {
-                buf.push("small.en.bin");
-            }
-            ModelType::Small => {
-                buf.push("small.bin");
-            }
-            ModelType::MediumEn => {
-                buf.push("medium.en.bin");
-            }
-            ModelType::Medium => {
-                buf.push("medium.bin");
-            }
-            ModelType::LargeV1 => {
-                buf.push("large-v1.bin");
-            }
-            ModelType::LargeV2 => {
-                buf.push("large-v2.bin");
-            }
-            // LargeV3 is large -> latest mod
-            ModelType::LargeV3 => {
-                buf.push("large.bin");
-            }
-        };
+        let file_name = self.model_file_name();
+        buf.push(file_name);
         buf.clone()
     }
 
+    pub fn model_file_name(&self) -> &str {
+        match self.model_type {
+            ModelType::TinyEn => "tiny.en.bin",
+            ModelType::Tiny => "tiny.bin",
+            ModelType::BaseEn => "base.en.bin",
+            ModelType::Base => "base.bin",
+            ModelType::SmallEn => "small.en.bin",
+            ModelType::Small => "small.bin",
+            ModelType::MediumEn => "medium.en.bin",
+            ModelType::Medium => "medium.bin",
+            ModelType::LargeV1 => "large-v1.bin",
+            ModelType::LargeV2 => "large-v2.bin",
+            ModelType::LargeV3 => "large.bin",
+        }
+    }
+
+    // NOTE: this doesn't handle malformed files.
     pub fn is_downloaded(&self) -> bool {
         let path_buf = self.file_path();
         let path = path_buf.as_path();
 
-        let path = std::fs::metadata(path);
+        let path = fs::metadata(path);
         match path {
-            Ok(_) => path.unwrap().is_file(),
+            Ok(p) => p.is_file(),
             Err(_) => false,
         }
     }
 
-    // TODO: Get the progress on this.
-
-    // Ideally, this should be run on a thread.
-    // TODO: Refactor as a Downloader impl
+    // TODO: remove.
     pub fn download(&self) {
         if self.is_downloaded() {
             return;
@@ -161,7 +107,7 @@ impl Model {
         let m_dir = model_directory_buf.as_path();
 
         if !m_dir.exists() {
-            std::fs::create_dir_all(m_dir).expect("failed to create models directory");
+            fs::create_dir_all(m_dir).expect("failed to create models directory");
         }
 
         let url = self.url();
@@ -183,7 +129,7 @@ impl Model {
         info!("Downloaded mod {}", url);
         let path_buf = self.file_path();
         let model_path = path_buf.as_path();
-        std::fs::write(model_path, bytes).expect("failed to save mod");
+        fs::write(model_path, bytes).expect("failed to save mod");
     }
 
     pub fn delete(&self) {
@@ -193,7 +139,7 @@ impl Model {
 
         let path_buf = self.file_path();
         let model_path = path_buf.as_path();
-        std::fs::remove_file(model_path).expect("failed to delete mod");
+        fs::remove_file(model_path).expect("failed to delete mod");
     }
 }
 

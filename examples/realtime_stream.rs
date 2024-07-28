@@ -15,12 +15,15 @@ use whisper_realtime::transcriber::realtime_transcriber;
 use whisper_realtime::transcriber::static_transcriber;
 use whisper_realtime::transcriber::transcriber::Transcriber;
 
+// TODO: Refactor into async
 fn main() {
     // Download the model.
     let mut proj_dir = std::env::current_dir().unwrap();
     proj_dir.push("data");
     let mut model = model::Model::new_with_data_dir(proj_dir.to_path_buf());
     model.model_type = model::ModelType::MediumEn;
+
+    // TODO: Refactor this to include ProgressBar and Asynchronous download.
     if !model.is_downloaded() {
         println!("Downloading model:");
         model.download();
@@ -136,8 +139,8 @@ fn main() {
                 match output {
                     Ok(mut audio_data) => {
                         audio_p_mic.push_audio(&mut audio_data);
-                        if t_static_audio_buffer.is_some() {
-                            let a_vec = t_static_audio_buffer.as_mut().unwrap();
+
+                        if let Some(a_vec) = t_static_audio_buffer.as_mut() {
                             // This might be a borrow problem.
                             a_vec.extend_from_slice(&audio_data);
                         }
@@ -231,9 +234,7 @@ fn main() {
         .lock()
         .expect("Failed to get static audio mutex");
 
-    if static_audio_buffer.is_some() {
-        let audio_recording = static_audio_buffer.to_owned().unwrap();
-
+    if let Some(audio_recording) = static_audio_buffer.to_owned() {
         let audio_recording = Arc::new(Mutex::new(audio_recording));
         let configs = configs.clone();
 

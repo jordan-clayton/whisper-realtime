@@ -16,7 +16,11 @@ ctrlc = "3.4.4"
 voice_activity_detector = "0.1.0"
 sdl2 = "0.37.0"
 indicatif = "0.17.8"
-reqwest = "0.12.5"
+reqwest = { version = "0.12.5", features = ["blocking", "stream"] }
+futures = "0.3.30"
+futures-util = "0.3.30"
+futures-core = "0.3.30"
+bytes = "1.6.1"
 
 # Cmake is required. Download with homebrew or from cmake.org and add to $PATH.
 [target.aarch64-apple-darwin]
