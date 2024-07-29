@@ -17,11 +17,11 @@ pub trait SyncDownload: Writable {
 }
 
 pub trait AsyncDownload: Writable {
-    async fn download(
+    fn download(
         &mut self,
         file_directory: &Path,
         file_name: &str,
-    ) -> Result<(), WhisperRealtimeError>;
+    ) -> impl std::future::Future<Output = Result<(), WhisperRealtimeError>>;
 }
 
 pub trait Writable {

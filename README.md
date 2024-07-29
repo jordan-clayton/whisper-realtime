@@ -3,8 +3,8 @@
 A rust-based, realtime capable, wrapper library for [whisper-rs](https://github.com/tazz4843/whisper-rs).
 Seeks to provide an ergonomic API to support realtime and static speech transcription applications.
 
-Realtime transcription (most likely) requires GPU support. CPU testing in release mode
-has not yet been tested.
+At this time, accurate realtime transcription (and use of larger models) requires GPU acceleration.
+Static transcription is possible with larger models via the CPU.
 
 See: Cargo.toml for feature flags to compile with GPU support (proper documentation coming)
 
@@ -12,6 +12,6 @@ See: Cargo.toml for feature flags to compile with GPU support (proper documentat
 
 ## TODO:
 
-- Cleanup realtime transcriber
+- RealtimeTranscriber: Non VAD implementation
 - Finish readme
 - Proper documentation

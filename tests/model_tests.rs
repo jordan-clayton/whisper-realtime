@@ -9,8 +9,8 @@ mod model_tests {
         let home_dir_string = std::env::var_os("HOME").unwrap();
         let home_path = std::path::Path::new(&home_dir_string);
         let mut model_directory = home_path.to_path_buf();
-        // I don't actually know if this is correct.
-        // TODO: support Windows
+
+        // NOTE: This has not been tested.
         #[cfg(target_os = "windows")]
         {
             model_directory.push("RoamingAppData");
@@ -18,6 +18,8 @@ mod model_tests {
             model_directory.push("data");
             model_directory.push("models");
         }
+
+        // NOTE: This has not been tested.
         #[cfg(target_os = "macos")]
         {
             model_directory.push("Library");
@@ -44,8 +46,8 @@ mod model_tests {
         let home_dir_string = std::env::var_os("HOME").unwrap();
         let home_path = std::path::Path::new(&home_dir_string);
         let mut model_directory = home_path.to_path_buf();
-        // I don't actually know if this is correct.
-        // TODO: support Windows
+
+        // NOTE: This has not been tested.
         #[cfg(target_os = "windows")]
         {
             model_directory.push("RoamingAppData");
@@ -54,6 +56,8 @@ mod model_tests {
             model_directory.push("models");
             model_directory.push("tiny.en.bin")
         }
+
+        // NOTE: This has not been tested.
         #[cfg(target_os = "macos")]
         {
             model_directory.push("Library");

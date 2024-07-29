@@ -8,7 +8,10 @@ edition = "2021"
 
 [dependencies]
 serde = { version = "1.0.204", features = ["derive"], optional = true }
-whisper-rs = { version = "0.11.1", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
+#whisper-rs = { version = "0.11.1", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
+
+#  Version 12.1 - switch to cargo once crate is refreshed.
+whisper-rs = { git = "https://github.com/tazz4843/whisper-rs.git", rev = "744804a", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
 log = "0.4.21"
 ctrlc = "3.4.4"
 voice_activity_detector = "0.1.0"
@@ -21,16 +24,13 @@ futures-core = "0.3.30"
 bytes = "1.6.1"
 tokio = { version = "1.39.2", features = ["rt-multi-thread"] }
 
-# Cmake is required. Download with homebrew or from cmake.org and add to $PATH.
+# See: https://github.com/tazz4843/whisper-rs/blob/master/BUILDING.md for building on Windows/MacOS
 [target.aarch64-apple-darwin]
 rustflags = "-lc++ -l framework=Accelerate"
 
 [target.x86_64-pc-windows-gnu]
 linker = "C:\\msys64\\ucrt64\\bin\\gcc.exe"
 ar = "C:\\msys64\\ucrt64\\bin\\ar.exe"
-
-# See: https://github.com/tazz4843/whisper-rs/blob/master/BUILDING.md for building on windows
-# using MSVSC++
 
 [features]
 default = []
@@ -39,9 +39,9 @@ use_serde = ["serde"]
 cuda = ["whisper-rs/cuda", "_gpu"]
 # openblas is Windows only, cpu acceleration.
 openblas = ["whisper-rs/openblas"]
-# Linux only - Not yet available in 0.11.1
-# ROCm support for AMD GPUs.
-# hipblas = ["whisper-rs/hipblas", "_gpu"]
+# Linux only
+# ROCm support for AMD GPUs - Linux only
+hipblas = ["whisper-rs/hipblas", "_gpu"]
 coreml = ["whisper-rs/coreml"]
 metal = ["whisper-rs/metal", "_gpu"]
 opencl = ["whisper-rs/opencl"]

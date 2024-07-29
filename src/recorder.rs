@@ -20,9 +20,9 @@ impl<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> AudioCallback 
 
     fn callback(&mut self, input: &mut [T]) {
         let success = self.sender.send(input.to_vec());
-        if let Err(e) = success {
-            // TODO: figure out how to bubble this up. Add SendError to error enum.
-            eprintln!("SendError: {}", e);
+        // Errors only happen when all receivers are disconnected.
+        if let Err(_) = success {
+            // Errors only happen when all receivers are disconnected.
             self.is_running.store(false, Ordering::SeqCst);
         }
     }

@@ -1,8 +1,5 @@
 use std::fs;
 
-use log::info;
-
-// TODO: async downloading & GUI refactor.
 pub struct Model {
     pub model_type: ModelType,
     data_directory: std::path::PathBuf,

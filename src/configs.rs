@@ -6,10 +6,15 @@ use crate::model;
 pub struct Configs {
     pub n_threads: std::ffi::c_int,
     pub set_translate: bool,
-    pub set_language: Option<String>,
+    pub language: Option<String>,
     // This is more or less a necessity for realtime in debug mode.
     // CPU realtime has not yet been tested.
     pub use_gpu: bool,
+    // TODO: finish non-VAD implementation
+    // pub use_vad: bool,
+
+    // EXPERIMENTAL:
+    // pub speed_up: bool,
     pub model: model::ModelType,
 
     // in milliseconds.
@@ -31,8 +36,10 @@ impl Default for Configs {
         Self {
             n_threads: 4,
             set_translate: false,
-            set_language: Some(String::from("en")),
+            language: Some(String::from("en")),
             use_gpu: cfg!(feature = "_gpu"),
+            // use_vad: true,
+            // speed_up: false,
             model: model::ModelType::default(),
             // Currently set to 1 hr
             realtime_timeout: constants::REALTIME_AUDIO_TIMEOUT,

@@ -7,6 +7,7 @@ use std::thread::scope;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use sdl2::audio::AudioDevice;
+use whisper_rs::install_whisper_log_trampoline;
 
 use whisper_realtime::{configs, constants, microphone, model};
 use whisper_realtime::audio_ring_buffer::AudioRingBuffer;
@@ -23,7 +24,13 @@ fn main() {
     let mut proj_dir = std::env::current_dir().unwrap();
     proj_dir.push("data");
     let mut model = model::Model::new_with_data_dir(proj_dir.to_path_buf());
-    model.model_type = model::ModelType::MediumEn;
+
+    // GPU acceleration is currently required to run larger models in realtime.
+    #[cfg(feature = "_gpu")]
+    model.model_type = model::ModelType::Medium;
+
+    #[cfg(not(feature = "_gpu"))]
+    model.model_type = model::ModelType::Small;
 
     if !model.is_downloaded() {
         println!("Downloading model:");
@@ -193,6 +200,9 @@ fn main() {
         });
 
         let transcription_thread = s.spawn(move || {
+            // Disable whisper.cpp logging to stderr/stdout.
+            install_whisper_log_trampoline();
+
             let mut transcriber = realtime_transcriber::RealtimeTranscriber::new_with_configs(
                 audio_p,
                 o_sender_p,
@@ -284,7 +294,12 @@ fn main() {
             .create_state()
             .expect("failed to create state for static re-transcription");
 
+        println!("Static Transcribing: ");
+        let pb = ProgressBar::new_spinner();
+        pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
         let output = static_transcriber.process_audio(&mut state);
+        pb.finish_and_clear();
         clear_stdout();
         println!("Static re-transcription:");
         println!("{}", &output);
