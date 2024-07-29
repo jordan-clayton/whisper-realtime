@@ -5,6 +5,7 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
 use crate::configs::Configs;
 use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
+
 use super::transcriber::Transcriber;
 
 // NOTE: At this time only f32 is supported. i16 may be implemented at a later time.
@@ -15,14 +16,14 @@ pub struct StaticTranscriber {
 
 impl StaticTranscriber {
     pub fn new(audio: Arc<Mutex<Vec<f32>>>) -> Self {
-        StaticTranscriber {
+        Self {
             configs: Arc::new(Configs::default()),
             audio,
         }
     }
 
     pub fn new_with_configs(audio: Arc<Mutex<Vec<f32>>>, configs: Arc<Configs>) -> Self {
-        StaticTranscriber { configs, audio }
+        Self { configs, audio }
     }
 
     fn send_error_string(e: &impl Error) -> String {
@@ -53,8 +54,10 @@ impl Transcriber for StaticTranscriber {
             .expect("failed to get segments");
 
         if num_segments == 0 {
-            let error =
-                WhisperRealtimeError::new(WhisperRealtimeErrorType::TranscriptionError, String::from("Zero segments transcribed"));
+            let error = WhisperRealtimeError::new(
+                WhisperRealtimeErrorType::TranscriptionError,
+                String::from("Zero segments transcribed"),
+            );
 
             return Self::send_error_string(&error);
         };

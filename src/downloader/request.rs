@@ -4,13 +4,13 @@ use bytes::Bytes;
 use futures_core::stream::Stream;
 use reqwest::Url;
 
-use crate::downloader::downloader::{StreamDownloader, SyncDownloader};
+use crate::downloader::downloaders::{StreamDownloader, SyncDownloader};
 use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
 
 /// Returns a StreamDownloader struct encapsulating the request bytestream, progress, total
 /// response size, and an optional callback function to receive progress updates.
 /// This function must be awaited and should not be called on a UI thread.
-async fn async_download_request<CB: Fn(usize)>(
+pub async fn async_download_request<CB: Fn(usize)>(
     client: &reqwest::Client,
     url: &str,
     progress_callback: Option<CB>,
@@ -76,7 +76,7 @@ async fn async_download_request<CB: Fn(usize)>(
 /// This is strictly for synchronous downloading and will block the calling thread.
 /// It is recommended to call this function on a separate thread if other work needs to be performed.
 
-fn sync_download_request<CB: Fn(usize)>(
+pub fn sync_download_request<CB: Fn(usize)>(
     client: &reqwest::blocking::Client,
     url: &str,
     progress_callback: Option<CB>,

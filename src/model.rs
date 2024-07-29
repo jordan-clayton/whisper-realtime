@@ -96,42 +96,6 @@ impl Model {
         }
     }
 
-    // TODO: remove.
-    pub fn download(&self) {
-        if self.is_downloaded() {
-            return;
-        }
-
-        // Create the models directory if it doesn't exist
-        let model_directory_buf = self.model_directory();
-        let m_dir = model_directory_buf.as_path();
-
-        if !m_dir.exists() {
-            fs::create_dir_all(m_dir).expect("failed to create models directory");
-        }
-
-        let url = self.url();
-
-        info!("Downloading mod {}", url);
-
-        let resp = ureq::get(url.as_str()).call().expect("download failed");
-        let len: usize = resp
-            .header("Content-Length")
-            .expect("request returned zero-length")
-            .parse()
-            .unwrap_or_default();
-
-        let mut bytes: Vec<u8> = Vec::with_capacity(len);
-        resp.into_reader()
-            .read_to_end(&mut bytes)
-            .expect("failed to serialize mod data");
-
-        info!("Downloaded mod {}", url);
-        let path_buf = self.file_path();
-        let model_path = path_buf.as_path();
-        fs::write(model_path, bytes).expect("failed to save mod");
-    }
-
     pub fn delete(&self) {
         if !self.is_downloaded() {
             return;

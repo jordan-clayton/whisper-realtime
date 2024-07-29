@@ -8,8 +8,6 @@ edition = "2021"
 
 [dependencies]
 serde = { version = "1.0.204", features = ["derive"], optional = true }
-# TODO: swap to reqwest
-ureq = "2.9.7"
 whisper-rs = { version = "0.11.1", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
 log = "0.4.21"
 ctrlc = "3.4.4"
@@ -21,6 +19,7 @@ futures = "0.3.30"
 futures-util = "0.3.30"
 futures-core = "0.3.30"
 bytes = "1.6.1"
+tokio = { version = "1.39.2", features = ["rt-multi-thread"] }
 
 # Cmake is required. Download with homebrew or from cmake.org and add to $PATH.
 [target.aarch64-apple-darwin]

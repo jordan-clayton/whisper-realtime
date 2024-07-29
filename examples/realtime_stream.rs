@@ -5,17 +5,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender, sync_channel};
 use std::thread::scope;
 
+use indicatif::{ProgressBar, ProgressStyle};
 use sdl2::audio::AudioDevice;
 
 use whisper_realtime::{configs, constants, microphone, model};
 use whisper_realtime::audio_ring_buffer::AudioRingBuffer;
+use whisper_realtime::downloader;
+use whisper_realtime::downloader::download::AsyncDownload;
 use whisper_realtime::errors::WhisperRealtimeError;
 use whisper_realtime::recorder::Recorder;
 use whisper_realtime::transcriber::realtime_transcriber;
 use whisper_realtime::transcriber::static_transcriber;
 use whisper_realtime::transcriber::transcriber::Transcriber;
 
-// TODO: Refactor into async
 fn main() {
     // Download the model.
     let mut proj_dir = std::env::current_dir().unwrap();
@@ -23,11 +25,47 @@ fn main() {
     let mut model = model::Model::new_with_data_dir(proj_dir.to_path_buf());
     model.model_type = model::ModelType::MediumEn;
 
-    // TODO: Refactor this to include ProgressBar and Asynchronous download.
     if !model.is_downloaded() {
         println!("Downloading model:");
-        model.download();
-        println!("Model downloaded");
+        stdout().flush().unwrap();
+
+        // Downloading.
+
+        let url = model.url();
+        let url = url.as_str();
+        let client = reqwest::Client::new();
+
+        let rt = tokio::runtime::Runtime::new().expect("Failed to build tokio runtime");
+        let handle = rt.handle();
+
+        let stream_downloader = downloader::request::async_download_request(&client, url, None);
+        let mut stream_downloader = handle
+            .block_on(stream_downloader)
+            .expect("Failed to make download request");
+
+        // Initiate a progress bar.
+        let pb = ProgressBar::new(stream_downloader.total_size as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})").unwrap()
+            .progress_chars("#>-")
+        );
+
+        let pb_c = pb.clone();
+
+        stream_downloader.progress_callback = Some(move |n: usize| {
+            pb_c.set_position(n as u64);
+        });
+
+        // File Path:
+        let file_directory = model.model_directory();
+        let file_directory = file_directory.as_path();
+        let file_name = model.model_file_name();
+
+        let download = stream_downloader.download(file_directory, file_name);
+
+        let _ = handle.block_on(download).expect("Failed to download model");
+
+        assert!(model.is_downloaded());
     }
 
     let model = Arc::new(model);

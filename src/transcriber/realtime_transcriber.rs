@@ -14,15 +14,15 @@ use crate::audio_ring_buffer::AudioRingBuffer;
 use crate::configs::Configs;
 use crate::constants;
 use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
+
 use super::transcriber::Transcriber;
 
-/// This implementation is a modified port of the whisper.cpp stream example, see: 
+/// This implementation is a modified port of the whisper.cpp stream example, see:
 /// https://github.com/ggerganov/whisper.cpp/blob/master/examples/stream/stream.cpp
 ///
-/// Realtime on CPU has not yet been tested and may or may not be feasible. 
+/// Realtime on CPU has not yet been tested and may or may not be feasible.
 /// Building with GPU support is currently recommended.
 
-// TODO: refactor the hardcoded constants into RealtimeConfigs
 pub struct RealtimeTranscriber {
     configs: Arc<Configs>,
     audio: Arc<AudioRingBuffer<f32>>,
@@ -53,7 +53,7 @@ impl RealtimeTranscriber {
             .build()
             .expect("failed to build voice activity detector");
 
-        RealtimeTranscriber {
+        Self {
             configs: Arc::new(Configs::default()),
             audio,
             output_buffer,
@@ -79,7 +79,7 @@ impl RealtimeTranscriber {
             .chunk_size(1024usize)
             .build()
             .expect("failed to build voice activity detector");
-        RealtimeTranscriber {
+        Self {
             configs,
             audio,
             output_buffer,
@@ -134,7 +134,6 @@ impl Transcriber for RealtimeTranscriber {
         loop {
             let running = self.running.clone().load(Ordering::Relaxed);
             if !running {
-
                 self.data_sender
                     .send(Ok((String::from("\nEnd Transcription\n"), true)))
                     .expect("Failed to send transcription");
@@ -218,10 +217,10 @@ impl Transcriber for RealtimeTranscriber {
                     }
                     _ => {
                         self.data_sender
-                            .send(Err(
-                            WhisperRealtimeError::new(WhisperRealtimeErrorType::TranscriptionError, String::from("Model Failure"))
-
-                            ))
+                            .send(Err(WhisperRealtimeError::new(
+                                WhisperRealtimeErrorType::TranscriptionError,
+                                String::from("Model Failure"),
+                            )))
                             .expect("Failed to send error");
                     }
                 }
@@ -264,9 +263,7 @@ impl Transcriber for RealtimeTranscriber {
 
             // set the flag if over timeout.
 
-            if total_time > self.configs.realtime_timeout {
-
-            }
+            if total_time > self.configs.realtime_timeout {}
         }
 
         self.output_buffer.join("").clone()

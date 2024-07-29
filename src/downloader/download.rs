@@ -9,6 +9,11 @@ pub trait SyncDownload: Writable {
         file_directory: &Path,
         file_name: &str,
     ) -> Result<(), WhisperRealtimeError>;
+    fn download_with_progress(
+        &mut self,
+        file_directory: &Path,
+        file_name: &str,
+    ) -> Result<(), WhisperRealtimeError>;
 }
 
 pub trait AsyncDownload: Writable {

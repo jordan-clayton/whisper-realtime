@@ -25,7 +25,7 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
         let head = AtomicUsize::new(0);
         let audio_len = AtomicUsize::new(0);
         let len_ms = AtomicUsize::new(len_ms);
-        AudioRingBuffer {
+        Self {
             head,
             audio_len,
             len_ms,

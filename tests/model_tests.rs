@@ -96,13 +96,4 @@ mod model_tests {
         let model: Model = Model::default();
         assert!(!model.is_downloaded())
     }
-
-    #[test]
-    fn download_and_delete() {
-        let model: Model = Model::default();
-        model.download();
-        assert!(model.is_downloaded());
-        model.delete();
-        assert!(!model.is_downloaded());
-    }
 }

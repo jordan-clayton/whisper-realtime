@@ -6,6 +6,6 @@ pub mod transcriber;
 
 pub mod audio_ring_buffer;
 
-mod downloader;
+pub mod downloader;
 pub mod errors;
 pub mod recorder;

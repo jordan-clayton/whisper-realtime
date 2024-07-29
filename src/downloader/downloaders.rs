@@ -18,18 +18,14 @@ pub struct StreamDownloader<S: Stream<Item = Result<Bytes, reqwest::Error>> + Un
     file_stream: S,
     progress: usize,
     pub total_size: usize,
-    progress_callback: Option<CB>,
+    pub progress_callback: Option<CB>,
 }
 
 impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Fn(usize)>
     StreamDownloader<S, CB>
 {
-    pub fn new(
-        file_stream: S,
-        total_size: usize,
-        progress_callback: Option<CB>,
-    ) -> StreamDownloader<S, CB> {
-        StreamDownloader {
+    pub fn new(file_stream: S, total_size: usize, progress_callback: Option<CB>) -> Self {
+        Self {
             file_stream,
             progress: 0,
             total_size,
@@ -110,21 +106,21 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Fn(usize)> Asy
 /// It does not provide download progress, but will provide write progress.
 ///
 /// Use the progress callback to receive the total number of bytes copied per read while copying
-/// the download to the filesystem.
+/// the download to the filesystem using download_with_progress()
+///
+/// NOTE: download() uses std::fs::copy and is considerably faster, but will not call
+/// the progress_callback.
 pub struct SyncDownloader<R: Read, CB: Fn(usize)> {
     file_stream: R,
     progress: usize,
     pub total_size: usize,
-    progress_callback: Option<CB>,
+    pub progress_callback: Option<CB>,
 }
 
+// NOTE: This needs to be implemented, but gets optimized out by the compiler in favour of a syscall.
 impl<R: Read, CB: Fn(usize)> SyncDownloader<R, CB> {
-    pub fn new(
-        file_stream: R,
-        total_size: usize,
-        progress_callback: Option<CB>,
-    ) -> SyncDownloader<R, CB> {
-        SyncDownloader {
+    pub fn new(file_stream: R, total_size: usize, progress_callback: Option<CB>) -> Self {
+        Self {
             file_stream,
             progress: 0,
             total_size,
@@ -174,6 +170,40 @@ impl<R: Read, CB: Fn(usize)> SyncDownload for SyncDownloader<R, CB> {
         let mut dest = dest.unwrap();
         let source = &mut self.file_stream;
         let downloaded = copy(source, &mut dest);
+
+        if let Err(_) = downloaded {
+            return Err(WhisperRealtimeError::new(
+                WhisperRealtimeErrorType::DownloadError,
+                String::from("Failed to write file"),
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn download_with_progress(
+        &mut self,
+        file_directory: &Path,
+        file_name: &str,
+    ) -> Result<(), WhisperRealtimeError> {
+        let path_available = Self::prepare_file_path(file_directory);
+        if let Err(e) = path_available {
+            return Err(e);
+        }
+
+        let mut destination = file_directory.to_path_buf();
+        destination.push(file_name);
+
+        let dest = Self::open_write_file(&destination);
+        if let Err(e) = dest {
+            return Err(e);
+        }
+
+        let mut dest = dest.unwrap();
+        let source = &mut self.file_stream;
+
+        // This will call the callback.
+        let downloaded = std::io::copy(source, &mut dest);
 
         if let Err(_) = downloaded {
             return Err(WhisperRealtimeError::new(

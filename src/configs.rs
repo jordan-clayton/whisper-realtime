@@ -1,5 +1,5 @@
-use crate::model;
 use crate::constants;
+use crate::model;
 
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
@@ -28,7 +28,7 @@ pub struct Configs {
 
 impl Default for Configs {
     fn default() -> Self {
-        Configs {
+        Self {
             n_threads: 4,
             set_translate: false,
             set_language: Some(String::from("en")),

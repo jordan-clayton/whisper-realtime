@@ -35,8 +35,8 @@ impl fmt::Display for WhisperRealtimeErrorType {
 }
 
 impl WhisperRealtimeError {
-    pub fn new(error_type: WhisperRealtimeErrorType, reason: String) -> WhisperRealtimeError {
-        WhisperRealtimeError { error_type, reason }
+    pub fn new(error_type: WhisperRealtimeErrorType, reason: String) -> Self {
+        Self { error_type, reason }
     }
 
     pub fn cause(&self) -> String {
