@@ -14,6 +14,7 @@ serde = { version = "1.0.204", features = ["derive"], optional = true }
 whisper-rs = { git = "https://github.com/tazz4843/whisper-rs.git", rev = "744804a", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
 log = "0.4.21"
 ctrlc = "3.4.4"
+# voice_activity_detector builds without HW acceleration atm; looking into this.
 voice_activity_detector = "0.1.0"
 sdl2 = "0.37.0"
 indicatif = "0.17.8"
@@ -44,7 +45,8 @@ openblas = ["whisper-rs/openblas"]
 hipblas = ["whisper-rs/hipblas", "_gpu"]
 coreml = ["whisper-rs/coreml"]
 metal = ["whisper-rs/metal", "_gpu"]
-opencl = ["whisper-rs/opencl"]
+# whisper.cpp will use the gpu if supported drivers are installed.
+opencl = ["whisper-rs/opencl", "_gpu"]
 
 
 

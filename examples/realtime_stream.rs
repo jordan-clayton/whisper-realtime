@@ -26,11 +26,11 @@ fn main() {
     let mut model = model::Model::new_with_data_dir(proj_dir.to_path_buf());
 
     // GPU acceleration is currently required to run larger models in realtime.
-    #[cfg(feature = "_gpu")]
-    model.model_type = model::ModelType::Medium;
-
-    #[cfg(not(feature = "_gpu"))]
-    model.model_type = model::ModelType::Small;
+    model.model_type = if cfg!(feature = "_gpu") {
+        model::ModelType::Medium
+    } else {
+        model::ModelType::Small
+    };
 
     if !model.is_downloaded() {
         println!("Downloading model:");
