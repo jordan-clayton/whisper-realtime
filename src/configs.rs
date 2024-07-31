@@ -10,8 +10,6 @@ pub struct Configs {
     // This is more or less a necessity for realtime in debug mode.
     // CPU realtime has not yet been tested.
     pub use_gpu: bool,
-    // TODO: finish non-VAD implementation
-    // pub use_vad: bool,
 
     // EXPERIMENTAL:
     // pub speed_up: bool,
@@ -23,7 +21,13 @@ pub struct Configs {
     pub vad_sample_ms: usize,
     pub phrase_timeout: usize,
 
-    pub voice_threshold: f32,
+    pub voice_probability_threshold: f32,
+    // To determine high-pass
+    pub naive_vad_freq_threshold: f64,
+    // To determine VAD for naive impl.
+    pub naive_vad_energy_threshold: f64,
+    pub naive_window_len: f64,
+    pub naive_window_step: f64,
     // Stdout only.
     pub print_special: bool,
     pub print_progress: bool,
@@ -46,7 +50,11 @@ impl Default for Configs {
             audio_sample_ms: constants::AUDIO_SAMPLE_MS,
             vad_sample_ms: constants::VAD_SAMPLE_MS,
             phrase_timeout: constants::PHRASE_TIMEOUT,
-            voice_threshold: constants::VOICE_THRESHOLD,
+            naive_vad_energy_threshold: constants::VOICE_ENERGY_THRESHOLD,
+            naive_window_len: constants::VAD_WIN_LEN,
+            naive_window_step: constants::VAD_WIN_HOP,
+            voice_probability_threshold: constants::VOICE_PROBABILITY_THRESHOLD,
+            naive_vad_freq_threshold: constants::VAD_FREQ_THRESHOLD,
             print_special: false,
             print_progress: false,
             print_realtime: false,

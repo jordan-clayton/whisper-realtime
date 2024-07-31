@@ -12,6 +12,7 @@ pub enum WhisperRealtimeErrorType {
     TranscriptionError,
     DownloadError,
     WriteError,
+    ParameterError,
     Unknown,
 }
 
@@ -26,6 +27,9 @@ impl fmt::Display for WhisperRealtimeErrorType {
             }
             WhisperRealtimeErrorType::WriteError => {
                 write!(f, "WriteError")
+            }
+            WhisperRealtimeErrorType::ParameterError => {
+                write!(f, "ParameterErrorError")
             }
             WhisperRealtimeErrorType::Unknown => {
                 write!(f, "UnknownError")

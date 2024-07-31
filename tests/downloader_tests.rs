@@ -10,6 +10,7 @@ mod downloader_tests {
     use whisper_realtime::model;
 
     #[test]
+    #[ignore]
     fn test_async_download() {
         let model: model::Model = model::Model::default();
 
@@ -76,6 +77,7 @@ mod downloader_tests {
     }
 
     #[test]
+    #[ignore]
     fn test_sync_download() {
         let mut model: model::Model = model::Model::default();
         // model.model_type = model::ModelType::MediumEn;

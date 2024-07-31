@@ -13,16 +13,17 @@ use crate::audio_ring_buffer::AudioRingBuffer;
 use crate::configs::Configs;
 use crate::constants;
 use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
+use crate::transcriber::vad::VoiceActivityDetection;
 
 use super::transcriber::Transcriber;
+use super::vad;
 
-/// This implementation is a modified port of the whisper.cpp stream example, see:
-/// https://github.com/ggerganov/whisper.cpp/blob/master/examples/stream/stream.cpp
-///
-/// Realtime on CPU has not yet been tested and may or may not be feasible.
-/// Building with GPU support is currently recommended.
+// This implementation is a modified port of the whisper.cpp stream example, see:
+// https://github.com/ggerganov/whisper.cpp/tree/master/examples/stream
+// Realtime on CPU has not yet been tested and may or may not be feasible.
+// Building with GPU support is currently recommended.
 
-// TODO: Non-vad implementation using token_buffer to seed next transcription.
+// Idea: Non-vad implementation using token_buffer to seed next transcription.
 // TODO: Support for i16 audio with conversion to f32
 pub struct RealtimeTranscriber {
     configs: Arc<Configs>,
@@ -33,8 +34,7 @@ pub struct RealtimeTranscriber {
     // token_buffer: Vec<std::ffi::c_int>,
     ready: Arc<AtomicBool>,
     running: Arc<AtomicBool>,
-    // vad: Option<VoiceActivityDetector>,
-    vad: VoiceActivityDetector,
+    vad: Option<VoiceActivityDetector>,
 }
 
 impl RealtimeTranscriber {
@@ -43,13 +43,11 @@ impl RealtimeTranscriber {
         data_sender: Arc<Sender<Result<(String, bool), WhisperRealtimeError>>>,
         running: Arc<AtomicBool>,
         ready: Arc<AtomicBool>,
+        vad_strategy: Option<vad::VadStrategy>,
     ) -> Self {
+        let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());
         let output_buffer: Vec<String> = vec![];
-        let vad = VoiceActivityDetector::builder()
-            .sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
-            .chunk_size(1024usize)
-            .build()
-            .expect("failed to build voice activity detector");
+        let vad = Self::init_vad(strategy);
 
         Self {
             configs: Arc::new(Configs::default()),
@@ -68,13 +66,11 @@ impl RealtimeTranscriber {
         running: Arc<AtomicBool>,
         ready: Arc<AtomicBool>,
         configs: Arc<Configs>,
+        vad_strategy: Option<vad::VadStrategy>,
     ) -> Self {
+        let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());
         let output_buffer: Vec<String> = vec![];
-        let vad = VoiceActivityDetector::builder()
-            .sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
-            .chunk_size(1024usize)
-            .build()
-            .expect("failed to build voice activity detector");
+        let vad = Self::init_vad(strategy);
         Self {
             configs,
             audio,
@@ -86,17 +82,28 @@ impl RealtimeTranscriber {
         }
     }
 
-    fn is_voice_detected<T: voice_activity_detector::Sample>(
-        vad: &mut VoiceActivityDetector,
-        audio_data: &Vec<T>,
-        voice_threshold: f32,
-    ) -> bool {
-        let samples = audio_data.clone();
-
-        let probability = vad.predict(samples);
-
-        return probability > voice_threshold;
+    fn init_vad(strategy: vad::VadStrategy) -> Option<VoiceActivityDetector> {
+        match strategy {
+            vad::VadStrategy::Naive => None,
+            vad::VadStrategy::Silero => Some(
+                VoiceActivityDetector::builder()
+                    .sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
+                    .chunk_size(1024usize)
+                    .build()
+                    .expect("failed to build voice activity detector"),
+            ),
+        }
     }
+}
+
+impl<
+        T: voice_activity_detector::Sample
+            + num_traits::cast::FromPrimitive
+            + num_traits::cast::ToPrimitive
+            + num_traits::cast::NumCast
+            + num_traits::Zero,
+    > VoiceActivityDetection<T> for RealtimeTranscriber
+{
 }
 
 impl Transcriber for RealtimeTranscriber {
@@ -150,11 +157,41 @@ impl Transcriber for RealtimeTranscriber {
             self.audio
                 .get_audio(self.configs.vad_sample_ms, &mut audio_samples_vad);
 
-            // VAD is mono only
-            let new_samples = whisper_rs::convert_stereo_to_mono_audio(&audio_samples_vad)
-                .expect("failed to convert new samples to mono");
+            // VAD is mono only. If streaming in stereo, uncomment.
+            // let mut new_samples = whisper_rs::convert_stereo_to_mono_audio(&audio_samples_vad)
+            //     .expect("failed to convert new samples to mono");
 
-            if Self::is_voice_detected(&mut self.vad, &new_samples, self.configs.voice_threshold) {
+            let voice_detected = match &mut self.vad {
+                None => Self::is_voice_detected_naive(
+                    constants::WHISPER_SAMPLE_RATE,
+                    &mut audio_samples_vad,
+                    // &mut new_samples,
+                    self.configs.naive_vad_energy_threshold,
+                    self.configs.naive_window_len,
+                    self.configs.naive_window_step,
+                    self.configs.naive_vad_freq_threshold,
+                    self.configs.voice_probability_threshold,
+                ),
+                Some(ref mut vad) => Ok(Self::is_voice_detected_silero(
+                    vad,
+                    &mut audio_samples_vad,
+                    // &mut new_samples,
+                    self.configs.voice_probability_threshold,
+                )),
+            };
+
+            if let Err(e) = &voice_detected {
+                self.data_sender
+                    .send(Err(WhisperRealtimeError::new(
+                        WhisperRealtimeErrorType::TranscriptionError,
+                        format!("Voice detection failure. Error: {}", e),
+                    )))
+                    .expect("Failed to send error");
+            }
+
+            let voice_detected = voice_detected.unwrap();
+
+            if voice_detected {
                 self.audio
                     .get_audio(self.configs.audio_sample_ms, &mut audio_samples);
 

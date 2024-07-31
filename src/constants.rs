@@ -21,7 +21,23 @@ pub const PAUSE_DURATION: u64 = 100;
 
 // This works best when within the range of 0.65-0.80
 // Higher thresholds are prone to false negatives.
-pub const VOICE_THRESHOLD: f32 = 0.65;
+pub const VOICE_PROBABILITY_THRESHOLD: f32 = 0.65;
+
+// For Naive VAD implementation
+pub const VOICE_ENERGY_THRESHOLD: f64 = -35.0;
+
+pub const VAD_WIN_LEN: f64 = 0.025;
+pub const VAD_WIN_HOP: f64 = 0.025;
+
+// Energy normalization constant.
+// 1e7 comes from this implementation: https://superkogito.github.io/blog/2020/02/09/naive_vad.html
+// which is for (what I assume to be) i16 wav format.
+// This constant should work for f32
+pub const E0: f64 = 1e7 / (i16::MAX as f64 * i16::MAX as f64);
+pub const KERNEL_SIZE: usize = 5;
+
+// This seems to work reasonably well, anywhere within the range of 50-1000Hz.
+pub const VAD_FREQ_THRESHOLD: f64 = 100.0;
 
 // This is currently only used for testing purposes.
 pub const SAMPLE_DURATION: usize = 10000;

@@ -18,6 +18,7 @@ use whisper_realtime::recorder::Recorder;
 use whisper_realtime::transcriber::realtime_transcriber;
 use whisper_realtime::transcriber::static_transcriber;
 use whisper_realtime::transcriber::transcriber::Transcriber;
+use whisper_realtime::transcriber::vad::VadStrategy;
 
 fn main() {
     // Download the model.
@@ -144,24 +145,51 @@ fn main() {
 
     let mut text_output_buffer: Vec<String> = vec![];
 
+    // Get the VAD strategy.
+    let mut confirm_buffer = String::new();
+    println!(
+        "\nAvailable Voice Activity Detection strategies: \n\
+    0: Silero VAD (CPU). More accurate, faster (default) \n\
+    1: Naive . Less accurate, higher overhead, slower"
+    );
+    print!("Select VAD strategy: ");
+    stdout().flush().unwrap();
+
+    let read_success = std::io::stdin().read_line(&mut confirm_buffer);
+    let vad_strategy = match read_success {
+        Ok(_) => {
+            let selection: Result<u8, _> = confirm_buffer.trim().parse();
+            match selection {
+                Ok(n) => match n {
+                    0 => Some(VadStrategy::Silero),
+                    _ => Some(VadStrategy::Naive),
+                },
+                Err(_) => None,
+            }
+        }
+        Err(_) => None,
+    };
+
     // Optional store + re-transcription.
     // Get input for stdin.
-    println!();
     print!("Would you like to store audio and re-transcribe once realtime has finished? y/n: ");
     stdout().flush().unwrap();
-    let mut confirm_buffer = String::new();
+
+    // Clear the input buffer.
+    confirm_buffer = String::new();
     let read_success = std::io::stdin().read_line(&mut confirm_buffer);
 
-    let static_audio_buffer: Option<Vec<f32>> = if let Ok(_b) = read_success {
-        confirm_buffer = confirm_buffer.trim().to_lowercase();
-        if confirm_buffer == "y" {
-            println!("Confirmed. Recording audio.");
-            Some(vec![])
-        } else {
-            None
+    let static_audio_buffer: Option<Vec<f32>> = match read_success {
+        Ok(_) => {
+            confirm_buffer = confirm_buffer.trim().to_lowercase();
+            if confirm_buffer == "y" {
+                println!("Confirmed. Recording audio.\n");
+                Some(vec![])
+            } else {
+                None
+            }
         }
-    } else {
-        None
+        Err(_) => None,
     };
 
     let static_audio_buffer_p = Arc::new(Mutex::new(static_audio_buffer));
@@ -209,6 +237,7 @@ fn main() {
                 c_is_running,
                 c_is_ready,
                 c_configs,
+                vad_strategy,
             );
             let output = transcriber.process_audio(&mut state);
             output
