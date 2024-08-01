@@ -1,7 +1,7 @@
 use crate::constants;
 use crate::model;
 
-#[cfg_attr(feature = "use_serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
 pub struct Configs {
     pub n_threads: std::ffi::c_int,

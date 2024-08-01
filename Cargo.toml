@@ -40,7 +40,7 @@ ar = "C:\\msys64\\ucrt64\\bin\\ar.exe"
 [features]
 default = []
 _gpu = []
-use_serde = ["serde"]
+serde = ["dep:serde"]
 cuda = ["whisper-rs/cuda", "_gpu"]
 # openblas is Windows only, cpu acceleration.
 openblas = ["whisper-rs/openblas"]

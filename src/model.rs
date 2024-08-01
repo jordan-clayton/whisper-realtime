@@ -104,7 +104,7 @@ impl Model {
     }
 }
 
-#[cfg_attr(feature = "use_serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Copy, Clone, Debug)]
 pub enum ModelType {
     TinyEn,
