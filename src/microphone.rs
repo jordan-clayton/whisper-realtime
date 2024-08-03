@@ -7,13 +7,6 @@ use sdl2::AudioSubsystem;
 
 use crate::recorder::Recorder;
 
-// Struct def'n
-// AudioSpecDesired {
-//     freq: Option<i32>, WHISPER_SAMPLE_RATE as i32,
-//     channels: Option<u8>, 1
-//     samples: Option<u16>, 1024
-// }
-
 pub fn get_desired_audio_spec(
     freq: Option<i32>,
     channels: Option<u8>,
@@ -29,7 +22,7 @@ pub fn get_desired_audio_spec(
 pub fn build_audio_stream<T: Default + Clone + Copy + Send + AudioFormatNum + 'static>(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
-    text_sender: SyncSender<Vec<T>>,
+    audio_sender: SyncSender<Vec<T>>,
     is_running: Arc<AtomicBool>,
 ) -> AudioDevice<Recorder<T>> {
     audio_subsystem
@@ -38,7 +31,7 @@ pub fn build_audio_stream<T: Default + Clone + Copy + Send + AudioFormatNum + 's
             None,
             desired_spec,
             |_spec| Recorder {
-                sender: text_sender,
+                sender: audio_sender,
                 is_running,
             },
         )

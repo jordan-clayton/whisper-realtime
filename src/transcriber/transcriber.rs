@@ -1,5 +1,9 @@
 pub trait Transcriber {
-    fn process_audio(&mut self, whisper_state: &mut whisper_rs::WhisperState) -> String;
+    fn process_audio(
+        &mut self,
+        whisper_state: &mut whisper_rs::WhisperState,
+        progress_callback: Option<impl FnMut(i32) + Send + Sync + 'static>,
+    ) -> String;
     fn set_full_params<'a>(
         full_params: &mut whisper_rs::FullParams<'a, 'a>,
         prefs: &'a crate::configs::Configs,

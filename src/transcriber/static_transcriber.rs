@@ -1,12 +1,22 @@
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
+use lazy_static::lazy_static;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
 use crate::configs::Configs;
 use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
 
 use super::transcriber::Transcriber;
+
+// Workaround for whisper-rs issue #134 -- moving memory in rust causes a segmentation fault
+// in the progress callback.
+// Solution from: https://github.com/thewh1teagle/vibe/blob/main/core/src/transcribe.rs
+
+lazy_static! {
+    static ref PROGRESS_CALLBACK: Mutex<Option<Box<dyn FnMut(i32) + Send + Sync>>> =
+        Mutex::new(None);
+}
 
 // NOTE: At this time only f32 is supported. i16 may be implemented at a later time.
 pub struct StaticTranscriber {
@@ -17,7 +27,7 @@ pub struct StaticTranscriber {
 impl StaticTranscriber {
     pub fn new(audio: Arc<Mutex<Vec<f32>>>) -> Self {
         Self {
-            configs: Arc::new(Configs::default()),
+            configs: Arc::<Configs>::default(),
             audio,
         }
     }
@@ -34,9 +44,33 @@ impl StaticTranscriber {
 }
 
 impl Transcriber for StaticTranscriber {
-    fn process_audio(&mut self, whisper_state: &mut WhisperState) -> String {
+    fn process_audio(
+        &mut self,
+        whisper_state: &mut WhisperState,
+        progress_callback: Option<impl FnMut(i32) + Send + Sync + 'static>,
+    ) -> String {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         Self::set_full_params(&mut params, &self.configs, None);
+
+        if let Some(callback) = progress_callback {
+            {
+                let mut guard = PROGRESS_CALLBACK
+                    .lock()
+                    .expect("Failed to get callback lock");
+
+                *guard = Some(Box::new(callback));
+            }
+
+            params.set_progress_callback_safe(|p| {
+                let mut progress_callback = PROGRESS_CALLBACK
+                    .lock()
+                    .expect("Failed to get callback mutex");
+
+                if let Some(callback) = progress_callback.as_mut() {
+                    callback(p)
+                }
+            })
+        }
 
         let audio_samples = self.audio.lock().expect("failed to grab mutex");
 

@@ -20,7 +20,7 @@ pub enum VadStrategy {
 
 impl Default for VadStrategy {
     fn default() -> Self {
-        Self::Naive
+        Self::Silero
     }
 }
 

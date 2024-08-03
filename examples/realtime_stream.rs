@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender, sync_channel};
 use std::thread::scope;
+use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use sdl2::audio::AudioDevice;
@@ -18,7 +19,6 @@ use whisper_realtime::recorder::Recorder;
 use whisper_realtime::transcriber::realtime_transcriber;
 use whisper_realtime::transcriber::static_transcriber;
 use whisper_realtime::transcriber::transcriber::Transcriber;
-use whisper_realtime::transcriber::vad::VadStrategy;
 
 fn main() {
     // Download the model.
@@ -57,6 +57,7 @@ fn main() {
             .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})").unwrap()
             .progress_chars("#>-")
         );
+        pb.set_message(format!("Downloading {}", url));
 
         let pb_c = pb.clone();
 
@@ -147,36 +148,12 @@ fn main() {
 
     // Get the VAD strategy.
     let mut confirm_buffer = String::new();
-    println!(
-        "\nAvailable Voice Activity Detection strategies: \n\
-    0: Silero VAD (CPU). More accurate, faster (default) \n\
-    1: Naive . Less accurate, higher overhead, slower"
-    );
-    print!("Select VAD strategy: ");
-    stdout().flush().unwrap();
-
-    let read_success = std::io::stdin().read_line(&mut confirm_buffer);
-    let vad_strategy = match read_success {
-        Ok(_) => {
-            let selection: Result<u8, _> = confirm_buffer.trim().parse();
-            match selection {
-                Ok(n) => match n {
-                    0 => Some(VadStrategy::Silero),
-                    _ => Some(VadStrategy::Naive),
-                },
-                Err(_) => None,
-            }
-        }
-        Err(_) => None,
-    };
 
     // Optional store + re-transcription.
     // Get input for stdin.
     print!("Would you like to store audio and re-transcribe once realtime has finished? y/n: ");
     stdout().flush().unwrap();
 
-    // Clear the input buffer.
-    confirm_buffer = String::new();
     let read_success = std::io::stdin().read_line(&mut confirm_buffer);
 
     let static_audio_buffer: Option<Vec<f32>> = match read_success {
@@ -237,9 +214,9 @@ fn main() {
                 c_is_running,
                 c_is_ready,
                 c_configs,
-                vad_strategy,
+                None,
             );
-            let output = transcriber.process_audio(&mut state);
+            let output = transcriber.process_audio(&mut state, None::<fn(i32)>);
             output
         });
 
@@ -324,10 +301,25 @@ fn main() {
             .expect("failed to create state for static re-transcription");
 
         println!("Static Transcribing: ");
-        let pb = ProgressBar::new_spinner();
-        pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
-        let output = static_transcriber.process_audio(&mut state);
+        // Initiate a progress bar.
+        let pb = ProgressBar::new(100);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {percent} ({eta})").unwrap()
+            .progress_chars("#>-")
+        );
+
+        pb.set_message("Transcription Progress: ");
+        pb.enable_steady_tick(Duration::from_millis(10));
+
+        let pb_c = pb.clone();
+
+        let output = static_transcriber.process_audio(
+            &mut state,
+            Some(move |p| {
+                pb_c.set_position(p as u64);
+            }),
+        );
         pb.finish_and_clear();
         clear_stdout();
         println!("Static re-transcription:");

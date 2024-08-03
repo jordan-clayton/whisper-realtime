@@ -107,7 +107,11 @@ impl<
 }
 
 impl Transcriber for RealtimeTranscriber {
-    fn process_audio(&mut self, whisper_state: &mut WhisperState) -> String {
+    fn process_audio(
+        &mut self,
+        whisper_state: &mut WhisperState,
+        _: Option<impl FnMut(i32) + Send + Sync + 'static>,
+    ) -> String {
         let ready = self.ready.load(Ordering::Relaxed);
         if !ready {
             return String::from("");
