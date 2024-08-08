@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+#[cfg(not(feature = "crossbeam"))]
+use std::sync::mpsc;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -23,24 +24,35 @@ use super::vad;
 // Realtime on CPU has not yet been tested and may or may not be feasible.
 // Building with GPU support is currently recommended.
 
-// Idea: Non-vad implementation using token_buffer to seed next transcription.
-// TODO: Support for i16 audio with conversion to f32
+// Possible feature: Non-vad implementation using token_buffer to seed next transcription.
+
+#[cfg(not(feature = "crossbeam"))]
 pub struct RealtimeTranscriber {
     configs: Arc<Configs>,
     audio: Arc<AudioRingBuffer<f32>>,
     output_buffer: Vec<String>,
-    // To send data to the G/UI
-    data_sender: Arc<Sender<Result<(String, bool), WhisperRealtimeError>>>,
-    // token_buffer: Vec<std::ffi::c_int>,
+    data_sender: mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>,
+    ready: Arc<AtomicBool>,
+    running: Arc<AtomicBool>,
+    vad: Option<VoiceActivityDetector>,
+}
+
+#[cfg(feature = "crossbeam")]
+pub struct RealtimeTranscriber {
+    configs: Arc<Configs>,
+    audio: Arc<AudioRingBuffer<f32>>,
+    output_buffer: Vec<String>,
+    data_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
     ready: Arc<AtomicBool>,
     running: Arc<AtomicBool>,
     vad: Option<VoiceActivityDetector>,
 }
 
 impl RealtimeTranscriber {
+    #[cfg(not(feature = "crossbeam"))]
     pub fn new(
         audio: Arc<AudioRingBuffer<f32>>,
-        data_sender: Arc<Sender<Result<(String, bool), WhisperRealtimeError>>>,
+        data_sender: mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>,
         running: Arc<AtomicBool>,
         ready: Arc<AtomicBool>,
         vad_strategy: Option<vad::VadStrategy>,
@@ -60,9 +72,56 @@ impl RealtimeTranscriber {
         }
     }
 
+    #[cfg(feature = "crossbeam")]
+    pub fn new(
+        audio: Arc<AudioRingBuffer<f32>>,
+        data_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
+        running: Arc<AtomicBool>,
+        ready: Arc<AtomicBool>,
+        vad_strategy: Option<vad::VadStrategy>,
+    ) -> Self {
+        let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());
+        let output_buffer: Vec<String> = vec![];
+        let vad = Self::init_vad(strategy);
+
+        Self {
+            configs: Arc::new(Configs::default()),
+            audio,
+            output_buffer,
+            data_sender,
+            ready,
+            running,
+            vad,
+        }
+    }
+
+    #[cfg(not(feature = "crossbeam"))]
     pub fn new_with_configs(
         audio: Arc<AudioRingBuffer<f32>>,
-        data_sender: Arc<Sender<Result<(String, bool), WhisperRealtimeError>>>,
+        data_sender: mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>,
+        running: Arc<AtomicBool>,
+        ready: Arc<AtomicBool>,
+        configs: Arc<Configs>,
+        vad_strategy: Option<vad::VadStrategy>,
+    ) -> Self {
+        let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());
+        let output_buffer: Vec<String> = vec![];
+        let vad = Self::init_vad(strategy);
+        Self {
+            configs,
+            audio,
+            output_buffer,
+            data_sender,
+            ready,
+            running,
+            vad,
+        }
+    }
+
+    #[cfg(feature = "crossbeam")]
+    pub fn new_with_configs(
+        audio: Arc<AudioRingBuffer<f32>>,
+        data_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
         running: Arc<AtomicBool>,
         ready: Arc<AtomicBool>,
         configs: Arc<Configs>,
@@ -232,7 +291,7 @@ impl Transcriber for RealtimeTranscriber {
                         WhisperRealtimeErrorType::TranscriptionError,
                         format!("Model failure. Error: {}", e),
                     )))
-                    .expect("Failed to send error");
+                    .expect("Data channel closed");
             }
 
             let num_segments = whisper_state
@@ -271,11 +330,13 @@ impl Transcriber for RealtimeTranscriber {
                 .expect("Failed to send transcription");
 
             // Set the flag if over timeout.
-            if total_time > self.configs.realtime_timeout {
-                self.data_sender
-                    .send(Ok((String::from("\n[TRANSCRIPTION TIMEOUT\n"), true)))
-                    .expect("Failed to send transcription data");
-                self.running.store(false, Ordering::SeqCst);
+            if self.configs.realtime_timeout > 0 {
+                if total_time > self.configs.realtime_timeout {
+                    self.data_sender
+                        .send(Ok((String::from("\n[TRANSCRIPTION TIMEOUT\n"), true)))
+                        .expect("Failed to send transcription data");
+                    self.running.store(false, Ordering::SeqCst);
+                }
             }
         }
 

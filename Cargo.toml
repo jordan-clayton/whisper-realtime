@@ -28,6 +28,7 @@ num-traits = "0.2.19"
 lazy_static = "1.5.0"
 realfft = "3.3.0"
 hound = "3.5.1"
+crossbeam = { version = "0.8.4", optional = true }
 
 # See: https://github.com/tazz4843/whisper-rs/blob/master/BUILDING.md for building on Windows/MacOS
 [target.aarch64-apple-darwin]
@@ -40,6 +41,7 @@ ar = "C:\\msys64\\ucrt64\\bin\\ar.exe"
 [features]
 default = []
 _gpu = []
+crossbeam = ["dep:crossbeam"]
 serde = ["dep:serde"]
 cuda = ["whisper-rs/cuda", "_gpu"]
 # openblas is Windows only, cpu acceleration.

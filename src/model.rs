@@ -1,5 +1,6 @@
 use std::fs;
 
+// TODO: CoreML support.
 pub struct Model {
     pub model_type: ModelType,
     data_directory: std::path::PathBuf,

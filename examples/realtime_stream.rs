@@ -2,7 +2,8 @@ use std::io::{stdout, Write};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Sender, sync_channel};
+#[cfg(not(feature = "crossbeam"))]
+use std::sync::mpsc::{channel, sync_channel};
 use std::thread::scope;
 use std::time::Duration;
 
@@ -14,7 +15,6 @@ use whisper_realtime::{configs, constants, microphone, model};
 use whisper_realtime::audio_ring_buffer::AudioRingBuffer;
 use whisper_realtime::downloader;
 use whisper_realtime::downloader::download::AsyncDownload;
-use whisper_realtime::errors::WhisperRealtimeError;
 use whisper_realtime::recorder::Recorder;
 use whisper_realtime::transcriber::realtime_transcriber;
 use whisper_realtime::transcriber::static_transcriber;
@@ -90,18 +90,24 @@ fn main() {
     let audio_p_mic = audio_p.clone();
 
     // Input sender
+    #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(constants::INPUT_BUFFER_CAPACITY);
+    #[cfg(feature = "crossbeam")]
+    let (a_sender, a_receiver) = crossbeam::channel::bounded(constants::INPUT_BUFFER_CAPACITY);
 
     // Output sender
+    #[cfg(not(feature = "crossbeam"))]
     let (o_sender, o_receiver) = channel();
-    let o_sender_p: Arc<Sender<Result<(String, bool), WhisperRealtimeError>>> = Arc::new(o_sender);
+    #[cfg(feature = "crossbeam")]
+    let (o_sender, o_receiver) = crossbeam::channel::unbounded();
+
+    let o_sender_p = o_sender.clone();
 
     // State flags.
     let is_ready = Arc::new(AtomicBool::new(true));
     let c_is_ready = is_ready.clone();
     let is_running = Arc::new(AtomicBool::new(true));
     let c_is_running = is_running.clone();
-    let c_is_running_recorder_thread = is_running.clone();
     let c_is_running_audio_receiver = is_running.clone();
     let c_is_running_data_receiver = is_running.clone();
     let c_interrupt_is_running = is_running.clone();
@@ -123,12 +129,8 @@ fn main() {
     );
 
     // Setup
-    let mic_stream: AudioDevice<Recorder<f32>> = microphone::build_audio_stream(
-        &audio_subsystem,
-        &desired_audio_spec,
-        a_sender,
-        c_is_running_recorder_thread,
-    );
+    let mic_stream: AudioDevice<Recorder<f32>> =
+        microphone::build_audio_stream(&audio_subsystem, &desired_audio_spec, a_sender);
 
     // Model params
     let mut whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
@@ -289,11 +291,17 @@ fn main() {
         .expect("Failed to get static audio mutex");
 
     if let Some(audio_recording) = static_audio_buffer.to_owned() {
-        let audio_recording = Arc::new(Mutex::new(audio_recording));
+        let audio_recording = Arc::new(Mutex::new(static_transcriber::SupportedAudioSample::F32(
+            audio_recording,
+        )));
         let configs = configs.clone();
 
-        let mut static_transcriber =
-            static_transcriber::StaticTranscriber::new_with_configs(audio_recording, configs);
+        let mut static_transcriber = static_transcriber::StaticTranscriber::new_with_configs(
+            audio_recording,
+            None,
+            configs,
+            static_transcriber::SupportedChannels::MONO,
+        );
 
         // new state for static re-transcription.
         let mut state = ctx
