@@ -106,7 +106,18 @@ impl Model {
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Copy, Clone, Debug)]
+#[cfg_attr(
+    feature = "strum",
+    derive(
+        strum::EnumCount,
+        strum::EnumIter,
+        strum::EnumString,
+        strum::Display,
+        strum::FromRepr,
+        strum::VariantArray,
+    )
+)]
+#[derive(Copy, Clone, Debug, PartialOrd, PartialEq, Ord, Eq)]
 pub enum ModelType {
     TinyEn,
     Tiny,
