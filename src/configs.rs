@@ -37,8 +37,16 @@ pub struct Configs {
 
 impl Default for Configs {
     fn default() -> Self {
+        let n_threads = match std::thread::available_parallelism() {
+            Ok(n) => {
+                let min = n.get();
+                std::cmp::min(min, 4) as std::ffi::c_int
+            }
+            Err(_) => 2,
+        };
+
         Self {
-            n_threads: 4,
+            n_threads,
             set_translate: false,
             language: Some(String::from("en")),
             use_gpu: cfg!(feature = "_gpu"),
