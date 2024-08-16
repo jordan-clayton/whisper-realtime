@@ -11,7 +11,7 @@ pub const N_SAMPLES_2S: usize = ((1e-3 * 2000.0) * WHISPER_SAMPLE_RATE) as usize
 pub const INPUT_BUFFER_CAPACITY: usize = 10000;
 
 // This is currently set at 1 hr -> This has not yet been tested for OOM panics.
-pub const REALTIME_AUDIO_TIMEOUT: u128 = std::time::Duration::new(3600 * 60, 0).as_millis();
+pub const REALTIME_AUDIO_TIMEOUT: u128 = std::time::Duration::new(3600, 0).as_millis();
 
 // in ms
 pub const AUDIO_SAMPLE_MS: usize = 10000;
