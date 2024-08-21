@@ -1,5 +1,4 @@
-use crate::constants;
-use crate::model;
+use crate::{constants, model};
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]

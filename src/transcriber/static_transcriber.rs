@@ -1,16 +1,19 @@
-use std::error::Error;
-use std::ops::DerefMut;
-use std::sync::{Arc, Mutex};
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc;
+use std::{
+    error::Error,
+    ops::DerefMut,
+    sync::{Arc, Mutex},
+};
 
 use lazy_static::lazy_static;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
-use crate::configs::Configs;
-use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
-
-use super::transcriber::Transcriber;
+use crate::{
+    configs::Configs,
+    errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
+    transcriber::transcriber::Transcriber,
+};
 
 // Workaround for whisper-rs issue #134 -- moving memory in rust causes a segmentation fault
 // in the progress callback.

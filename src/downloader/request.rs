@@ -1,11 +1,13 @@
 use std::io::Read;
 
-use bytes::Bytes;
-use futures_core::stream::Stream;
-use reqwest::Url;
+pub use bytes::Bytes;
+pub use futures_core::stream::Stream;
+pub use reqwest::{self, Url};
 
-use crate::downloader::downloaders::{StreamDownloader, SyncDownloader};
-use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
+use crate::{
+    downloader::downloaders::{StreamDownloader, SyncDownloader},
+    errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
+};
 
 /// Returns a StreamDownloader struct encapsulating the request bytestream, progress, total
 /// response size, and an optional callback function to receive progress updates.

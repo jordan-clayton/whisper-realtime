@@ -1,12 +1,13 @@
-use std::f64::consts::PI;
-use std::sync::Mutex;
+use std::{f64::consts::PI, sync::Mutex};
 
 use lazy_static::lazy_static;
 use realfft::RealFftPlanner;
 use voice_activity_detector::VoiceActivityDetector;
 
-use crate::constants;
-use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
+use crate::{
+    constants,
+    errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
+};
 
 // This is for the naive strategy to avoid extra memory allocations at runtime.
 lazy_static! {

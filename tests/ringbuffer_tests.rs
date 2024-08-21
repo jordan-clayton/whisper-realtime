@@ -2,15 +2,15 @@
 mod ringbuffer_tests {
     use std::sync::atomic::Ordering;
 
-    use whisper_realtime::audio_ring_buffer::AudioRingBuffer;
-    use whisper_realtime::constants;
+    use whisper_realtime::{audio_ring_buffer::AudioRingBuffer, constants};
 
     #[test]
     fn test_copy_buffer_lengths() {
         // Full length
         let mut ring_buffer: AudioRingBuffer<f32> =
             AudioRingBuffer::new(constants::SAMPLE_DURATION);
-        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE;
+        let sample_len =
+            (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE;
         let sample_len = sample_len as usize;
 
         let mut samples = vec![0.5f32; sample_len];
@@ -21,7 +21,8 @@ mod ringbuffer_tests {
         // Half-length
         let mut ring_buffer: AudioRingBuffer<f32> =
             AudioRingBuffer::new(constants::SAMPLE_DURATION);
-        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
+        let sample_len =
+            (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
         let sample_len = sample_len as usize;
 
         let mut samples = vec![0.5f32; sample_len];
@@ -66,7 +67,8 @@ mod ringbuffer_tests {
         // Half-length
         let mut ring_buffer: AudioRingBuffer<f32> =
             AudioRingBuffer::new(constants::SAMPLE_DURATION);
-        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
+        let sample_len =
+            (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
         let sample_len = sample_len as usize;
 
         let mut samples = vec![0.5f32; sample_len];
@@ -93,7 +95,8 @@ mod ringbuffer_tests {
         // Half-length
         let mut ring_buffer: AudioRingBuffer<f32> =
             AudioRingBuffer::new(constants::SAMPLE_DURATION);
-        let sample_len = (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
+        let sample_len =
+            (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
         let sample_len = sample_len as usize;
 
         let expect_length = (2f64 * constants::WHISPER_SAMPLE_RATE) as usize;

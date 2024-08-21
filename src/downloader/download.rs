@@ -1,5 +1,7 @@
-use std::{fs, path::Path};
-use std::fs::File;
+use std::{
+    fs::{self, File},
+    path::Path,
+};
 
 use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
 

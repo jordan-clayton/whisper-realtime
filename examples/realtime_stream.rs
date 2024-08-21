@@ -1,9 +1,9 @@
 use std::io::{stdout, Write};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc::{channel, sync_channel};
+use std::sync::{Arc, Mutex};
 use std::thread::scope;
 use std::time::Duration;
 
@@ -11,7 +11,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 use sdl2::audio::AudioDevice;
 use whisper_rs::install_whisper_log_trampoline;
 
-use whisper_realtime::{configs, constants, microphone, model};
 use whisper_realtime::audio_ring_buffer::AudioRingBuffer;
 use whisper_realtime::downloader;
 use whisper_realtime::downloader::download::AsyncDownload;
@@ -19,6 +18,7 @@ use whisper_realtime::recorder::Recorder;
 use whisper_realtime::transcriber::realtime_transcriber;
 use whisper_realtime::transcriber::static_transcriber;
 use whisper_realtime::transcriber::transcriber::Transcriber;
+use whisper_realtime::{configs, constants, microphone, model};
 
 fn main() {
     // Download the model.

@@ -1,13 +1,16 @@
-use std::io::{copy, Read, Write};
-use std::path::Path;
+use std::{
+    io::{copy, Read, Write},
+    path::Path,
+};
 
 use bytes::Bytes;
 pub use futures::StreamExt;
 pub use futures_core::stream::Stream;
 
-use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
-
-use super::download::{AsyncDownload, SyncDownload, Writable};
+use crate::{
+    downloader::download::{AsyncDownload, SyncDownload, Writable},
+    errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
+};
 
 /// Streamdownloader is for streaming in downloaded data from a successful request.
 ///

@@ -1,23 +1,27 @@
-#![allow(clippy::uninlined_format_args)]
-
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc;
-use std::thread::sleep;
-use std::time::Duration;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread::sleep,
+    time::Duration,
+};
 
 use voice_activity_detector::VoiceActivityDetector;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
-use crate::audio_ring_buffer::AudioRingBuffer;
-use crate::configs::Configs;
-use crate::constants;
-use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
-use crate::transcriber::vad::VoiceActivityDetection;
-
-use super::transcriber::Transcriber;
-use super::vad;
+use crate::{
+    audio_ring_buffer::AudioRingBuffer,
+    configs::Configs,
+    constants,
+    errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
+    transcriber::{
+        transcriber::Transcriber,
+        vad::{self, VoiceActivityDetection},
+    },
+};
 
 // This implementation is a modified port of the whisper.cpp stream example, see:
 // https://github.com/ggerganov/whisper.cpp/tree/master/examples/stream

@@ -1,10 +1,12 @@
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc::SyncSender;
 
-use sdl2::audio::{AudioDevice, AudioFormatNum, AudioSpecDesired};
-use sdl2::AudioSubsystem;
+use sdl2::{
+    audio::{AudioDevice, AudioFormatNum, AudioSpecDesired},
+    AudioSubsystem,
+};
 
-use super::recorder::Recorder;
+use crate::recorder::Recorder;
 
 pub fn get_desired_audio_spec(
     freq: Option<i32>,

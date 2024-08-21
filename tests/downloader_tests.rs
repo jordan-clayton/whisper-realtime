@@ -4,10 +4,12 @@ mod downloader_tests {
     use reqwest;
     use tokio::runtime::Runtime;
 
-    use whisper_realtime::downloader;
-    use whisper_realtime::downloader::download::{AsyncDownload, SyncDownload};
-    use whisper_realtime::errors::WhisperRealtimeError;
-    use whisper_realtime::model;
+    use whisper_realtime::{
+        downloader,
+        downloader::download::{AsyncDownload, SyncDownload},
+        errors::WhisperRealtimeError,
+        model,
+    };
 
     #[test]
     #[ignore]
