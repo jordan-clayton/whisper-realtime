@@ -233,7 +233,6 @@ fn naive_frame_energy_vad(
         return Err(e);
     }
 
-    // So far, things work up to the frames.
     let (frames, frames_len) = result.unwrap();
 
     // Compute STE -> Voiced frames
@@ -243,7 +242,6 @@ fn naive_frame_energy_vad(
     }
     let energy = normalized_energy.unwrap();
 
-    // log_energy not calculated properly.
     let log_energy: Vec<f64> = energy.iter().map(|e| 10.0 * (*e / e0).log10()).collect();
 
     let filtered_energy = medfilt(&log_energy, constants::KERNEL_SIZE);
@@ -251,7 +249,6 @@ fn naive_frame_energy_vad(
 
     let mut vad: Vec<u8> = vec![0; repeated_energy.len()];
 
-    // f_frames should be equal in size to vad.
     let f_frames: Vec<f64> = frames.iter().flatten().map(|n| *n).collect();
 
     assert_eq!(

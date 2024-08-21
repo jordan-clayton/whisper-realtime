@@ -2,8 +2,8 @@ use std::io::{copy, Read, Write};
 use std::path::Path;
 
 use bytes::Bytes;
-use futures::StreamExt;
-use futures_core::stream::Stream;
+pub use futures::StreamExt;
+pub use futures_core::stream::Stream;
 
 use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
 
