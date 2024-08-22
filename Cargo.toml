@@ -16,6 +16,8 @@ log = "0.4.21"
 ctrlc = "3.4.4"
 # voice_activity_detector builds without HW acceleration atm; looking into this.
 voice_activity_detector = "0.1.0"
+# voice_activity_detector breaks with 2.0.0-rc.5 due to ndarray update. Remove once VAD dependency has been updated.
+ort = "=2.0.0-rc.4"
 sdl2 = "0.37.0"
 indicatif = "0.17.8"
 reqwest = { version = "0.12.5", features = ["blocking", "stream"] }
