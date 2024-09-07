@@ -1,7 +1,11 @@
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+
 pub trait Transcriber {
     fn process_audio(
         &mut self,
         whisper_state: &mut whisper_rs::WhisperState,
+        run_transcription: Arc<AtomicBool>,
         progress_callback: Option<impl FnMut(i32) + Send + Sync + 'static>,
     ) -> String;
     fn set_full_params<'a>(

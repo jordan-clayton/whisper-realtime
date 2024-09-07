@@ -6,7 +6,7 @@ mod downloader_tests {
 
     use whisper_realtime::{
         downloader,
-        downloader::download::{AsyncDownload, SyncDownload},
+        downloader::traits::{AsyncDownload, SyncDownload},
         errors::WhisperRealtimeError,
         model,
     };

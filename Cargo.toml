@@ -8,10 +8,10 @@ edition = "2021"
 
 [dependencies]
 serde = { version = "1.0.204", features = ["derive"], optional = true }
-#whisper-rs = { version = "0.11.1", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
 
-#  Version 12.1 - switch to cargo once crate is refreshed.
-whisper-rs = { git = "https://github.com/tazz4843/whisper-rs.git", rev = "744804a", features = ["whisper-cpp-log", "whisper-cpp-tracing"] }
+# Version 12.1 - switch to cargo once crate is refreshed.
+# Note: raw-api exposure might break whisper_rs at a later date.
+whisper-rs = { git = "https://github.com/tazz4843/whisper-rs.git", rev = "744804a", features = ["whisper-cpp-log", "whisper-cpp-tracing", "raw-api"] }
 log = "0.4.21"
 ctrlc = "3.4.4"
 # voice_activity_detector builds without HW acceleration atm; looking into this.

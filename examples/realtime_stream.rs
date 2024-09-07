@@ -1,24 +1,28 @@
-use std::io::{stdout, Write};
-use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    io::{stdout, Write},
+    process::Command,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering}, Mutex,
+    },
+    thread::scope,
+    time::Duration,
+};
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc::{channel, sync_channel};
-use std::sync::{Arc, Mutex};
-use std::thread::scope;
-use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use sdl2::audio::AudioDevice;
 use whisper_rs::install_whisper_log_trampoline;
 
-use whisper_realtime::audio_ring_buffer::AudioRingBuffer;
-use whisper_realtime::downloader;
-use whisper_realtime::downloader::download::AsyncDownload;
-use whisper_realtime::recorder::Recorder;
-use whisper_realtime::transcriber::realtime_transcriber;
-use whisper_realtime::transcriber::static_transcriber;
-use whisper_realtime::transcriber::transcriber::Transcriber;
-use whisper_realtime::{configs, constants, microphone, model};
+use whisper_realtime::{
+    audio_ring_buffer::AudioRingBuffer,
+    configs, constants,
+    downloader::{self, traits::AsyncDownload},
+    microphone, model,
+    recorder::Recorder,
+    transcriber::{realtime_transcriber, static_transcriber, traits::Transcriber},
+};
 
 fn main() {
     // Download the model.
@@ -104,8 +108,6 @@ fn main() {
     let o_sender_p = o_sender.clone();
 
     // State flags.
-    let is_ready = Arc::new(AtomicBool::new(true));
-    let c_is_ready = is_ready.clone();
     let is_running = Arc::new(AtomicBool::new(true));
     let c_is_running = is_running.clone();
     let c_is_running_audio_receiver = is_running.clone();
@@ -211,14 +213,9 @@ fn main() {
             install_whisper_log_trampoline();
 
             let mut transcriber = realtime_transcriber::RealtimeTranscriber::new_with_configs(
-                audio_p,
-                o_sender_p,
-                c_is_running,
-                c_is_ready,
-                c_configs,
-                None,
+                audio_p, o_sender_p, c_configs, None,
             );
-            let output = transcriber.process_audio(&mut state, None::<fn(i32)>);
+            let output = transcriber.process_audio(&mut state, c_is_running, None::<fn(i32)>);
             output
         });
 
@@ -321,9 +318,11 @@ fn main() {
         pb.enable_steady_tick(Duration::from_millis(10));
 
         let pb_c = pb.clone();
+        let run_transcription = Arc::new(AtomicBool::new(true));
 
         let output = static_transcriber.process_audio(
             &mut state,
+            run_transcription,
             Some(move |p| {
                 pb_c.set_position(p as u64);
             }),

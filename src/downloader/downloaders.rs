@@ -8,7 +8,7 @@ pub use futures::StreamExt;
 pub use futures_core::stream::Stream;
 
 use crate::{
-    downloader::download::{AsyncDownload, SyncDownload, Writable},
+    downloader::traits::{AsyncDownload, SyncDownload, Writable},
     errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
 };
 

@@ -1,13 +1,11 @@
-#[cfg(not(feature = "crossbeam"))]
-use std::sync::mpsc;
 use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::{Arc, atomic::Ordering},
     thread::sleep,
     time::Duration,
 };
+use std::sync::atomic::AtomicBool;
+#[cfg(not(feature = "crossbeam"))]
+use std::sync::mpsc;
 
 use voice_activity_detector::VoiceActivityDetector;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
@@ -18,7 +16,7 @@ use crate::{
     constants,
     errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
     transcriber::{
-        transcriber::Transcriber,
+        traits::Transcriber,
         vad::{self, VoiceActivityDetection},
     },
 };
@@ -36,8 +34,6 @@ pub struct RealtimeTranscriber {
     audio: Arc<AudioRingBuffer<f32>>,
     output_buffer: Vec<String>,
     data_sender: mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>,
-    ready: Arc<AtomicBool>,
-    running: Arc<AtomicBool>,
     vad: Option<VoiceActivityDetector>,
 }
 
@@ -47,8 +43,6 @@ pub struct RealtimeTranscriber {
     audio: Arc<AudioRingBuffer<f32>>,
     output_buffer: Vec<String>,
     data_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
-    ready: Arc<AtomicBool>,
-    running: Arc<AtomicBool>,
     vad: Option<VoiceActivityDetector>,
 }
 
@@ -57,8 +51,6 @@ impl RealtimeTranscriber {
     pub fn new(
         audio: Arc<AudioRingBuffer<f32>>,
         data_sender: mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>,
-        running: Arc<AtomicBool>,
-        ready: Arc<AtomicBool>,
         vad_strategy: Option<vad::VadStrategy>,
     ) -> Self {
         let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());
@@ -70,8 +62,6 @@ impl RealtimeTranscriber {
             audio,
             output_buffer,
             data_sender,
-            ready,
-            running,
             vad,
         }
     }
@@ -80,8 +70,6 @@ impl RealtimeTranscriber {
     pub fn new(
         audio: Arc<AudioRingBuffer<f32>>,
         data_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
-        running: Arc<AtomicBool>,
-        ready: Arc<AtomicBool>,
         vad_strategy: Option<vad::VadStrategy>,
     ) -> Self {
         let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());
@@ -93,8 +81,6 @@ impl RealtimeTranscriber {
             audio,
             output_buffer,
             data_sender,
-            ready,
-            running,
             vad,
         }
     }
@@ -103,8 +89,6 @@ impl RealtimeTranscriber {
     pub fn new_with_configs(
         audio: Arc<AudioRingBuffer<f32>>,
         data_sender: mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>,
-        running: Arc<AtomicBool>,
-        ready: Arc<AtomicBool>,
         configs: Arc<Configs>,
         vad_strategy: Option<vad::VadStrategy>,
     ) -> Self {
@@ -116,8 +100,6 @@ impl RealtimeTranscriber {
             audio,
             output_buffer,
             data_sender,
-            ready,
-            running,
             vad,
         }
     }
@@ -126,8 +108,6 @@ impl RealtimeTranscriber {
     pub fn new_with_configs(
         audio: Arc<AudioRingBuffer<f32>>,
         data_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
-        running: Arc<AtomicBool>,
-        ready: Arc<AtomicBool>,
         configs: Arc<Configs>,
         vad_strategy: Option<vad::VadStrategy>,
     ) -> Self {
@@ -139,8 +119,6 @@ impl RealtimeTranscriber {
             audio,
             output_buffer,
             data_sender,
-            ready,
-            running,
             vad,
         }
     }
@@ -173,13 +151,9 @@ impl Transcriber for RealtimeTranscriber {
     fn process_audio(
         &mut self,
         whisper_state: &mut WhisperState,
+        run_transcription: Arc<AtomicBool>,
         _: Option<impl FnMut(i32) + Send + Sync + 'static>,
     ) -> String {
-        let ready = self.ready.load(Ordering::Relaxed);
-        if !ready {
-            return String::from("");
-        }
-
         let mut t_last = std::time::Instant::now();
 
         let mut audio_samples: Vec<f32> = vec![0f32; constants::N_SAMPLES_30S];
@@ -198,8 +172,7 @@ impl Transcriber for RealtimeTranscriber {
             .expect("Failed to send transcription");
 
         loop {
-            let running = self.running.clone().load(Ordering::Relaxed);
-            if !running {
+            if !run_transcription.load(Ordering::Acquire) {
                 self.data_sender
                     .send(Ok((String::from("\n[END TRANSCRIPTION]\n"), true)))
                     .expect("Failed to send transcription");
@@ -223,10 +196,6 @@ impl Transcriber for RealtimeTranscriber {
 
             self.audio
                 .get_audio(self.configs.vad_sample_ms, &mut audio_samples_vad);
-
-            // VAD is mono only. If streaming in stereo, uncomment.
-            // let mut new_samples = whisper_rs::convert_stereo_to_mono_audio(&audio_samples_vad)
-            //     .expect("failed to convert new samples to mono");
 
             let voice_detected = match &mut self.vad {
                 None => Self::is_voice_detected_naive(
@@ -339,7 +308,7 @@ impl Transcriber for RealtimeTranscriber {
                     self.data_sender
                         .send(Ok((String::from("\n[TRANSCRIPTION TIMEOUT\n"), true)))
                         .expect("Failed to send transcription data");
-                    self.running.store(false, Ordering::SeqCst);
+                    run_transcription.store(false, Ordering::Release);
                 }
             }
         }

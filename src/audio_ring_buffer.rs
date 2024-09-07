@@ -52,7 +52,7 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
             stream = stream[new_start..].to_vec();
         }
 
-        let mut buffer = self.buffer.lock().expect("failed to get buffer");
+        let mut buffer = self.buffer.lock().expect("Mutex poisoned");
         let head_pos = self.head.load(Ordering::Acquire);
         if head_pos + n_samples > buffer_len {
             let offset = buffer_len - head_pos;

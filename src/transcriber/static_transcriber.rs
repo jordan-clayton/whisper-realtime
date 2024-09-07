@@ -1,18 +1,22 @@
-#[cfg(not(feature = "crossbeam"))]
-use std::sync::mpsc;
 use std::{
     error::Error,
+    ffi::c_void,
     ops::DerefMut,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering}, Mutex,
+    },
 };
+#[cfg(not(feature = "crossbeam"))]
+use std::sync::mpsc;
 
 use lazy_static::lazy_static;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
+use whisper_rs::{FullParams, SamplingStrategy, whisper_rs_sys, WhisperState};
 
 use crate::{
     configs::Configs,
     errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
-    transcriber::transcriber::Transcriber,
+    transcriber::traits::Transcriber,
 };
 
 // Workaround for whisper-rs issue #134 -- moving memory in rust causes a segmentation fault
@@ -114,7 +118,7 @@ impl StaticTranscriber {
         }
     }
     fn send_error_string(e: &impl Error) -> String {
-        let mut error_string = String::from("Error");
+        let mut error_string = String::from("Error:");
         error_string.push_str(&e.to_string());
         return error_string;
     }
@@ -124,6 +128,7 @@ impl Transcriber for StaticTranscriber {
     fn process_audio(
         &mut self,
         whisper_state: &mut WhisperState,
+        run_transcription: Arc<AtomicBool>,
         progress_callback: Option<impl FnMut(i32) + Send + Sync + 'static>,
     ) -> String {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
@@ -149,7 +154,16 @@ impl Transcriber for StaticTranscriber {
             })
         }
 
-        let mut guard = self.audio.lock().expect("Failed to grab mutex");
+        // Set the trigger for aborting whisper transcription
+
+        let start_encoder_callback_user_data = run_transcription.as_ptr() as *mut c_void;
+
+        unsafe {
+            params.set_start_encoder_callback(Some(check_running_state));
+            params.set_start_encoder_callback_user_data(start_encoder_callback_user_data);
+        }
+
+        let mut guard = self.audio.lock().expect("Poisoned mutex");
 
         let audio_samples = guard.deref_mut();
 
@@ -185,9 +199,7 @@ impl Transcriber for StaticTranscriber {
             return Self::send_error_string(&e);
         };
 
-        let num_segments = whisper_state
-            .full_n_segments()
-            .expect("failed to get segments");
+        let num_segments = whisper_state.full_n_segments().unwrap_or(0);
 
         if num_segments == 0 {
             let error = WhisperRealtimeError::new(
@@ -219,5 +231,16 @@ impl Transcriber for StaticTranscriber {
         let text_string = String::from(text);
 
         text_string.clone()
+    }
+}
+
+extern "C" fn check_running_state(
+    _: *mut whisper_rs_sys::whisper_context,
+    _: *mut whisper_rs_sys::whisper_state,
+    user_data: *mut c_void,
+) -> bool {
+    unsafe {
+        let run_transcription = AtomicBool::from_ptr(user_data as *mut bool);
+        run_transcription.load(Ordering::Acquire)
     }
 }
