@@ -79,7 +79,7 @@ impl Model {
             ModelType::Medium => "medium.bin",
             ModelType::LargeV1 => "large-v1.bin",
             ModelType::LargeV2 => "large-v2.bin",
-            ModelType::LargeV3 => "large.bin",
+            ModelType::LargeV3 => "large-v3.bin",
         }
     }
 
