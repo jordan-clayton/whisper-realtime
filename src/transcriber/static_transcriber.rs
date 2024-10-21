@@ -212,17 +212,19 @@ impl Transcriber for StaticTranscriber {
 
         let mut text: Vec<String> = vec![];
         for i in 0..num_segments {
-            let segment = whisper_state
-                .full_get_segment_text(i)
-                .expect("failed to get segment");
+            if let Ok(segment) = whisper_state.full_get_segment_text(i) {
+                if let Some(ref data_sender) = self.data_sender {
+                    data_sender
+                        .send(Ok((segment.clone(), true)))
+                        .expect("Data channel closed")
+                }
 
-            if let Some(ref data_sender) = self.data_sender {
-                data_sender
-                    .send(Ok((segment.clone(), true)))
-                    .expect("Data channel closed")
+                text.push(segment);
             }
-
-            text.push(segment);
+            // let segment = whisper_state
+            //     .full_get_segment_text(i)
+            //     .expect("failed to get segment");
+            //
         }
 
         // Static segments are generally "longer" and thus are separated by newline.
