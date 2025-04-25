@@ -1,3 +1,4 @@
+// TODO! Refactor this: send an ARC'd slice; there's no need to incur the Vec penalty
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc::SyncSender;
 

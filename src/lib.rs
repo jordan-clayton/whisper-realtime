@@ -9,4 +9,5 @@ pub mod errors;
 pub mod microphone;
 pub mod model;
 pub mod recorder;
+mod resampler;
 pub mod transcriber;

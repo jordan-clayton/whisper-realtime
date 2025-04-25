@@ -12,6 +12,8 @@ use crate::{
     errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
 };
 
+// TODO: make this optional, as part of extras. These are out of scope.
+
 /// Streamdownloader is for streaming in downloaded data from a successful request.
 ///
 /// Use the progress callback to receive the in-progress total bytes downloaded + written

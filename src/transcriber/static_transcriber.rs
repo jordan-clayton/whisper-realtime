@@ -28,6 +28,7 @@ lazy_static! {
         Mutex::new(None);
 }
 
+// TODO: these probably shouldn't be vectors
 pub enum SupportedAudioSample {
     I16(Vec<i16>),
     F32(Vec<f32>),
@@ -158,6 +159,7 @@ impl Transcriber for StaticTranscriber {
 
         let start_encoder_callback_user_data = run_transcription.as_ptr() as *mut c_void;
 
+        // TODO: Check RS for safe encoder callback
         unsafe {
             params.set_start_encoder_callback(Some(check_running_state));
             params.set_start_encoder_callback_user_data(start_encoder_callback_user_data);

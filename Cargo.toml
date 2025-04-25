@@ -1,13 +1,17 @@
 [package]
 name = "whisper_realtime"
+# TODO: update version to 0.1.1
 version = "0.1.0"
 edition = "2021"
 # TODO LICENSE, DESCRIPTION, DOCS, REPO
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
+# TODO: update deps
 [dependencies]
 serde = { version = "1.0.204", features = ["derive"], optional = true }
+# TODO, move to feature
+# TODO, add checks for resampling
+rubato = { version = "0.16.2" }
 
 # Version 12.1 - switch to cargo once crate is refreshed.
 # Note: raw-api exposure might break whisper_rs at a later date.
@@ -15,11 +19,15 @@ whisper-rs = { git = "https://github.com/tazz4843/whisper-rs.git", rev = "744804
 log = "0.4.21"
 ctrlc = "3.4.4"
 # voice_activity_detector builds without HW acceleration atm; looking into this.
+# TODO: update to 0.2
+# TODO: check/test mobile support/wasm
 voice_activity_detector = "0.1.0"
+# TODO: update, no more ndarray bug, voice_activity_detector pins ort
 # voice_activity_detector breaks with 2.0.0-rc.5 due to ndarray update. Remove once VAD dependency has been updated.
 ort = "=2.0.0-rc.4"
 sdl2 = "0.37.0"
 indicatif = "0.17.8"
+# TODO: reqwest/Tokio should be part of extras
 reqwest = { version = "0.12.5", features = ["blocking", "stream"] }
 futures = "0.3.30"
 futures-util = "0.3.30"
@@ -32,6 +40,8 @@ realfft = "3.3.0"
 hound = "3.5.1"
 crossbeam = { version = "0.8.4", optional = true }
 strum = { version = "0.26.3", features = ["derive"], optional = true }
+# TODO: make feature
+symphonia = "0.5.4"
 
 # See: https://github.com/tazz4843/whisper-rs/blob/master/BUILDING.md for building on Windows/MacOS
 [target.aarch64-apple-darwin]
@@ -47,6 +57,8 @@ _gpu = []
 strum = ["dep:strum"]
 crossbeam = ["dep:crossbeam"]
 serde = ["dep:serde"]
+# TODO: move downloading to a feature.
+extras = []
 cuda = ["whisper-rs/cuda", "_gpu"]
 # openblas is Windows only, cpu acceleration.
 openblas = ["whisper-rs/openblas"]

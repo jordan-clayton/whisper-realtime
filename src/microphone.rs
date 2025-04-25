@@ -1,3 +1,4 @@
+// TODO: These should take ARC<[T]> instead of vec.
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc::SyncSender;
 
