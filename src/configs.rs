@@ -1,5 +1,6 @@
 use crate::{constants, model};
 
+// TODO: think about ModelType implementation and refactor accordingly
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
 pub struct Configs {

@@ -14,6 +14,8 @@ lazy_static! {
     static ref FFT_Planner: Mutex<RealFftPlanner<f64>> = Mutex::new(RealFftPlanner::<f64>::new());
 }
 
+// Silero is considerably faster than my hand-rolled VAD. Only use the hand-rolled VAD if silero is
+// somehow not supported.
 pub enum VadStrategy {
     Naive,
     Silero,

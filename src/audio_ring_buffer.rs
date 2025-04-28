@@ -1,3 +1,4 @@
+// TODO: this is hard to read; separate imports.
 use std::{
     sync::atomic::{AtomicUsize, Ordering},
     sync::Mutex,
@@ -9,6 +10,7 @@ use crate::constants;
 
 pub struct AudioRingBuffer<T: Default + Clone + Copy + AudioFormatNum + 'static> {
     head: AtomicUsize,
+    // TODO: get rid of pub -> implement builder.
     pub audio_len: AtomicUsize,
     pub len_ms: AtomicUsize,
     pub buffer_len: AtomicUsize,
@@ -20,7 +22,10 @@ unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Sync for Audio
 unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Send for AudioRingBuffer<T> {}
 
 impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
+    // TODO: generalize this -> sample rate should be a parameter, abstract out constants::WHISPER_SAMPLE_RATE.
+    // TODO: builder pattern; construct with default params and use methods to set attrs.
     pub fn new(len_ms: usize) -> Self {
+        // Buffer size is in seconds; I am not entirely sure why. TODO: investigate this.
         let buffer_size = (len_ms / 1000) as f64 * constants::WHISPER_SAMPLE_RATE;
         let buffer_size = buffer_size as usize;
         let buffer_len = AtomicUsize::new(buffer_size);
@@ -40,6 +45,7 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
         self.head.load(Ordering::Acquire)
     }
 
+    // TODO: I don't think this needs to be a mut slice.
     pub fn push_audio(&self, input: &mut [T]) {
         let len = input.len();
         let mut n_samples = len.clone();
@@ -90,7 +96,7 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
             self.audio_len.store(new_audio_len, Ordering::Release);
         }
     }
-
+    // TODO: rename ms -> len_ms
     pub fn get_audio(&self, ms: usize, result: &mut Vec<T>) {
         let mut ms = ms.clone();
         if ms == 0 {

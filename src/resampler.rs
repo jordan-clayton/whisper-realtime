@@ -17,7 +17,7 @@ use crate::constants;
 use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
 use crate::transcriber::static_transcriber::SupportedAudioSample;
 
-// TODO: possibly make into a struct with the audio information?
+// This is to restrict the audio to supported formats.
 pub enum AudioSample<'a> {
     I16(&'a [i16]),
     F32(&'a [f32]),
@@ -84,7 +84,7 @@ pub fn resample(
 // TODO: think about this, don't love it -> inline it if using.
 // Not entirely sold. Have to take ownership
 #[inline]
-fn resample_mono(
+pub fn resample_mono(
     samples: Vec<f32>,
     mut resampler: SincFixedIn<f32>,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
@@ -102,7 +102,7 @@ fn resample_mono(
 
 // TODO: inline or remove; not in love with this.
 #[inline]
-fn resample_stereo(
+pub fn resample_stereo(
     samples: Vec<f32>,
     mut resampler: SincFixedIn<f32>,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
@@ -131,13 +131,25 @@ fn resample_stereo(
     }
 }
 
+// Since this is for whisper, it will also convert the samples to mono
 #[inline]
 pub fn normalize_audio(
     samples: &AudioSample,
     in_sample_rate: f64,
     num_channels: usize,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
-    resample(samples, 16000., in_sample_rate, num_channels)
+    let SupportedAudioSample::F32(stereo) = resample(samples, 16000., in_sample_rate, num_channels);
+    match whisper_rs::convert_stereo_to_mono_audio(&stereo) {
+        Ok(audio) => Ok(SupportedAudioSample::F32(audio)),
+        Err(e) => {
+            let mut err_str = "Failed to convert resampled audio to mono. Error: ".to_owned();
+            err_str.push_str(&e.to_string());
+            Err(WhisperRealtimeError::new(
+                WhisperRealtimeErrorType::Unknown,
+                err_str,
+            ))
+        }
+    }
 }
 
 // TODO: move where appropriate, probably better to make a separate module

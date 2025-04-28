@@ -2,6 +2,7 @@ use std::fs;
 
 // TODO: CoreML support.
 // TODO: user-defined model to allow compatible ggml models to be used.
+// TODO: rethink this; don't love it.
 pub struct Model {
     pub model_type: ModelType,
     data_directory: std::path::PathBuf,

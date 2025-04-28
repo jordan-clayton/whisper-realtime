@@ -28,7 +28,7 @@ lazy_static! {
         Mutex::new(None);
 }
 
-// TODO: these probably shouldn't be vectors
+// TODO: these probably shouldn't be vectors; use [T]
 pub enum SupportedAudioSample {
     I16(Vec<i16>),
     F32(Vec<f32>),
@@ -48,6 +48,7 @@ pub struct StaticTranscriber {
     channels: SupportedChannels,
 }
 
+// TODO: get rid of the mutex and use an immutable slice.
 #[cfg(feature = "crossbeam")]
 pub struct StaticTranscriber {
     configs: Arc<Configs>,

@@ -3,6 +3,7 @@ use std::{
     thread::sleep,
     time::Duration,
 };
+// TODO: refactor the imports; this nested business is gross.
 use std::sync::atomic::AtomicBool;
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc;

@@ -6,6 +6,7 @@ pub struct WhisperRealtimeError {
     pub reason: String,
 }
 
+// TODO: Add more types re: resampling
 #[derive(Debug, Clone, Copy)]
 pub enum WhisperRealtimeErrorType {
     TranscriptionError,
