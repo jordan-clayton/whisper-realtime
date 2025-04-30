@@ -20,7 +20,7 @@ use whisper_realtime::constants;
 pub fn recorder_benchmark(c: &mut Criterion) {
     // Single thread: Sending data only
     let mut group = c.benchmark_group("Single thread: sending data only");
-    group.bench_function("recorder_st: 50 audio samples", |b| {
+    group.bench_function("vec_st: 50 audio samples", |b| {
         b.iter(|| run_with_recorder_st(black_box(50)))
     });
 
@@ -32,7 +32,7 @@ pub fn recorder_benchmark(c: &mut Criterion) {
 
     // Multi thread: Sending and receiving data, no work is done
     let mut group = c.benchmark_group("Multi thread: sending and receiving data, no work is done");
-    group.bench_function("recorder_par: 50 audio samples", |b| {
+    group.bench_function("vec_par: 50 audio samples", |b| {
         b.iter(|| run_with_recorder_par(black_box(50), black_box(0)))
     });
 
@@ -46,7 +46,7 @@ pub fn recorder_benchmark(c: &mut Criterion) {
     let mut group = c
         .benchmark_group("Multi thread: sending and receiving data, work is simulated using sleep");
 
-    group.bench_function("recorder_par_with_workers: 5 audio samples", |b| {
+    group.bench_function("vec_par_with_workers: 5 audio samples", |b| {
         b.iter(|| run_with_recorder_par(black_box(5), black_box(10)))
     });
 
@@ -65,7 +65,7 @@ fn run_with_recorder_st(n_samples: usize) {
     let (a_sender, a_receiver) = channel::bounded(n_samples + 1);
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
-    let mut recorder = whisper_realtime::recorder::Recorder { sender: a_sender };
+    let mut recorder = whisper_realtime::recorder::AudioRecorderVecSender { sender: a_sender };
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -108,7 +108,7 @@ fn run_with_slice_st(n_samples: usize) {
     let (a_sender, a_receiver) = channel::bounded(n_samples + 1);
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
-    let mut recorder = whisper_realtime::recorder::SliceRecorder { sender: a_sender };
+    let mut recorder = whisper_realtime::recorder::AudioRecorderSliceSender { sender: a_sender };
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -152,7 +152,7 @@ fn run_with_recorder_par(n_samples: usize, work_millis: u64) {
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
 
-    let mut recorder = whisper_realtime::recorder::Recorder { sender: a_sender };
+    let mut recorder = whisper_realtime::recorder::AudioRecorderVecSender { sender: a_sender };
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -249,7 +249,7 @@ fn run_with_slice_par(n_samples: usize, work_millis: u64) {
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
 
-    let mut recorder = whisper_realtime::recorder::SliceRecorder { sender: a_sender };
+    let mut recorder = whisper_realtime::recorder::AudioRecorderSliceSender { sender: a_sender };
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]

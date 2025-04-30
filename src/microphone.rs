@@ -8,7 +8,7 @@ use sdl2::{
     AudioSubsystem,
 };
 
-use crate::recorder::{Recorder, SliceRecorder};
+use crate::recorder::{AudioRecorderSliceSender, AudioRecorderVecSender};
 
 #[inline]
 pub fn get_desired_audio_spec(
@@ -29,13 +29,13 @@ pub fn build_audio_stream<T: Default + Clone + Copy + Send + AudioFormatNum + 's
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: SyncSender<Vec<T>>,
-) -> AudioDevice<Recorder<T>> {
+) -> AudioDevice<AudioRecorderVecSender<T>> {
     audio_subsystem
         .open_capture(
             // Device - should be default, SDL should change if the user changes devices in their sysprefs.
             None,
             desired_spec,
-            |_spec| Recorder {
+            |_spec| AudioRecorderVecSender {
                 sender: audio_sender,
             },
         )
@@ -50,13 +50,13 @@ pub fn build_audio_stream_using_slices<
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: SyncSender<Arc<[T]>>,
-) -> AudioDevice<SliceRecorder<T>> {
+) -> AudioDevice<AudioRecorderSliceSender<T>> {
     audio_subsystem
         .open_capture(
             // Device - should be default, SDL should change if the user changes devices in their sysprefs.
             None,
             desired_spec,
-            |_spec| SliceRecorder {
+            |_spec| AudioRecorderSliceSender {
                 sender: audio_sender,
             },
         )
@@ -69,13 +69,13 @@ pub fn build_audio_stream<T: Default + Clone + Copy + Send + AudioFormatNum + 's
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: crossbeam::channel::Sender<Vec<T>>,
-) -> AudioDevice<Recorder<T>> {
+) -> AudioDevice<AudioRecorderVecSender<T>> {
     audio_subsystem
         .open_capture(
             // Device - should be default, SDL should change if the user changes devices in their sysprefs.
             None,
             desired_spec,
-            |_spec| Recorder {
+            |_spec| AudioRecorderVecSender {
                 sender: audio_sender,
             },
         )
@@ -90,13 +90,13 @@ pub fn build_audio_stream_using_slice<
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: crossbeam::channel::Sender<Arc<[T]>>,
-) -> AudioDevice<SliceRecorder<T>> {
+) -> AudioDevice<AudioRecorderSliceSender<T>> {
     audio_subsystem
         .open_capture(
             // Device - should be default, SDL should change if the user changes devices in their sysprefs.
             None,
             desired_spec,
-            |_spec| SliceRecorder {
+            |_spec| AudioRecorderSliceSender {
                 sender: audio_sender,
             },
         )

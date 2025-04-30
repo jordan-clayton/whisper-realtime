@@ -19,7 +19,7 @@ use whisper_realtime::{
     configs, constants,
     downloader::{self, traits::AsyncDownload},
     microphone, model,
-    recorder::Recorder,
+    recorder::AudioRecorderVecSender,
     transcriber::{realtime_transcriber, static_transcriber, traits::Transcriber},
 };
 
@@ -130,7 +130,7 @@ fn main() {
     );
 
     // Setup
-    let mic_stream: AudioDevice<Recorder<f32>> =
+    let mic_stream: AudioDevice<AudioRecorderVecSender<f32>> =
         microphone::build_audio_stream(&audio_subsystem, &desired_audio_spec, a_sender);
 
     // Model params
