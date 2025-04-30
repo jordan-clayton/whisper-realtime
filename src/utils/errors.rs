@@ -4,18 +4,10 @@ use thiserror::Error;
 pub enum WhisperRealtimeError {
     #[error("Transcription Error {0}")]
     TranscriptionError(String),
-    #[error("Reqwest Error {0}")]
-    ReqwestError(#[from] reqwest::Error),
-    #[error("Download Error {0}")]
-    DownloadError(String),
     #[error("Write Error {0}")]
     WriteError(String),
     #[error("Parameter Error {0}")]
     ParameterError(String),
-    #[error("ResampleError: {0}")]
-    ResampleError(#[from] rubato::ResampleError),
-    #[error("ResamplerConstructionError: {0}")]
-    ResamplerConstructionError(#[from] rubato::ResamplerConstructionError),
     #[error("I/O error: {0}")]
     IOError(#[from] std::io::Error),
     #[error("Decode error: {0}")]
@@ -28,4 +20,16 @@ pub enum WhisperRealtimeError {
     UrlParseError(#[from] url::ParseError),
     #[error("Whisper Error {0}")]
     WhisperError(#[from] whisper_rs::WhisperError),
+    #[cfg(feature = "resampler")]
+    #[error("ResampleError: {0}")]
+    ResampleError(#[from] rubato::ResampleError),
+    #[cfg(feature = "resampler")]
+    #[error("ResamplerConstructionError: {0}")]
+    ResamplerConstructionError(#[from] rubato::ResamplerConstructionError),
+    #[cfg(feature = "downloader")]
+    #[error("Reqwest Error {0}")]
+    ReqwestError(#[from] reqwest::Error),
+    #[error("Download Error {0}")]
+    #[cfg(feature = "downloader")]
+    DownloadError(String),
 }

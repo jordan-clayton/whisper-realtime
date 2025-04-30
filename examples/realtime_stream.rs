@@ -13,7 +13,9 @@ use sdl2::audio::AudioDevice;
 use whisper_realtime::audio::audio_ring_buffer::AudioRingBuffer;
 use whisper_realtime::audio::microphone;
 use whisper_realtime::audio::recorder::AudioRecorderVecSender;
+#[cfg(feature = "downloader")]
 use whisper_realtime::downloader::request;
+#[cfg(feature = "downloader")]
 use whisper_realtime::downloader::traits::AsyncDownload;
 use whisper_realtime::transcriber::{realtime_transcriber, static_transcriber};
 use whisper_realtime::transcriber::traits::Transcriber;

@@ -1,1 +1,1 @@
-// See crate/transcriber/vad.rs for implementation tests
+// See crate/transcriber/vad.rs for implementation tests, due to private function implementations

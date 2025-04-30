@@ -8,8 +8,6 @@ pub use futures_core::stream::Stream;
 use crate::downloader::traits::{AsyncDownload, SyncDownload, Writable};
 use crate::utils::errors::WhisperRealtimeError;
 
-// TODO: make this optional, as part of extras. These are out of scope.
-
 /// Streamdownloader is for streaming in downloaded data from a successful request.
 ///
 /// Use the progress callback to receive the in-progress total bytes downloaded + written

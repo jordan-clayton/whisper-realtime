@@ -1,4 +1,6 @@
+///NOTE: These have to be run with the downloader feature enabled
 #[cfg(test)]
+#[cfg(feature = "downloader")]
 mod downloader_tests {
     use indicatif::{ProgressBar, ProgressStyle};
     use reqwest;

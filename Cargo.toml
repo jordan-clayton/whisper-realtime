@@ -8,9 +8,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 serde = { version = "1.0.204", features = ["derive"], optional = true }
-# TODO, move to feature
-# TODO, add checks for resampling
-rubato = { version = "0.16.2" }
+rubato = { version = "0.16.2", optional = true }
 
 whisper-rs = { version = "0.14.2", features = ["log_backend", "tracing_backend"] }
 # Whisper-rs raw-api, for callback-signature function argument types: this can and will likely break, change accordingly
@@ -19,24 +17,20 @@ log = "0.4.21"
 ctrlc = "3.4.4"
 # voice_activity_detector builds without HW acceleration atm; might look into this, but speed is not an issue.
 voice_activity_detector = "0.2.0"
-# voice_activity_detector breaks with 2.0.0-rc.5 due to ndarray update. Remove once VAD dependency has been updated.
-ort = "2.0.0-rc.9"
 sdl2 = "0.37.0"
-indicatif = "0.17.8"
-# TODO: reqwest/Tokio should be part of extras
-reqwest = { version = "0.12.5", features = ["blocking", "stream"] }
+indicatif = { version = "0.17.8", optional = true }
+reqwest = { version = "0.12.5", features = ["blocking", "stream"], optional = true }
 futures = "0.3.30"
 futures-util = "0.3.30"
 futures-core = "0.3.30"
 bytes = "1.6.1"
-tokio = { version = "1.39.2", features = ["rt-multi-thread"] }
+tokio = { version = "1.39.2", features = ["rt-multi-thread"], optional = true }
 num-traits = "0.2.19"
 lazy_static = "1.5.0"
 realfft = "3.3.0"
 hound = "3.5.1"
 crossbeam = { version = "0.8.4", optional = true }
 strum = { version = "0.27.1", features = ["derive"], optional = true }
-# TODO: make feature
 symphonia = "0.5.4"
 thiserror = "2.0.12"
 url = "2.5.4"
@@ -58,11 +52,9 @@ _gpu = []
 strum = ["dep:strum"]
 crossbeam = ["dep:crossbeam"]
 serde = ["dep:serde"]
-# TODO: move downloading to a feature.
-downloader = []
-# TODO: hammer out resampling api
-resampler = []
-extras = []
+downloader = ["dep:reqwest", "dep:tokio", "dep:indicatif"]
+resampler = ["dep:rubato"]
+extras = ["downloader", "resampler"]
 cuda = ["whisper-rs/cuda", "_gpu"]
 # openblas is Windows only, cpu acceleration.
 openblas = ["whisper-rs/openblas"]
@@ -75,6 +67,11 @@ metal = ["whisper-rs/metal", "_gpu"]
 [[bench]]
 name = "recorder_benchmark"
 harness = false
+
+[[example]]
+name = "realtime_stream"
+path = "examples/realtime_stream.rs"
+required-features = ["downloader"]
 
 
 
