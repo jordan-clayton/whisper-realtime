@@ -1,26 +1,17 @@
-use std::{
-    sync::{Arc, atomic::Ordering},
-    thread::sleep,
-    time::Duration,
-};
-// TODO: refactor the imports; this nested business is gross.
-use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc;
+use std::thread::sleep;
+use std::time::Duration;
 
 use voice_activity_detector::VoiceActivityDetector;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
-use crate::{
-    audio_ring_buffer::AudioRingBuffer,
-    configs::Configs,
-    constants,
-    errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
-    transcriber::{
-        traits::Transcriber,
-        vad::{self, VoiceActivityDetection},
-    },
-};
+use crate::audio_ring_buffer::AudioRingBuffer;
+use crate::configs::Configs;
+use crate::constants;
+use crate::errors::WhisperRealtimeError;
+use crate::transcriber::{traits::Transcriber, vad, vad::VoiceActivityDetection};
 
 // This implementation is a modified port of the whisper.cpp stream example, see:
 // https://github.com/ggerganov/whisper.cpp/tree/master/examples/stream
@@ -198,7 +189,7 @@ impl Transcriber for RealtimeTranscriber {
             self.audio
                 .get_audio(self.configs.vad_sample_ms, &mut audio_samples_vad);
 
-            let voice_detected = match &mut self.vad {
+            let check_voice_detected = match &mut self.vad {
                 None => Self::is_voice_detected_naive(
                     constants::WHISPER_SAMPLE_RATE,
                     &mut audio_samples_vad,
@@ -217,36 +208,35 @@ impl Transcriber for RealtimeTranscriber {
                 )),
             };
 
-            if let Err(e) = &voice_detected {
-                self.data_sender
-                    .send(Err(WhisperRealtimeError::new(
-                        WhisperRealtimeErrorType::TranscriptionError,
-                        format!("Voice detection failure. Error: {}", e),
-                    )))
-                    .expect("Failed to send error");
-            }
+            match check_voice_detected {
+                Ok(detected) => {
+                    if detected {
+                        self.audio
+                            .get_audio(self.configs.audio_sample_ms, &mut audio_samples);
 
-            let voice_detected = voice_detected.unwrap();
+                        pause_detected = false;
+                    } else {
+                        if !pause_detected {
+                            pause_detected = true;
+                            phrase_finished = true;
+                            self.output_buffer.push(String::from("\n"));
+                            self.data_sender
+                                .send(Ok((String::from("\n"), true)))
+                                .expect("Failed to send transcription");
 
-            if voice_detected {
-                self.audio
-                    .get_audio(self.configs.audio_sample_ms, &mut audio_samples);
+                            self.audio.clear();
+                        }
 
-                pause_detected = false;
-            } else {
-                if !pause_detected {
-                    pause_detected = true;
-                    phrase_finished = true;
-                    self.output_buffer.push(String::from("\n"));
-                    self.data_sender
-                        .send(Ok((String::from("\n"), true)))
-                        .expect("Failed to send transcription");
-
-                    self.audio.clear();
+                        sleep(Duration::from_millis(constants::PAUSE_DURATION));
+                        continue;
+                    }
                 }
-
-                sleep(Duration::from_millis(constants::PAUSE_DURATION));
-                continue;
+                Err(e) => {
+                    self.data_sender
+                        .send(Err(e))
+                        .expect("Data channel should be open");
+                    continue;
+                }
             }
 
             t_last = t_now;
@@ -261,11 +251,12 @@ impl Transcriber for RealtimeTranscriber {
 
             if let Err(e) = result {
                 self.data_sender
-                    .send(Err(WhisperRealtimeError::new(
-                        WhisperRealtimeErrorType::TranscriptionError,
-                        format!("Model failure. Error: {}", e),
-                    )))
-                    .expect("Data channel closed");
+                    .send(Err(WhisperRealtimeError::TranscriptionError(format!(
+                        "WhisperError: {}",
+                        e
+                    ))))
+                    .expect("Data channel should be open");
+                continue;
             }
 
             let num_segments = whisper_state

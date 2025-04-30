@@ -6,25 +6,21 @@ edition = "2021"
 # TODO LICENSE, DESCRIPTION, DOCS, REPO
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-# TODO: update deps
 [dependencies]
 serde = { version = "1.0.204", features = ["derive"], optional = true }
 # TODO, move to feature
 # TODO, add checks for resampling
 rubato = { version = "0.16.2" }
 
-# Version 12.1 - switch to cargo once crate is refreshed.
-# Note: raw-api exposure might break whisper_rs at a later date.
-whisper-rs = { git = "https://github.com/tazz4843/whisper-rs.git", rev = "744804a", features = ["whisper-cpp-log", "whisper-cpp-tracing", "raw-api"] }
+whisper-rs = { version = "0.14.2", features = ["log_backend", "tracing_backend"] }
+# Whisper-rs raw-api, for callback-signature function argument types: this can and will likely break, change accordingly
+whisper-rs-sys = "0.12.1"
 log = "0.4.21"
 ctrlc = "3.4.4"
-# voice_activity_detector builds without HW acceleration atm; looking into this.
-# TODO: update to 0.2
-# TODO: check/test mobile support/wasm
-voice_activity_detector = "0.1.0"
-# TODO: update, no more ndarray bug, voice_activity_detector pins ort
+# voice_activity_detector builds without HW acceleration atm; might look into this, but speed is not an issue.
+voice_activity_detector = "0.2.0"
 # voice_activity_detector breaks with 2.0.0-rc.5 due to ndarray update. Remove once VAD dependency has been updated.
-ort = "=2.0.0-rc.4"
+ort = "2.0.0-rc.9"
 sdl2 = "0.37.0"
 indicatif = "0.17.8"
 # TODO: reqwest/Tokio should be part of extras
@@ -39,9 +35,14 @@ lazy_static = "1.5.0"
 realfft = "3.3.0"
 hound = "3.5.1"
 crossbeam = { version = "0.8.4", optional = true }
-strum = { version = "0.26.3", features = ["derive"], optional = true }
+strum = { version = "0.27.1", features = ["derive"], optional = true }
 # TODO: make feature
 symphonia = "0.5.4"
+thiserror = "2.0.12"
+url = "2.5.4"
+
+[dev-dependencies]
+criterion = "0.5.1"
 
 # See: https://github.com/tazz4843/whisper-rs/blob/master/BUILDING.md for building on Windows/MacOS
 [target.aarch64-apple-darwin]
@@ -58,6 +59,9 @@ strum = ["dep:strum"]
 crossbeam = ["dep:crossbeam"]
 serde = ["dep:serde"]
 # TODO: move downloading to a feature.
+downloader = []
+# TODO: hammer out resampling api
+resampler = []
 extras = []
 cuda = ["whisper-rs/cuda", "_gpu"]
 # openblas is Windows only, cpu acceleration.
@@ -65,11 +69,13 @@ openblas = ["whisper-rs/openblas"]
 # Linux only
 # ROCm support for AMD GPUs - Linux only
 hipblas = ["whisper-rs/hipblas", "_gpu"]
-coreml = ["whisper-rs/coreml"]
+coreml = ["whisper-rs/coreml", "_gpu"]
 metal = ["whisper-rs/metal", "_gpu"]
-# If OpenCL is enabled, GPU is always enabled.
-# It is not feasible to use it with large models for realtime
-opencl = ["whisper-rs/opencl"]
+
+# TODO: benchmarking
+[[bench]]
+name = "recorder_benchmark"
+harness = false
 
 
 

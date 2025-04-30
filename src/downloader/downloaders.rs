@@ -1,16 +1,12 @@
-use std::{
-    io::{copy, Read, Write},
-    path::Path,
-};
+use std::io::{copy, Read, Write};
+use std::path::Path;
 
 use bytes::Bytes;
 pub use futures::StreamExt;
 pub use futures_core::stream::Stream;
 
-use crate::{
-    downloader::traits::{AsyncDownload, SyncDownload, Writable},
-    errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
-};
+use crate::downloader::traits::{AsyncDownload, SyncDownload, Writable};
+use crate::errors::WhisperRealtimeError;
 
 // TODO: make this optional, as part of extras. These are out of scope.
 
@@ -37,10 +33,6 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Fn(usize)>
             progress_callback,
         }
     }
-
-    // pub fn get_progress(&self) -> usize {
-    //     self.progress
-    // }
 }
 
 impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Fn(usize)> Writable
@@ -56,45 +48,22 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Fn(usize)> Asy
         file_directory: &Path,
         file_name: &str,
     ) -> Result<(), WhisperRealtimeError> {
-        let path_available = Self::prepare_file_path(file_directory);
-        if let Err(e) = path_available {
-            return Err(e);
-        }
+        Self::prepare_file_path(file_directory)?;
 
         let mut destination = file_directory.to_path_buf();
         destination.push(file_name);
 
-        let dest = Self::open_write_file(&destination);
-        if let Err(e) = dest {
-            return Err(e);
-        }
+        let mut dest = Self::open_write_file(&destination)?;
 
-        let mut dest = dest.unwrap();
         let stream = &mut self.file_stream;
 
         while let Some(next) = stream.next().await {
-            let chunk = next.or(Err(WhisperRealtimeError::new(
-                WhisperRealtimeErrorType::DownloadError,
-                String::from("Error while downloading file"),
-            )));
-
-            if let Err(e) = chunk {
-                return Err(e);
-            }
-
-            let chunk = chunk.unwrap();
-
-            let write_success = dest.write_all(&chunk);
-            if let Err(_) = write_success {
-                return Err(WhisperRealtimeError::new(
-                    WhisperRealtimeErrorType::DownloadError,
-                    String::from("Failed to write to file"),
-                ));
-            }
+            let buf = next?;
+            dest.write_all(&buf)?;
 
             let mut cur_progress = self.progress;
 
-            cur_progress = std::cmp::min(cur_progress + (chunk.len()), self.total_size);
+            cur_progress = std::cmp::min(cur_progress + (buf.len()), self.total_size);
             self.progress = cur_progress;
 
             // Update the UI with the current progress
@@ -102,7 +71,6 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Fn(usize)> Asy
                 callback(self.progress);
             }
         }
-
         Ok(())
     }
 }
@@ -167,21 +135,9 @@ impl<R: Read, CB: Fn(usize)> SyncDownload for SyncDownloader<R, CB> {
         let mut destination = file_directory.to_path_buf();
         destination.push(file_name);
 
-        let dest = Self::open_write_file(&destination);
-        if let Err(e) = dest {
-            return Err(e);
-        }
-
-        let mut dest = dest.unwrap();
+        let mut dest = Self::open_write_file(&destination)?;
         let source = &mut self.file_stream;
-        let downloaded = copy(source, &mut dest);
-
-        if let Err(_) = downloaded {
-            return Err(WhisperRealtimeError::new(
-                WhisperRealtimeErrorType::DownloadError,
-                String::from("Failed to write file"),
-            ));
-        }
+        copy(source, &mut dest)?;
 
         Ok(())
     }
@@ -208,14 +164,7 @@ impl<R: Read, CB: Fn(usize)> SyncDownload for SyncDownloader<R, CB> {
         let source = &mut self.file_stream;
 
         // This will call the callback.
-        let downloaded = std::io::copy(source, &mut dest);
-
-        if let Err(_) = downloaded {
-            return Err(WhisperRealtimeError::new(
-                WhisperRealtimeErrorType::DownloadError,
-                String::from("Failed to write file"),
-            ));
-        }
+        std::io::copy(source, &mut dest)?;
 
         Ok(())
     }

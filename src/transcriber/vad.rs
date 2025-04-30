@@ -4,10 +4,8 @@ use lazy_static::lazy_static;
 use realfft::RealFftPlanner;
 use voice_activity_detector::VoiceActivityDetector;
 
-use crate::{
-    constants,
-    errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
-};
+use crate::constants;
+use crate::errors::WhisperRealtimeError;
 
 // This is for the naive strategy to avoid extra memory allocations at runtime.
 lazy_static! {
@@ -164,13 +162,10 @@ fn framing(
     window_step: f64,
 ) -> Result<(Vec<Vec<f64>>, usize), WhisperRealtimeError> {
     if window_len < window_step {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::ParameterError,
-            format!(
-                "Framing: window_len, {} must be larger than window_hop, {}",
-                window_len, window_step
-            ),
-        ));
+        return Err(WhisperRealtimeError::ParameterError(format!(
+            "Framing: window_len, {} must be larger than window_hop, {}",
+            window_len, window_step
+        )));
     }
 
     let frame_length = (window_len * sample_rate) as usize;
@@ -196,9 +191,8 @@ fn calculate_normalized_short_time_energy(
     frames: &[Vec<f64>],
 ) -> Result<Vec<f64>, WhisperRealtimeError> {
     if frames.len() < 1 {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::ParameterError,
-            String::from("STE: cannot calculate from 0-length array"),
+        return Err(WhisperRealtimeError::ParameterError(
+            "STE: cannot calculate from 0-length array".to_owned(),
         ));
     }
 
@@ -330,7 +324,7 @@ mod vad_tests {
             configs.naive_window_len,
             configs.naive_window_step,
         );
-        assert!(result.is_ok(), "{}", result.err().unwrap().cause());
+        assert!(result.is_ok(), "{}", result.err().unwrap());
 
         let audio: Vec<f64> = result.unwrap().0.iter().flatten().map(|n| *n).collect();
         // Write the output in f32, regular spec.
@@ -498,7 +492,7 @@ mod vad_tests {
             constants::E0,
         );
 
-        assert!(result.is_ok(), "{}", result.err().unwrap().cause());
+        assert!(result.is_ok(), "{}", result.err().unwrap());
 
         let (vad, v_frames) = result.unwrap();
 
@@ -580,7 +574,7 @@ mod vad_tests {
             configs.voice_probability_threshold,
         );
 
-        assert!(result.is_ok(), "{}", result.err().unwrap().cause());
+        assert!(result.is_ok(), "{}", result.err().unwrap());
 
         let voice_detected = result.unwrap();
         assert!(voice_detected, "Failed to detect voice");
@@ -635,7 +629,7 @@ mod vad_tests {
             configs.voice_probability_threshold,
         );
 
-        assert!(result.is_ok(), "{}", result.err().unwrap().cause());
+        assert!(result.is_ok(), "{}", result.err().unwrap());
 
         let voice_detected = result.unwrap();
         assert!(voice_detected, "Failed to detect voice");

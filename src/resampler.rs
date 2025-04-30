@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::path::Path;
 
-use ort::MemoryType::Default;
 use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
@@ -13,9 +12,10 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::{Hint, ProbeResult};
 
 use crate::constants;
-// TODO: possibly make this into a feature instead of the core library.
-use crate::errors::{WhisperRealtimeError, WhisperRealtimeErrorType};
+use crate::errors::WhisperRealtimeError;
 use crate::transcriber::static_transcriber::SupportedAudioSample;
+
+// TODO: make this into a feature instead of the core library.
 
 // This is to restrict the audio to supported formats.
 pub enum AudioSample<'a> {
@@ -34,9 +34,8 @@ pub fn resample(
     num_channels: usize,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
     if num_channels == 0 {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::ParameterError,
-            "Zero channels".to_owned(),
+        return Err(WhisperRealtimeError::ParameterError(
+            "Zero channels.".to_owned(),
         ));
     }
     // TODO: check rubato examples
@@ -57,78 +56,58 @@ pub fn resample(
             output
         }
         AudioSample::F32(audio_in) => audio_in.to_vec(),
-        AudioSample::F64(audio_in) => audio_in.iter().filter_map(|s| s.into()).collect(),
+        AudioSample::F64(audio_in) => audio_in.iter().map(|s| *s as f32).collect(),
     };
 
-    let mut resampler = SincFixedIn::new(
+    let resampler = SincFixedIn::new(
         out_sample_rate / in_sample_rate,
         2.0,
         params,
         samples_to_process.len() / num_channels,
         num_channels,
-    );
-    if let Err(_) = resampler.as_ref() {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::ParameterError,
-            "Failed to create resample params".to_owned(),
-        ));
-    }
+    )?;
 
     if num_channels == 2 {
-        resample_stereo(samples_to_process, resampler.unwrap())
+        resample_stereo(samples_to_process, resampler)
     } else {
-        resample_mono(samples_to_process, resampler.unwrap())
+        resample_mono(samples_to_process, resampler)
     }
 }
 
-// TODO: think about this, don't love it -> inline it if using.
-// Not entirely sold. Have to take ownership
+// These two functions have to take ownership of the resources for resampling
+// The original slice provided is untouched; these work on a copy of the samples.
 #[inline]
 pub fn resample_mono(
     samples: Vec<f32>,
     mut resampler: SincFixedIn<f32>,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
     let waves_in = vec![samples];
-    let waves_out = resampler.process(&waves_in, None);
-    match waves_out.as_ref() {
-        // ResampleError
-        Err(_) => Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::Unknown,
-            "Failed to resample".to_owned(),
-        )),
-        Ok(waves_out) => Ok(SupportedAudioSample::F32(waves_out[0].to_vec())),
-    }
+    let waves_out = resampler.process(&waves_in, None)?;
+    Ok(SupportedAudioSample::F32(waves_out[0].to_vec()))
 }
 
-// TODO: inline or remove; not in love with this.
 #[inline]
 pub fn resample_stereo(
     samples: Vec<f32>,
     mut resampler: SincFixedIn<f32>,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
     let waves_in: Vec<Vec<f32>> = vec![
-        samples.iter().step_by(2).collect(),
-        samples[1].iter().step_by(2).collect,
+        samples.iter().step_by(2).copied().collect(),
+        samples[1..].iter().step_by(2).copied().collect(),
     ];
 
-    let waves_out = resampler.process(&waves_in, None);
-    match waves_out.as_ref() {
-        // ResampleError
-        Err(_) => Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::Unknown,
-            "Failed to resample".to_owned(),
-        )),
-        Ok(waves_out) => {
-            let interleaved: Vec<f32> = &waves_out[0]
-                .iter()
-                .zip(&waves_out[1])
-                .map(|(x, y)| [*x, *y])
-                .flatten()
-                .collect();
+    let waves_out = resampler.process(&waves_in, None)?;
 
-            Ok(SupportedAudioSample::F32(interleaved))
-        }
-    }
+    let left = &waves_out[0];
+    let right = &waves_out[1];
+    let interleaved: Vec<f32> = left
+        .iter()
+        .zip(right)
+        .map(|(x, y)| [*x, *y])
+        .flatten()
+        .collect();
+
+    Ok(SupportedAudioSample::F32(interleaved))
 }
 
 // Since this is for whisper, it will also convert the samples to mono
@@ -138,38 +117,42 @@ pub fn normalize_audio(
     in_sample_rate: f64,
     num_channels: usize,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
-    let SupportedAudioSample::F32(stereo) = resample(samples, 16000., in_sample_rate, num_channels);
-    match whisper_rs::convert_stereo_to_mono_audio(&stereo) {
-        Ok(audio) => Ok(SupportedAudioSample::F32(audio)),
-        Err(e) => {
-            let mut err_str = "Failed to convert resampled audio to mono. Error: ".to_owned();
-            err_str.push_str(&e.to_string());
-            Err(WhisperRealtimeError::new(
-                WhisperRealtimeErrorType::Unknown,
-                err_str,
-            ))
-        }
+    let resampled = resample(samples, 16000., in_sample_rate, num_channels)?;
+    if let SupportedAudioSample::F32(stereo) = resampled {
+        let mono = whisper_rs::convert_stereo_to_mono_audio(&stereo)?;
+        Ok(SupportedAudioSample::F32(mono))
+    } else {
+        // This should never, ever happen
+        Err(WhisperRealtimeError::ParameterError(
+            "Resampling returned invalid audio format".to_owned(),
+        ))
     }
 }
 
 // TODO: move where appropriate, probably better to make a separate module
-fn get_audio_probe<P: Into<Path>>(path: P) -> ProbeResult {
+fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, WhisperRealtimeError> {
     let file = Box::new(File::open(path)?);
     let mss = MediaSourceStream::new(file, Default::default());
     let hint = Hint::new();
     let format_opts = Default::default();
     let metadata_opts = Default::default();
-    symphonia::default::get_probe().format(&hint, mss, &format_opts, &metadata_opts)?
+    let probe = symphonia::default::get_probe().format(&hint, mss, &format_opts, &metadata_opts)?;
+    Ok(probe)
 }
 
-pub fn load_audio_file<P: Into<Path>>(
+// TODO: maybe don't wrap in the struct at the end?
+pub fn load_audio_file<P: AsRef<Path>>(
     path: P,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
     let decoder_opts = Default::default();
-    let probed = get_audio_probe(path);
+    let probed = get_audio_probe(path)?;
 
     let format = probed.format;
-    let track = format.default_track()?;
+    let track = format
+        .default_track()
+        .ok_or(WhisperRealtimeError::ParameterError(
+            "Failed to get default audio track".to_owned(),
+        ))?;
 
     let decoder = symphonia::default::get_codecs().make(&track.codec_params, &decoder_opts)?;
     // Decode loop
@@ -179,30 +162,50 @@ pub fn load_audio_file<P: Into<Path>>(
 
 // This will return f32 audio normalized for whisper
 // TODO: maybe don't wrap in the struct at the end?
-pub fn load_normalized_audio_file<P: Into<Path>>(
+pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     path: P,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
     let decoder_opts = Default::default();
-    let probed = get_audio_probe(path);
+    let probed = get_audio_probe(path)?;
     let format = probed.format;
-    let track = format.default_track()?;
-    let needs_normalizing = needs_normalizing(track);
+    let track = format
+        .default_track()
+        .ok_or(WhisperRealtimeError::ParameterError(
+            "Failed to get default track".to_owned(),
+        ))?
+        .clone();
+
+    // Get the codec parameters before passing ownership to the decode loop.
+    let codec_params = &track.codec_params;
+    let sample_rate = codec_params
+        .sample_rate
+        .ok_or(WhisperRealtimeError::ParameterError(
+            "Failed to grab sample rate".to_owned(),
+        ))? as f64;
+
+    let num_channels = codec_params
+        .channels
+        .ok_or(WhisperRealtimeError::ParameterError(
+            "Failed to grab number of channels".to_owned(),
+        ))?
+        .count();
+
+    let needs_normalizing = needs_normalizing(&track);
     let decoder = symphonia::default::get_codecs().make(&track.codec_params, &decoder_opts)?;
     // Decode loop
     let samples = decode_loop(track.id, decoder, format);
+
     // Normalize
-    if needs_normalizing {
+    if needs_normalizing? {
         let audio = AudioSample::F32(&samples);
-        normalize_audio(
-            &audio,
-            track.codec_params.sample_rate? as f64,
-            track.codec_params.channels?.count(),
-        )
+        normalize_audio(&audio, sample_rate, num_channels)
     } else {
         Ok(SupportedAudioSample::F32(samples))
     }
 }
 
+// TODO: add decode_loop with progress callback
+// TODO: clean this up
 fn decode_loop(
     track_id: u32,
     mut decoder: Box<dyn Decoder>,
@@ -220,7 +223,7 @@ fn decode_loop(
 
         // Consume metadata; not really sure what to do with this.
         while !reader.metadata().is_latest() {
-            reader.metadata().pop()
+            reader.metadata().pop();
         }
 
         if packet.track_id() != track_id {
@@ -234,7 +237,7 @@ fn decode_loop(
                     sample_buf = Some(SampleBuffer::<f32>::new(duration, spec));
                 }
 
-                let in_mono = *audio_buffer.spec().channels.iter().count() == 1;
+                let in_mono = audio_buffer.spec().channels.iter().count() == 1;
 
                 if let Some(buf) = &mut sample_buf {
                     if in_mono {
@@ -255,7 +258,7 @@ fn decode_loop(
 }
 
 // Probe and return a boolean
-pub fn file_needs_normalizing<P: Into<Path>>(path: P) -> bool {
+pub fn file_needs_normalizing<P: AsRef<Path>>(path: P) -> Result<bool, WhisperRealtimeError> {
     let file = Box::new(File::open(path)?);
     let mss = MediaSourceStream::new(file, Default::default());
     let hint = Hint::new();
@@ -264,13 +267,23 @@ pub fn file_needs_normalizing<P: Into<Path>>(path: P) -> bool {
     let probed =
         symphonia::default::get_probe().format(&hint, mss, &format_opts, &metadata_opts)?;
 
-    let mut format = probed.format;
-    let track = format.default_track()?;
+    let format = probed.format;
+    let track = format
+        .default_track()
+        .ok_or(WhisperRealtimeError::ParameterError(
+            "Failed to get default track".to_owned(),
+        ))?;
     needs_normalizing(track)
 }
 
 // Possibly just inline the codec_params instead of accessing.
 #[inline]
-pub fn needs_normalizing(track: &Track) -> bool {
-    track.codec_params.sample_rate? as f64 != constants::WHISPER_SAMPLE_RATE
+pub fn needs_normalizing(track: &Track) -> Result<bool, WhisperRealtimeError> {
+    let sample_rate = track
+        .codec_params
+        .sample_rate
+        .ok_or(WhisperRealtimeError::ParameterError(
+            "Failed to get sample rate".to_owned(),
+        ))? as f64;
+    Ok(sample_rate != constants::WHISPER_SAMPLE_RATE)
 }

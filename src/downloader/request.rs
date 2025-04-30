@@ -4,10 +4,8 @@ pub use bytes::Bytes;
 pub use futures_core::stream::Stream;
 pub use reqwest::{self, Url};
 
-use crate::{
-    downloader::downloaders::{StreamDownloader, SyncDownloader},
-    errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
-};
+use crate::downloader::downloaders::{StreamDownloader, SyncDownloader};
+use crate::errors::WhisperRealtimeError;
 
 /// Returns a StreamDownloader struct encapsulating the request bytestream, progress, total
 /// response size, and an optional callback function to receive progress updates.
@@ -20,54 +18,22 @@ pub async fn async_download_request<CB: Fn(usize)>(
     StreamDownloader<impl Stream<Item = Result<Bytes, reqwest::Error>>, CB>,
     WhisperRealtimeError,
 > {
-    let m_url = Url::parse(url);
-    if let Err(e) = m_url {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::DownloadError,
-            format!("Failed to parse url: {}, Error: {:?} ", url, e),
-        ));
-    };
+    let m_url = Url::parse(url)?;
 
-    let m_url = m_url.unwrap();
-
-    let res = client
-        .get(m_url)
-        .send()
-        .await
-        .or(Err(format!("Failed to GET from {}", url)));
-
-    if let Err(e) = res {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::DownloadError,
-            format!("{} ", e),
-        ));
-    };
-
-    let res = res.unwrap();
+    let res = client.get(m_url).send().await?;
 
     if !res.status().is_success() {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::DownloadError,
-            format!(
-                "Failed to download URL: {}, Error Code: {}",
-                url,
-                res.status()
-            ),
-        ));
+        return Err(WhisperRealtimeError::DownloadError(format!(
+            "Failed to download, status code: {}",
+            res.status()
+        )));
     }
 
     let total_size = res
         .content_length()
-        .ok_or(format!("Failed to get content length from {}", url));
-
-    if let Err(e) = total_size {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::DownloadError,
-            format!("{} ", e),
-        ));
-    };
-
-    let total_size = total_size.unwrap() as usize;
+        .ok_or(WhisperRealtimeError::ParameterError(
+            "Failed to get content length".to_owned(),
+        ))? as usize;
 
     let stream = res.bytes_stream();
     Ok(StreamDownloader::new(stream, total_size, progress_callback))
@@ -83,48 +49,22 @@ pub fn sync_download_request<CB: Fn(usize)>(
     url: &str,
     progress_callback: Option<CB>,
 ) -> Result<SyncDownloader<impl Read, CB>, WhisperRealtimeError> {
-    let m_url = Url::parse(url);
-    if let Err(e) = m_url {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::DownloadError,
-            format!("Failed to parse url: {}, Error: {:?} ", url, e),
-        ));
-    };
+    let m_url = Url::parse(url)?;
 
-    let m_url = m_url.unwrap();
-    let res = client.get(m_url).send();
-
-    if let Err(e) = res {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::DownloadError,
-            format!("Failed to GET from {}, Error: {:?} ", url, e),
-        ));
-    };
-
-    let res = res.unwrap();
+    let res = client.get(m_url).send()?;
 
     if !res.status().is_success() {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::DownloadError,
-            format!(
-                "Failed to download URL: {}, Error Code: {}",
-                url,
-                res.status()
-            ),
-        ));
-    };
+        return Err(WhisperRealtimeError::DownloadError(format!(
+            "Failed to download, status code: {}",
+            res.status()
+        )));
+    }
 
     let total_size = res
         .content_length()
-        .ok_or(format!("Failed to get content length from {}", url));
+        .ok_or(WhisperRealtimeError::ParameterError(
+            "Failed to get content length".to_owned(),
+        ))? as usize;
 
-    if let Err(e) = total_size {
-        return Err(WhisperRealtimeError::new(
-            WhisperRealtimeErrorType::DownloadError,
-            format!("{} ", e),
-        ));
-    };
-
-    let total_size = total_size.unwrap() as usize;
     Ok(SyncDownloader::new(res, total_size, progress_callback))
 }

@@ -39,7 +39,7 @@ mod downloader_tests {
         assert!(
             stream_downloader.is_ok(),
             "{}",
-            format!("{}", stream_downloader.err().unwrap().cause())
+            format!("{}", stream_downloader.err().unwrap())
         );
 
         let mut stream_downloader = stream_downloader.unwrap();
@@ -69,7 +69,7 @@ mod downloader_tests {
         assert!(
             download.is_ok(),
             "{}",
-            format!("{}", download.err().unwrap().cause())
+            format!("{}", download.err().unwrap())
         );
 
         assert!(
@@ -100,7 +100,7 @@ mod downloader_tests {
         assert!(
             sync_downloader.is_ok(),
             "{}",
-            format!("{}", sync_downloader.err().unwrap().cause())
+            format!("{}", sync_downloader.err().unwrap())
         );
 
         let mut sync_downloader = sync_downloader.unwrap();
@@ -117,7 +117,7 @@ mod downloader_tests {
         assert!(
             download.is_ok(),
             "{}",
-            format!("{}", download.err().unwrap().cause())
+            format!("{}", download.err().unwrap())
         );
 
         assert!(

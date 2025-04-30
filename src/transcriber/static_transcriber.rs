@@ -1,23 +1,18 @@
-use std::{
-    error::Error,
-    ffi::c_void,
-    ops::DerefMut,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering}, Mutex,
-    },
-};
+use std::error::Error;
+use std::ffi::c_void;
+use std::ops::DerefMut;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc;
+use std::sync::Mutex;
 
 use lazy_static::lazy_static;
-use whisper_rs::{FullParams, SamplingStrategy, whisper_rs_sys, WhisperState};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
-use crate::{
-    configs::Configs,
-    errors::{WhisperRealtimeError, WhisperRealtimeErrorType},
-    transcriber::traits::Transcriber,
-};
+use crate::configs::Configs;
+use crate::errors::WhisperRealtimeError;
+use crate::transcriber::traits::Transcriber;
 
 // Workaround for whisper-rs issue #134 -- moving memory in rust causes a segmentation fault
 // in the progress callback.
@@ -136,6 +131,7 @@ impl Transcriber for StaticTranscriber {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         Self::set_full_params(&mut params, &self.configs, None);
 
+        // At the moment, the
         if let Some(callback) = progress_callback {
             {
                 let mut guard = PROGRESS_CALLBACK
@@ -160,7 +156,8 @@ impl Transcriber for StaticTranscriber {
 
         let start_encoder_callback_user_data = run_transcription.as_ptr() as *mut c_void;
 
-        // TODO: Check RS for safe encoder callback
+        // These are unsafe insofar that they touch C
+        // The underlying C code is safe provided the callback doesn't touch the whisper pointer.
         unsafe {
             params.set_start_encoder_callback(Some(check_running_state));
             params.set_start_encoder_callback_user_data(start_encoder_callback_user_data);
@@ -191,10 +188,7 @@ impl Transcriber for StaticTranscriber {
 
         if let Err(e) = result {
             if let Some(ref data_sender) = self.data_sender {
-                let err = WhisperRealtimeError::new(
-                    WhisperRealtimeErrorType::TranscriptionError,
-                    format!("Model failure. Error: {}", e),
-                );
+                let err = WhisperRealtimeError::TranscriptionError(format!("Whisper Error: {}", e));
 
                 data_sender.send(Err(err)).expect("Data channel closed")
             }
@@ -205,10 +199,8 @@ impl Transcriber for StaticTranscriber {
         let num_segments = whisper_state.full_n_segments().unwrap_or(0);
 
         if num_segments == 0 {
-            let error = WhisperRealtimeError::new(
-                WhisperRealtimeErrorType::TranscriptionError,
-                String::from("Zero segments transcribed"),
-            );
+            let error =
+                WhisperRealtimeError::TranscriptionError("Zero segments transcribed".to_owned());
 
             return Self::send_error_string(&error);
         };
@@ -224,10 +216,6 @@ impl Transcriber for StaticTranscriber {
 
                 text.push(segment);
             }
-            // let segment = whisper_state
-            //     .full_get_segment_text(i)
-            //     .expect("failed to get segment");
-            //
         }
 
         // Static segments are generally "longer" and thus are separated by newline.

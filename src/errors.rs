@@ -1,57 +1,32 @@
-use std::{error, fmt};
+use thiserror::Error;
 
-#[derive(Debug, Clone)]
-pub struct WhisperRealtimeError {
-    error_type: WhisperRealtimeErrorType,
-    pub reason: String,
+#[derive(Debug, Error)]
+pub enum WhisperRealtimeError {
+    #[error("Transcription Error {0}")]
+    TranscriptionError(String),
+    // TODO: migrate reqwest errors over to this enum pls.
+    #[error("Reqwest Error {0}")]
+    ReqwestError(#[from] reqwest::Error),
+    #[error("Download Error {0}")]
+    DownloadError(String),
+    #[error("Write Error {0}")]
+    WriteError(String),
+    #[error("Parameter Error {0}")]
+    ParameterError(String),
+    #[error("ResampleError: {0}")]
+    ResampleError(#[from] rubato::ResampleError),
+    #[error("ResamplerConstructionError: {0}")]
+    ResamplerConstructionError(#[from] rubato::ResamplerConstructionError),
+    #[error("I/O error: {0}")]
+    IOError(#[from] std::io::Error),
+    #[error("Decode error: {0}")]
+    DecodeError(#[from] symphonia::core::errors::Error),
+    #[error("Unknown Error {0}")]
+    Unknown(String),
+    #[error("Parse Error {0}")]
+    ParseError(#[from] std::string::ParseError),
+    #[error("UrlParse Error {0}")]
+    UrlParseError(#[from] url::ParseError),
+    #[error("Whisper Error {0}")]
+    WhisperError(#[from] whisper_rs::WhisperError),
 }
-
-// TODO: Add more types re: resampling
-#[derive(Debug, Clone, Copy)]
-pub enum WhisperRealtimeErrorType {
-    TranscriptionError,
-    DownloadError,
-    WriteError,
-    ParameterError,
-    Unknown,
-}
-
-impl fmt::Display for WhisperRealtimeErrorType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            WhisperRealtimeErrorType::TranscriptionError => {
-                write!(f, "TranscriptionError")
-            }
-            WhisperRealtimeErrorType::DownloadError => {
-                write!(f, "DownloadError")
-            }
-            WhisperRealtimeErrorType::WriteError => {
-                write!(f, "WriteError")
-            }
-            WhisperRealtimeErrorType::ParameterError => {
-                write!(f, "ParameterErrorError")
-            }
-            WhisperRealtimeErrorType::Unknown => {
-                write!(f, "UnknownError")
-            }
-        }
-    }
-}
-
-impl WhisperRealtimeError {
-    pub fn new(error_type: WhisperRealtimeErrorType, reason: String) -> Self {
-        Self { error_type, reason }
-    }
-
-    pub fn cause(&self) -> String {
-        format!("{}: {}", self.error_type, self.reason)
-    }
-}
-
-impl fmt::Display for WhisperRealtimeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.cause())
-    }
-}
-
-impl error::Error for WhisperRealtimeError {}

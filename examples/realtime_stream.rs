@@ -13,7 +13,6 @@ use std::sync::mpsc::{channel, sync_channel};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use sdl2::audio::AudioDevice;
-use whisper_rs::install_whisper_log_trampoline;
 
 use whisper_realtime::{
     audio_ring_buffer::AudioRingBuffer,
@@ -209,9 +208,6 @@ fn main() {
         });
 
         let transcription_thread = s.spawn(move || {
-            // Disable whisper.cpp logging to stderr/stdout.
-            install_whisper_log_trampoline();
-
             let mut transcriber = realtime_transcriber::RealtimeTranscriber::new_with_configs(
                 audio_p, o_sender_p, c_configs, None,
             );

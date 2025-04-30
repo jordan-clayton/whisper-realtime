@@ -45,7 +45,7 @@ pub fn build_audio_stream<T: Default + Clone + Copy + Send + AudioFormatNum + 's
 #[cfg(not(feature = "crossbeam"))]
 #[inline]
 pub fn build_audio_stream_using_slices<
-    T: Default + Clone + Copy + Send + AudioFormatNum + 'static,
+    T: Default + Clone + Copy + Send + Sync + AudioFormatNum + 'static,
 >(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
@@ -85,7 +85,7 @@ pub fn build_audio_stream<T: Default + Clone + Copy + Send + AudioFormatNum + 's
 #[cfg(feature = "crossbeam")]
 #[inline]
 pub fn build_audio_stream_using_slice<
-    T: Default + Clone + Copy + Send + AudioFormatNum + 'static,
+    T: Default + Clone + Copy + Send + Sync + AudioFormatNum + 'static,
 >(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
