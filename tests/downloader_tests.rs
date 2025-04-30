@@ -4,12 +4,10 @@ mod downloader_tests {
     use reqwest;
     use tokio::runtime::Runtime;
 
-    use whisper_realtime::{
-        downloader,
-        downloader::traits::{AsyncDownload, SyncDownload},
-        errors::WhisperRealtimeError,
-        model,
-    };
+    use whisper_realtime::downloader;
+    use whisper_realtime::downloader::traits::{AsyncDownload, SyncDownload};
+    use whisper_realtime::utils::errors::WhisperRealtimeError;
+    use whisper_realtime::whisper::model;
 
     #[test]
     #[ignore]
@@ -81,7 +79,7 @@ mod downloader_tests {
     #[test]
     #[ignore]
     fn test_sync_download() {
-        let mut model: model::Model = model::Model::default();
+        let model: model::Model = model::Model::default();
         // model.model_type = model::ModelType::MediumEn;
 
         // Delete the model
@@ -94,7 +92,7 @@ mod downloader_tests {
         let client = reqwest::blocking::Client::new();
 
         // NOTE: callback url is public and can be set after creating the struct.
-        let sync_downloader = downloader::request::sync_download_request(&client, url, None);
+        let sync_downloader = downloader::request::sync_download_request(&client, url);
 
         // Ensure proper struct creation + download.
         assert!(

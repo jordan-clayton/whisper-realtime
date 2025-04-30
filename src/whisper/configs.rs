@@ -1,6 +1,8 @@
-use crate::{constants, model};
+use crate::utils::constants;
+use crate::whisper::model;
 
 // TODO: think about ModelType implementation and refactor accordingly
+// TODO: get rid of pub -> use a builder/accessors
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
 pub struct Configs {

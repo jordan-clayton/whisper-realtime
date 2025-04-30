@@ -1,16 +1,13 @@
-// TODO: this is hard to read; separate imports.
-use std::{
-    sync::atomic::{AtomicUsize, Ordering},
-    sync::Mutex,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use sdl2::audio::AudioFormatNum;
 
-use crate::constants;
+use crate::utils::constants;
 
 pub struct AudioRingBuffer<T: Default + Clone + Copy + AudioFormatNum + 'static> {
     head: AtomicUsize,
-    // TODO: get rid of pub -> implement builder.
+    // TODO: get rid of pub -> implement builder and accessor methods.
     pub audio_len: AtomicUsize,
     pub len_ms: AtomicUsize,
     pub buffer_len: AtomicUsize,
@@ -19,13 +16,13 @@ pub struct AudioRingBuffer<T: Default + Clone + Copy + AudioFormatNum + 'static>
 
 // The ring buffer should be thread safe.
 unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Sync for AudioRingBuffer<T> {}
+
 unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Send for AudioRingBuffer<T> {}
 
 impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
     // TODO: generalize this -> sample rate should be a parameter, abstract out constants::WHISPER_SAMPLE_RATE.
     // TODO: builder pattern; construct with default params and use methods to set attrs.
     pub fn new(len_ms: usize) -> Self {
-        // Buffer size is in seconds; I am not entirely sure why. TODO: investigate this.
         let buffer_size = (len_ms / 1000) as f64 * constants::WHISPER_SAMPLE_RATE;
         let buffer_size = buffer_size as usize;
         let buffer_len = AtomicUsize::new(buffer_size);

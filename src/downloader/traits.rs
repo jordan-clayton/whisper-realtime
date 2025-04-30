@@ -1,7 +1,7 @@
 use std::fs::{self, File};
 use std::path::Path;
 
-use crate::errors::WhisperRealtimeError;
+use crate::utils::errors::WhisperRealtimeError;
 
 pub trait SyncDownload: Writable {
     fn download(

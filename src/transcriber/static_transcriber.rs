@@ -10,9 +10,9 @@ use std::sync::Mutex;
 use lazy_static::lazy_static;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
-use crate::configs::Configs;
-use crate::errors::WhisperRealtimeError;
 use crate::transcriber::traits::Transcriber;
+use crate::utils::errors::WhisperRealtimeError;
+use crate::whisper::configs::Configs;
 
 // Workaround for whisper-rs issue #134 -- moving memory in rust causes a segmentation fault
 // in the progress callback.
@@ -23,7 +23,7 @@ lazy_static! {
         Mutex::new(None);
 }
 
-// TODO: these probably shouldn't be vectors; use [T]
+// TODO: these probably shouldn't be vectors; use [T], can probably borrow
 pub enum SupportedAudioSample {
     I16(Vec<i16>),
     F32(Vec<f32>),
@@ -44,6 +44,7 @@ pub struct StaticTranscriber {
 }
 
 // TODO: get rid of the mutex and use an immutable slice.
+// TODO: rename to OfflineTranscriber
 #[cfg(feature = "crossbeam")]
 pub struct StaticTranscriber {
     configs: Arc<Configs>,
@@ -153,7 +154,6 @@ impl Transcriber for StaticTranscriber {
         }
 
         // Set the trigger for aborting whisper transcription
-
         let start_encoder_callback_user_data = run_transcription.as_ptr() as *mut c_void;
 
         // These are unsafe insofar that they touch C

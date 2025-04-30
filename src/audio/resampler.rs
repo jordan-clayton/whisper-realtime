@@ -11,9 +11,9 @@ use symphonia::core::formats::{FormatReader, Track};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::{Hint, ProbeResult};
 
-use crate::constants;
-use crate::errors::WhisperRealtimeError;
 use crate::transcriber::static_transcriber::SupportedAudioSample;
+use crate::utils::constants;
+use crate::utils::errors::WhisperRealtimeError;
 
 // TODO: make this into a feature instead of the core library.
 
@@ -24,9 +24,9 @@ pub enum AudioSample<'a> {
     F64(&'a [f64]),
 }
 
-// Resamples audio to 16kHz for Whisper processing
-// Packages into a SupportedAudioSample which can be passed to a StaticTranscriber
-// Audio will be converted to f32, because it is the most convenient
+/// Resamples audio to 16kHz for Whisper processing
+/// Packages into a SupportedAudioSample which can be passed to a StaticTranscriber
+/// Audio will be converted to f32, because it is the most convenient
 pub fn resample(
     samples: &AudioSample,
     out_sample_rate: f64,

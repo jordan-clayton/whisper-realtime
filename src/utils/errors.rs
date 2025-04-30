@@ -4,7 +4,6 @@ use thiserror::Error;
 pub enum WhisperRealtimeError {
     #[error("Transcription Error {0}")]
     TranscriptionError(String),
-    // TODO: migrate reqwest errors over to this enum pls.
     #[error("Reqwest Error {0}")]
     ReqwestError(#[from] reqwest::Error),
     #[error("Download Error {0}")]

@@ -7,11 +7,11 @@ use std::time::Duration;
 use voice_activity_detector::VoiceActivityDetector;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
-use crate::audio_ring_buffer::AudioRingBuffer;
-use crate::configs::Configs;
-use crate::constants;
-use crate::errors::WhisperRealtimeError;
+use crate::audio::audio_ring_buffer::AudioRingBuffer;
 use crate::transcriber::{traits::Transcriber, vad, vad::VoiceActivityDetection};
+use crate::utils::constants;
+use crate::utils::errors::WhisperRealtimeError;
+use crate::whisper::configs::Configs;
 
 // This implementation is a modified port of the whisper.cpp stream example, see:
 // https://github.com/ggerganov/whisper.cpp/tree/master/examples/stream

@@ -1,5 +1,5 @@
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 pub trait Transcriber {
     fn process_audio(
@@ -10,7 +10,7 @@ pub trait Transcriber {
     ) -> String;
     fn set_full_params<'a>(
         full_params: &mut whisper_rs::FullParams<'a, 'a>,
-        prefs: &'a crate::configs::Configs,
+        prefs: &'a crate::whisper::configs::Configs,
         tokens: Option<&'a Vec<std::ffi::c_int>>,
     ) {
         let lang = prefs.language.as_ref();

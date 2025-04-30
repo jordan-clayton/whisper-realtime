@@ -72,7 +72,6 @@ hipblas = ["whisper-rs/hipblas", "_gpu"]
 coreml = ["whisper-rs/coreml", "_gpu"]
 metal = ["whisper-rs/metal", "_gpu"]
 
-# TODO: benchmarking
 [[bench]]
 name = "recorder_benchmark"
 harness = false

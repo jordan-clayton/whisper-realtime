@@ -1,27 +1,24 @@
-use std::{
-    io::{stdout, Write},
-    process::Command,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering}, Mutex,
-    },
-    thread::scope,
-    time::Duration,
-};
+use std::io::{stdout, Write};
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc::{channel, sync_channel};
+use std::thread::scope;
+use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use sdl2::audio::AudioDevice;
 
-use whisper_realtime::{
-    audio_ring_buffer::AudioRingBuffer,
-    configs, constants,
-    downloader::{self, traits::AsyncDownload},
-    microphone, model,
-    recorder::AudioRecorderVecSender,
-    transcriber::{realtime_transcriber, static_transcriber, traits::Transcriber},
-};
+use whisper_realtime::audio::audio_ring_buffer::AudioRingBuffer;
+use whisper_realtime::audio::microphone;
+use whisper_realtime::audio::recorder::AudioRecorderVecSender;
+use whisper_realtime::downloader::request;
+use whisper_realtime::downloader::traits::AsyncDownload;
+use whisper_realtime::transcriber::{realtime_transcriber, static_transcriber};
+use whisper_realtime::transcriber::traits::Transcriber;
+use whisper_realtime::utils::constants;
+use whisper_realtime::whisper::{configs, model};
 
 fn main() {
     // Download the model.
@@ -49,7 +46,7 @@ fn main() {
         let rt = tokio::runtime::Runtime::new().expect("Failed to build tokio runtime");
         let handle = rt.handle();
 
-        let stream_downloader = downloader::request::async_download_request(&client, url, None);
+        let stream_downloader = request::async_download_request(&client, url, None);
         let mut stream_downloader = handle
             .block_on(stream_downloader)
             .expect("Failed to make download request");
@@ -235,7 +232,7 @@ fn main() {
                             }
                         }
                         Err(err) => {
-                            eprintln!("TranscriptionError: {}", err.cause());
+                            eprintln!("{}", err);
                             c_is_running_data_receiver.store(false, Ordering::SeqCst);
                         }
                     },

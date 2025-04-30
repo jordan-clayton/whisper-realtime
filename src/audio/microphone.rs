@@ -1,14 +1,11 @@
 use std::sync::Arc;
-// TODO: Test Arc<[T]> and replace vector implmentation if faster.
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc::SyncSender;
 
-use sdl2::{
-    audio::{AudioDevice, AudioFormatNum, AudioSpecDesired},
-    AudioSubsystem,
-};
+use sdl2::audio::{AudioDevice, AudioFormatNum, AudioSpecDesired};
+use sdl2::AudioSubsystem;
 
-use crate::recorder::{AudioRecorderSliceSender, AudioRecorderVecSender};
+use crate::audio::recorder::{AudioRecorderSliceSender, AudioRecorderVecSender};
 
 #[inline]
 pub fn get_desired_audio_spec(

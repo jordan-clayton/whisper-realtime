@@ -6,7 +6,7 @@ pub use futures::StreamExt;
 pub use futures_core::stream::Stream;
 
 use crate::downloader::traits::{AsyncDownload, SyncDownload, Writable};
-use crate::errors::WhisperRealtimeError;
+use crate::utils::errors::WhisperRealtimeError;
 
 // TODO: make this optional, as part of extras. These are out of scope.
 
@@ -82,46 +82,36 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Fn(usize)> Asy
 /// the download to the filesystem using download_with_progress()
 ///
 /// NOTE: download() uses std::fs::copy and is considerably faster, but will not call
-/// the progress_callback.
-pub struct SyncDownloader<R: Read, CB: Fn(usize)> {
+/// a progress_callback.
+pub struct SyncDownloader<R: Read> {
     file_stream: R,
     progress: usize,
     pub total_size: usize,
-    pub progress_callback: Option<CB>,
 }
 
-// NOTE: This needs to be implemented, but gets optimized out by the compiler in favour of a syscall.
-impl<R: Read, CB: Fn(usize)> SyncDownloader<R, CB> {
-    pub fn new(file_stream: R, total_size: usize, progress_callback: Option<CB>) -> Self {
+impl<R: Read> SyncDownloader<R> {
+    pub fn new(file_stream: R, total_size: usize) -> Self {
         Self {
             file_stream,
             progress: 0,
             total_size,
-            progress_callback,
         }
     }
-
-    // pub fn get_progress(&self) -> usize {
-    //     self.progress
-    // }
 }
 
-impl<R: Read, CB: Fn(usize)> Read for SyncDownloader<R, CB> {
+impl<R: Read> Read for SyncDownloader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let byte_read = self.file_stream.read(buf);
         if let Ok(num_bytes) = byte_read {
             self.progress += num_bytes;
-            if let Some(callback) = &self.progress_callback {
-                callback(self.progress)
-            }
         };
         byte_read
     }
 }
 
-impl<R: Read, CB: Fn(usize)> Writable for SyncDownloader<R, CB> {}
+impl<R: Read> Writable for SyncDownloader<R> {}
 
-impl<R: Read, CB: Fn(usize)> SyncDownload for SyncDownloader<R, CB> {
+impl<R: Read> SyncDownload for SyncDownloader<R> {
     fn download(
         &mut self,
         file_directory: &Path,

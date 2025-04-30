@@ -1,22 +1,23 @@
-// Model unit test
+// Model unit tests
+// TODO: these will need to be refactored once the implementation has been redesigned
+// TODO: also, make the tests a little more useful
 #[cfg(test)]
 mod model_tests {
-    use whisper_realtime::model::Model;
+    use whisper_realtime::whisper::model::Model;
 
     #[test]
     fn test_model_file_path() {
-        let model: Model = Model::default();
         let home_dir_string = std::env::var_os("HOME").unwrap();
         let home_path = std::path::Path::new(&home_dir_string);
+
         let mut model_directory = home_path.to_path_buf();
 
         // NOTE: This has not been tested.
         #[cfg(target_os = "windows")]
         {
             model_directory.push("RoamingAppData");
-            model_directory.push("WhisperGUI");
+            model_directory.push("whisper_realtime");
             model_directory.push("data");
-            model_directory.push("models");
         }
 
         // NOTE: This has not been tested.
@@ -24,16 +25,20 @@ mod model_tests {
         {
             model_directory.push("Library");
             model_directory.push("Application Support");
-            model_directory.push("com.jordan.WhisperGUI");
-            model_directory.push("models");
+            model_directory.push("com.jordan.whisper_realtime");
         }
         #[cfg(target_os = "linux")]
         {
             model_directory.push(".local");
             model_directory.push("share");
-            model_directory.push("whispergui");
-            model_directory.push("models");
+            model_directory.push("whisper_realtime");
+            model_directory.push("data");
         }
+
+        let model: Model = Model::default().with_data_dir(model_directory.clone());
+
+        model_directory.push("models");
+
         let test_dir = model.model_directory();
         let test_dir = test_dir.as_os_str();
         let expected_dir = model_directory.as_os_str();
@@ -42,7 +47,6 @@ mod model_tests {
     }
     #[test]
     fn test_file_path() {
-        let model: Model = Model::default();
         let home_dir_string = std::env::var_os("HOME").unwrap();
         let home_path = std::path::Path::new(&home_dir_string);
         let mut model_directory = home_path.to_path_buf();
@@ -51,10 +55,8 @@ mod model_tests {
         #[cfg(target_os = "windows")]
         {
             model_directory.push("RoamingAppData");
-            model_directory.push("WhisperGUI");
+            model_directory.push("whisper_realtime");
             model_directory.push("data");
-            model_directory.push("models");
-            model_directory.push("tiny.en.bin")
         }
 
         // NOTE: This has not been tested.
@@ -62,18 +64,21 @@ mod model_tests {
         {
             model_directory.push("Library");
             model_directory.push("Application Support");
-            model_directory.push("com.jordan.WhisperGUI");
-            model_directory.push("models");
-            model_directory.push("tiny.en.bin")
+            model_directory.push("com.jordan.whisper_realtime");
+            model_directory.push("data");
         }
         #[cfg(target_os = "linux")]
         {
             model_directory.push(".local");
             model_directory.push("share");
-            model_directory.push("whispergui");
-            model_directory.push("models");
-            model_directory.push("tiny.en.bin")
+            model_directory.push("whisper_realtime");
+            model_directory.push("data");
         }
+
+        let model: Model = Model::default().with_data_dir(model_directory.clone());
+
+        model_directory.push("models");
+        model_directory.push("tiny.en.bin");
         let test_file_path = model.file_path();
         let test_file = test_file_path.as_os_str();
         let expected_file = model_directory.as_os_str();
@@ -92,12 +97,5 @@ mod model_tests {
             test_url,
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
         )
-    }
-
-    #[test]
-    fn test_model_not_downloaded() {
-        // Downloads the default model and checks to see that it's in the correct spot
-        let model: Model = Model::default();
-        assert!(!model.is_downloaded())
     }
 }

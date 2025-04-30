@@ -4,8 +4,8 @@ use lazy_static::lazy_static;
 use realfft::RealFftPlanner;
 use voice_activity_detector::VoiceActivityDetector;
 
-use crate::constants;
-use crate::errors::WhisperRealtimeError;
+use crate::utils::constants;
+use crate::utils::errors::WhisperRealtimeError;
 
 // This is for the naive strategy to avoid extra memory allocations at runtime.
 lazy_static! {
@@ -274,7 +274,7 @@ mod vad_tests {
     use hound;
     use hound::SampleFormat;
 
-    use crate::configs;
+    use crate::whisper::configs;
 
     use super::*;
 
@@ -539,7 +539,7 @@ mod vad_tests {
                 .samples::<f32>()
                 .map(|s| {
                     let sample = s.unwrap();
-                    sample as f32
+                    sample
                 })
                 .collect(),
             SampleFormat::Int => reader
@@ -595,7 +595,7 @@ mod vad_tests {
                 .samples::<f32>()
                 .map(|s| {
                     let sample = s.unwrap();
-                    sample as f32
+                    sample
                 })
                 .collect(),
             SampleFormat::Int => reader
@@ -651,7 +651,7 @@ mod vad_tests {
                 .samples::<f32>()
                 .map(|s| {
                     let sample = s.unwrap();
-                    sample as f32
+                    sample
                 })
                 .collect(),
             SampleFormat::Int => reader
@@ -674,7 +674,7 @@ mod vad_tests {
         // This might not be mutable.
         let mut configs = configs::Configs::default();
 
-        let mut vad = voice_activity_detector::VoiceActivityDetector::builder()
+        let mut vad = VoiceActivityDetector::builder()
             .sample_rate(sample_rate as i64)
             .chunk_size(1024usize)
             .build()

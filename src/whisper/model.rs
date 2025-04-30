@@ -19,6 +19,8 @@ impl Default for Model {
     }
 }
 
+// TODO: proper builder pattern once re-implemented
+
 impl Model {
     pub fn new() -> Self {
         Self::default()
@@ -34,16 +36,22 @@ impl Model {
             data_directory: path,
         }
     }
+    pub fn with_data_dir(&self, path: std::path::PathBuf) -> Self {
+        Self {
+            model_type: self.model_type,
+            data_directory: path,
+        }
+    }
 
     pub fn new_with_data_dir(path: std::path::PathBuf) -> Self {
-        Model {
+        Self {
             model_type: ModelType::default(),
             data_directory: path,
         }
     }
 
     pub fn new_with_type_and_dir(m_type: ModelType, path: std::path::PathBuf) -> Self {
-        Model {
+        Self {
             model_type: m_type,
             data_directory: path,
         }
