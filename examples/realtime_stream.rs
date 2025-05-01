@@ -87,7 +87,9 @@ fn main() {
     let c_configs = configs.clone();
 
     // Audio buffer
-    let audio: AudioRingBuffer<f32> = AudioRingBuffer::new(constants::INPUT_BUFFER_CAPACITY);
+    let audio: AudioRingBuffer<f32> =
+        AudioRingBuffer::new_with_size(constants::INPUT_BUFFER_CAPACITY, None)
+            .expect("Audio length needs to be non-zero");
     let audio_p = Arc::new(audio);
     let audio_p_mic = audio_p.clone();
 
