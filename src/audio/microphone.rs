@@ -6,6 +6,7 @@ use sdl2::audio::{AudioDevice, AudioFormatNum, AudioSpecDesired};
 use sdl2::AudioSubsystem;
 
 use crate::audio::recorder::{AudioRecorderSliceSender, AudioRecorderVecSender};
+use crate::utils::errors::WhisperRealtimeError;
 
 #[inline]
 pub fn get_desired_audio_spec(
@@ -26,17 +27,22 @@ pub fn build_audio_stream<T: Default + Clone + Copy + Send + AudioFormatNum + 's
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: SyncSender<Vec<T>>,
-) -> AudioDevice<AudioRecorderVecSender<T>> {
-    audio_subsystem
-        .open_capture(
-            // Device - should be default, SDL should change if the user changes devices in their sysprefs.
-            None,
-            desired_spec,
-            |_spec| AudioRecorderVecSender {
-                sender: audio_sender,
-            },
-        )
-        .expect("failed to build audio stream")
+) -> Result<AudioDevice<AudioRecorderVecSender<T>>, WhisperRealtimeError> {
+    let audio_stream = audio_subsystem.open_capture(
+        // Device - should be default, SDL should change if the user changes devices in their sysprefs.
+        None,
+        desired_spec,
+        |_spec| AudioRecorderVecSender {
+            sender: audio_sender,
+        },
+    );
+    match audio_stream {
+        Err(e) => Err(WhisperRealtimeError::ParameterError(format!(
+            "Failed to build audio stream: {}",
+            e
+        ))),
+        Ok(audio) => Ok(audio),
+    }
 }
 
 #[cfg(not(feature = "crossbeam"))]
@@ -47,17 +53,22 @@ pub fn build_audio_stream_using_slices<
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: SyncSender<Arc<[T]>>,
-) -> AudioDevice<AudioRecorderSliceSender<T>> {
-    audio_subsystem
-        .open_capture(
-            // Device - should be default, SDL should change if the user changes devices in their sysprefs.
-            None,
-            desired_spec,
-            |_spec| AudioRecorderSliceSender {
-                sender: audio_sender,
-            },
-        )
-        .expect("failed to build audio stream")
+) -> Result<AudioDevice<AudioRecorderSliceSender<T>>, WhisperRealtimeError> {
+    let audio_stream = audio_subsystem.open_capture(
+        // Device - should be default, SDL should change if the user changes devices in their sysprefs.
+        None,
+        desired_spec,
+        |_spec| AudioRecorderSliceSender {
+            sender: audio_sender,
+        },
+    );
+    match audio_stream {
+        Err(e) => Err(WhisperRealtimeError::ParameterError(format!(
+            "Failed to build audio stream: {}",
+            e
+        ))),
+        Ok(audio) => Ok(audio),
+    }
 }
 
 #[cfg(feature = "crossbeam")]
@@ -66,17 +77,22 @@ pub fn build_audio_stream<T: Default + Clone + Copy + Send + AudioFormatNum + 's
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: crossbeam::channel::Sender<Vec<T>>,
-) -> AudioDevice<AudioRecorderVecSender<T>> {
-    audio_subsystem
-        .open_capture(
-            // Device - should be default, SDL should change if the user changes devices in their sysprefs.
-            None,
-            desired_spec,
-            |_spec| AudioRecorderVecSender {
-                sender: audio_sender,
-            },
-        )
-        .expect("failed to build audio stream")
+) -> Result<AudioDevice<AudioRecorderVecSender<T>>, WhisperRealtimeError> {
+    let audio_stream = audio_subsystem.open_capture(
+        // Device - should be default, SDL should change if the user changes devices in their sysprefs.
+        None,
+        desired_spec,
+        |_spec| AudioRecorderVecSender {
+            sender: audio_sender,
+        },
+    );
+    match audio_stream {
+        Err(e) => Err(WhisperRealtimeError::ParameterError(format!(
+            "Failed to build audio stream: {}",
+            e
+        ))),
+        Ok(audio) => Ok(audio),
+    }
 }
 
 #[cfg(feature = "crossbeam")]
@@ -87,15 +103,20 @@ pub fn build_audio_stream_using_slice<
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: crossbeam::channel::Sender<Arc<[T]>>,
-) -> AudioDevice<AudioRecorderSliceSender<T>> {
-    audio_subsystem
-        .open_capture(
-            // Device - should be default, SDL should change if the user changes devices in their sysprefs.
-            None,
-            desired_spec,
-            |_spec| AudioRecorderSliceSender {
-                sender: audio_sender,
-            },
-        )
-        .expect("failed to build audio stream")
+) -> Result<AudioDevice<AudioRecorderSliceSender<T>>, WhisperRealtimeError> {
+    let audio_stream = audio_subsystem.open_capture(
+        // Device - should be default, SDL should change if the user changes devices in their sysprefs.
+        None,
+        desired_spec,
+        |_spec| AudioRecorderSliceSender {
+            sender: audio_sender,
+        },
+    );
+    match audio_stream {
+        Err(e) => Err(WhisperRealtimeError::ParameterError(format!(
+            "Failed to build audio stream: {}",
+            e
+        ))),
+        Ok(audio) => Ok(audio),
+    }
 }

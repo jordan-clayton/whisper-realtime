@@ -12,6 +12,8 @@ use crate::transcriber::static_transcriber::SupportedAudioSample;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
+// TODO: test this implementation
+
 // This is to restrict the audio to supported formats.
 pub enum AudioSample<'a> {
     I16(&'a [i16]),
@@ -42,12 +44,10 @@ pub fn resample(
         window: WindowFunction::BlackmanHarris2,
     };
 
-    // LOL, rename
     let samples_to_process = match samples {
         AudioSample::I16(audio_in) => {
             let mut output = vec![0.0f32; audio_in.len()];
-            whisper_rs::convert_integer_to_float_audio(*audio_in, &mut output)
-                .expect("Audio samples length doesn't match");
+            whisper_rs::convert_integer_to_float_audio(*audio_in, &mut output)?;
             output
         }
         AudioSample::F32(audio_in) => audio_in.to_vec(),

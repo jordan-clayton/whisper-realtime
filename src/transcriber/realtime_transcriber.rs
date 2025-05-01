@@ -19,7 +19,8 @@ use crate::whisper::configs::Configs;
 // Building with GPU support is currently recommended.
 
 // Possible feature: Non-vad implementation using token_buffer to seed next transcription.
-
+// ^^ Bad idea, not really necessary, window overlaps during realtime and VAD helps with word-boundaries
+// TODO: cleanup, remove panicking
 #[cfg(not(feature = "crossbeam"))]
 pub struct RealtimeTranscriber {
     configs: Arc<Configs>,
@@ -189,6 +190,7 @@ impl Transcriber for RealtimeTranscriber {
             self.audio
                 .get_audio(self.configs.vad_sample_ms, &mut audio_samples_vad);
 
+            // TODO: refactor this once VAD has been refactored
             let check_voice_detected = match &mut self.vad {
                 None => Self::is_voice_detected_naive(
                     constants::WHISPER_SAMPLE_RATE,
@@ -240,7 +242,8 @@ impl Transcriber for RealtimeTranscriber {
             }
 
             t_last = t_now;
-
+            // TODO: this doesn't make a lot of sense; the configurations do not change during runtime, as far as I remember.
+            // And if they do, they shouldn't
             let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
             Self::set_full_params(&mut params, &self.configs, None);
 
@@ -251,6 +254,7 @@ impl Transcriber for RealtimeTranscriber {
 
             if let Err(e) = result {
                 self.data_sender
+                    // It makes more sense as a function that returns Whisper FullParams
                     .send(Err(WhisperRealtimeError::TranscriptionError(format!(
                         "WhisperError: {}",
                         e

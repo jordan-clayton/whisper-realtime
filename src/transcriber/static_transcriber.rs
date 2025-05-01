@@ -29,6 +29,7 @@ pub enum SupportedAudioSample {
     F32(Vec<f32>),
 }
 
+// TODO: this is probably not necessary; just convert to mono before transcription
 #[derive(Copy, Clone, PartialEq)]
 pub enum SupportedChannels {
     MONO,

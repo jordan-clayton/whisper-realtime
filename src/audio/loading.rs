@@ -58,8 +58,7 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
         .default_track()
         .ok_or(WhisperRealtimeError::ParameterError(
             "Failed to get default track".to_owned(),
-        ))?
-        .clone();
+        ))?;
 
     // Get the codec parameters before passing ownership to the decode loop.
     let codec_params = &track.codec_params;

@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+// TODO: rethink arguments, it should be possible to encapsulate the whisper state/context within the transcriber object
+// There's no reason as to why the context cannot be constructed/owned by the transcriber
 pub trait Transcriber {
     fn process_audio(
         &mut self,
@@ -8,6 +10,9 @@ pub trait Transcriber {
         run_transcription: Arc<AtomicBool>,
         progress_callback: Option<impl FnMut(i32) + Send + Sync + 'static>,
     ) -> String;
+    // TODO: possibly rethink this -> this should only really need to happen once
+    // It doesn't necessarily need to be a trait method.
+    // It makes more sense as a function that returns Whisper FullParams
     fn set_full_params<'a>(
         full_params: &mut whisper_rs::FullParams<'a, 'a>,
         prefs: &'a crate::whisper::configs::Configs,

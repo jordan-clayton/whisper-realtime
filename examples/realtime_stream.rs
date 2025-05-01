@@ -132,7 +132,7 @@ fn main() {
 
     // Setup
     let mic_stream: AudioDevice<AudioRecorderVecSender<f32>> =
-        microphone::build_audio_stream(&audio_subsystem, &desired_audio_spec, a_sender);
+        microphone::build_audio_stream(&audio_subsystem, &desired_audio_spec, a_sender)?;
 
     // Model params
     let mut whisper_ctx_params = whisper_rs::WhisperContextParameters::default();

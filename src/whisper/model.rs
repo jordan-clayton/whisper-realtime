@@ -3,6 +3,11 @@ use std::fs;
 // TODO: CoreML support.
 // TODO: user-defined model to allow compatible ggml models to be used.
 // TODO: rethink this; don't love it.
+// Proposed solution: hard-code the "Available-to-download" models that link with huggingface
+// Keep the ModelType enumeration, move model_file_name, url methods to the enumeration
+
+// Model should have: a user-friendly name, a file-name
+// Model should accept a "Data directory" as an argument to resolve the full file-path
 pub struct Model {
     pub model_type: ModelType,
     data_directory: std::path::PathBuf,
@@ -36,16 +41,16 @@ impl Model {
             data_directory: path,
         }
     }
-    pub fn with_data_dir(&self, path: std::path::PathBuf) -> Self {
+    pub fn new_with_data_dir(path: std::path::PathBuf) -> Self {
         Self {
-            model_type: self.model_type,
+            model_type: ModelType::default(),
             data_directory: path,
         }
     }
 
-    pub fn new_with_data_dir(path: std::path::PathBuf) -> Self {
+    pub fn with_data_dir(self, path: std::path::PathBuf) -> Self {
         Self {
-            model_type: ModelType::default(),
+            model_type: self.model_type,
             data_directory: path,
         }
     }

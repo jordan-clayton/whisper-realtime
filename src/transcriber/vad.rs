@@ -25,6 +25,10 @@ impl Default for VadStrategy {
     }
 }
 
+// This doesn't really make sense together as a trait.
+// TODO: split into structs SileroVoiceActivityDetection, and NaiveVoiceActivityDetection or some flavour thereof
+// and implement is_voice_detected(samples)
+// Take configurations in as an object or as parameters
 pub trait VoiceActivityDetection<
     T: voice_activity_detector::Sample
         + num_traits::cast::NumCast

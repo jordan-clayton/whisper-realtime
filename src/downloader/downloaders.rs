@@ -151,7 +151,6 @@ impl<R: Read> SyncDownload for SyncDownloader<R> {
         let mut dest = dest.unwrap();
         let source = &mut self.file_stream;
 
-        // This will call the callback.
         std::io::copy(source, &mut dest)?;
 
         Ok(())
