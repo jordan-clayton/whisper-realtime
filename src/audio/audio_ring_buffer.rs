@@ -1,5 +1,5 @@
+use std::sync::{Mutex, MutexGuard};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
 
 use sdl2::audio::AudioFormatNum;
 
@@ -10,6 +10,7 @@ pub struct AudioRingBuffer<T: Default + Clone + Copy + AudioFormatNum + 'static>
     audio_len: AtomicUsize,
     capacity_ms: AtomicUsize,
     buffer_len: AtomicUsize,
+    sample_rate: AtomicUsize,
     buffer: Mutex<Vec<T>>,
 }
 
@@ -18,12 +19,14 @@ unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Sync for Audio
 
 unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Send for AudioRingBuffer<T> {}
 
+// TODO: is it though? -> This can probably be refactored out.
 /// A zero-length / zero-sample-rate buffer is considered invalid
 /// Sending invalid parameters will return None
 impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
     // A 1 second @ WHISPER_SAMPLE_RATE buffer
     pub fn new() -> Self {
         let buffer_size = constants::WHISPER_SAMPLE_RATE as usize;
+        let sample_rate = AtomicUsize::new(buffer_size);
         let head = AtomicUsize::new(0);
         let audio_len = AtomicUsize::new(0);
         let capacity_ms = AtomicUsize::new(1000);
@@ -33,6 +36,7 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
             audio_len,
             capacity_ms,
             buffer_len,
+            sample_rate,
             buffer: Mutex::new(vec![T::default(); buffer_size]),
         }
     }
@@ -48,12 +52,14 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
         let head = AtomicUsize::new(0);
         let audio_len = AtomicUsize::new(0);
         let capacity_ms = AtomicUsize::new(capacity_ms);
+        let sample_rate = AtomicUsize::new(s_rate as usize);
 
         Some(Self {
             head,
             audio_len,
             capacity_ms,
             buffer_len,
+            sample_rate,
             buffer: Mutex::new(vec![T::default(); buffer_size]),
         })
     }
@@ -62,19 +68,48 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
         if capacity_ms < 1 {
             return None;
         }
-        let buffer_size = self.buffer_len.load(Ordering::Acquire) as f64;
-        let l = self.capacity_ms.load(Ordering::Acquire) as f64;
-        // This will panic on zero-division
-        let sample_rate = Some((buffer_size * 1000.) / l);
-        Self::new_with_size(capacity_ms, sample_rate)
+
+        let mut buf = self.get_buffer();
+        self.capacity_ms.store(capacity_ms, Ordering::Release);
+        // Resize the buffer
+        let sample_rate = self.sample_rate.load(Ordering::Acquire);
+        let buffer_size = (capacity_ms as f64 / 1000. * sample_rate as f64) as usize;
+        self.buffer_len.store(buffer_size, Ordering::Release);
+        buf.resize(buffer_size, T::default());
+        drop(buf);
+        Some(self)
+    }
+    fn get_buffer(&self) -> MutexGuard<'_, Vec<T>> {
+        // Get the buffer.
+        let try_guard = self.buffer.lock();
+
+        let buf = if let Err(e) = try_guard {
+            eprintln!("Audio ringbuffer mutex poisoned, {}", e);
+            self.buffer.clear_poison();
+            e.into_inner()
+        } else {
+            try_guard.unwrap()
+        };
+        buf
     }
 
     pub fn with_sample_rate(self, sample_rate: f64) -> Option<Self> {
         if sample_rate <= 0.0 {
             return None;
         }
-        let len_ms = self.capacity_ms.load(Ordering::Acquire);
-        Self::new_with_size(len_ms, Some(sample_rate))
+        // Get the buffer.
+        let mut buf = self.get_buffer();
+
+        self.sample_rate
+            .store(sample_rate as usize, Ordering::Release);
+
+        // Resize the buffer
+        let capacity_ms = self.capacity_ms.load(Ordering::Acquire);
+        let buffer_size = (capacity_ms as f64 / 1000. * sample_rate) as usize;
+        self.buffer_len.store(buffer_size, Ordering::Release);
+        buf.resize(buffer_size, T::default());
+        drop(buf);
+        Some(self)
     }
     pub fn audio_len(&self) -> usize {
         self.audio_len.load(Ordering::Acquire)

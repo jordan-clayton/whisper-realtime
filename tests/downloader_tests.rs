@@ -1,4 +1,5 @@
 ///NOTE: These have to be run with the downloader feature enabled
+/// At the moment all tests pass.
 #[cfg(test)]
 #[cfg(feature = "downloader")]
 mod downloader_tests {
@@ -8,6 +9,7 @@ mod downloader_tests {
 
     use whisper_realtime::downloader;
     use whisper_realtime::downloader::traits::{AsyncDownload, SyncDownload};
+    use whisper_realtime::utils::callback::ProgressCallback;
     use whisper_realtime::utils::errors::WhisperRealtimeError;
     use whisper_realtime::whisper::model;
 
@@ -30,7 +32,7 @@ mod downloader_tests {
         let handle = rt.handle();
 
         // NOTE: callback url is public and can be set after creating the struct.
-        let stream_downloader = downloader::request::async_download_request(&client, url, None);
+        let stream_downloader = downloader::request::async_download_request(&client, url);
 
         // Run the future -> At this time, tokio is not being used for async and this cannot be awaited in testing.
         let stream_downloader = handle.block_on(stream_downloader);
@@ -42,20 +44,22 @@ mod downloader_tests {
             format!("{}", stream_downloader.err().unwrap())
         );
 
-        let mut stream_downloader = stream_downloader.unwrap();
+        let stream_downloader = stream_downloader.unwrap();
 
         // Initiate a progress bar.
-        let pb = ProgressBar::new(stream_downloader.total_size as u64);
+        let pb = ProgressBar::new(stream_downloader.total_size() as u64);
         pb.set_style(ProgressStyle::default_bar()
             .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})").unwrap()
             .progress_chars("#>-")
         );
 
         let pb_c = pb.clone();
-
-        stream_downloader.progress_callback = Some(move |n: usize| {
+        let progress_callback_function = move |n: usize| {
             pb_c.set_position(n as u64);
-        });
+        };
+        let progress_callback = ProgressCallback::new(progress_callback_function);
+
+        let mut stream_downloader = stream_downloader.with_progress_callback(progress_callback);
 
         // File Path:
         let file_directory = model.model_directory();

@@ -8,17 +8,17 @@ use std::thread::scope;
 use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressStyle};
-use sdl2::audio::AudioDevice;
+use whisper_rs::install_logging_hooks;
 
 use whisper_realtime::audio::audio_ring_buffer::AudioRingBuffer;
 use whisper_realtime::audio::microphone;
-use whisper_realtime::audio::recorder::AudioRecorderVecSender;
 #[cfg(feature = "downloader")]
 use whisper_realtime::downloader::request;
 #[cfg(feature = "downloader")]
 use whisper_realtime::downloader::traits::AsyncDownload;
 use whisper_realtime::transcriber::{realtime_transcriber, static_transcriber};
 use whisper_realtime::transcriber::traits::Transcriber;
+use whisper_realtime::utils::callback::ProgressCallback;
 use whisper_realtime::utils::constants;
 use whisper_realtime::whisper::{configs, model};
 
@@ -48,13 +48,13 @@ fn main() {
         let rt = tokio::runtime::Runtime::new().expect("Failed to build tokio runtime");
         let handle = rt.handle();
 
-        let stream_downloader = request::async_download_request(&client, url, None);
-        let mut stream_downloader = handle
+        let stream_downloader = request::async_download_request(&client, url);
+        let stream_downloader = handle
             .block_on(stream_downloader)
             .expect("Failed to make download request");
 
         // Initiate a progress bar.
-        let pb = ProgressBar::new(stream_downloader.total_size as u64);
+        let pb = ProgressBar::new(stream_downloader.total_size() as u64);
         pb.set_style(ProgressStyle::default_bar()
             .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})").unwrap()
             .progress_chars("#>-")
@@ -63,9 +63,12 @@ fn main() {
 
         let pb_c = pb.clone();
 
-        stream_downloader.progress_callback = Some(move |n: usize| {
+        // Set the progress callback
+        let progress_callback_closure = move |n: usize| {
             pb_c.set_position(n as u64);
-        });
+        };
+        let progress_callback = ProgressCallback::new(progress_callback_closure);
+        let mut stream_downloader = stream_downloader.with_progress_callback(progress_callback);
 
         // File Path:
         let file_directory = model.model_directory();
@@ -131,8 +134,15 @@ fn main() {
     );
 
     // Setup
-    let mic_stream: AudioDevice<AudioRecorderVecSender<f32>> =
-        microphone::build_audio_stream(&audio_subsystem, &desired_audio_spec, a_sender)?;
+    let mic_stream =
+        microphone::build_audio_stream(&audio_subsystem, &desired_audio_spec, a_sender);
+
+    if let Err(e) = mic_stream.as_ref() {
+        eprintln!("{}", e);
+        return;
+    }
+
+    let mic_stream = mic_stream.unwrap();
 
     // Model params
     let mut whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
@@ -177,6 +187,8 @@ fn main() {
     let static_audio_buffer_c = static_audio_buffer_p.clone();
 
     let transcriber_thread = scope(|s| {
+        // Hide the logging away from stdout
+        install_logging_hooks();
         mic_stream.resume();
         let _audio_thread = s.spawn(move || {
             let mut t_static_audio_buffer = static_audio_buffer_c

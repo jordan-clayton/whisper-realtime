@@ -18,7 +18,6 @@ ctrlc = "3.4.4"
 # voice_activity_detector builds without HW acceleration atm; might look into this, but speed is not an issue.
 voice_activity_detector = "0.2.0"
 sdl2 = "0.37.0"
-indicatif = { version = "0.17.8", optional = true }
 reqwest = { version = "0.12.5", features = ["blocking", "stream"], optional = true }
 futures = "0.3.30"
 futures-util = "0.3.30"
@@ -37,6 +36,7 @@ url = "2.5.4"
 
 [dev-dependencies]
 criterion = "0.5.1"
+indicatif = "0.17.8"
 
 # See: https://github.com/tazz4843/whisper-rs/blob/master/BUILDING.md for building on Windows/MacOS
 [target.aarch64-apple-darwin]
@@ -52,7 +52,8 @@ _gpu = []
 strum = ["dep:strum"]
 crossbeam = ["dep:crossbeam"]
 serde = ["dep:serde"]
-downloader = ["dep:reqwest", "dep:tokio", "dep:indicatif"]
+downloader = ["dep:reqwest", "dep:tokio"]
+testing = []
 resampler = ["dep:rubato"]
 extras = ["downloader", "resampler"]
 cuda = ["whisper-rs/cuda", "_gpu"]

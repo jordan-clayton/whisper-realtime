@@ -11,9 +11,11 @@ use symphonia::core::probe::{Hint, ProbeResult};
 #[cfg(feature = "resampler")]
 use crate::audio::resampler::{AudioSample, needs_normalizing, normalize_audio};
 use crate::transcriber::static_transcriber::SupportedAudioSample;
+use crate::utils::callback::{Callback, Nop, ProgressCallback};
 use crate::utils::errors::WhisperRealtimeError;
 
-// TODO: cleanup
+// TODO: finish cleanup
+// TODO: audio loading tests
 
 fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, WhisperRealtimeError> {
     let file = Box::new(File::open(path)?);
@@ -25,9 +27,11 @@ fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, Whisp
     Ok(probe)
 }
 
-// TODO: maybe don't wrap in the struct at the end?
+// The optional progress callback returns the number of bytes read per iteration of the decoding loop.
+// TODO: determine whether mut is necessary here.
 pub fn load_audio_file<P: AsRef<Path>>(
     path: P,
+    progress_callback: Option<impl FnMut(usize)>,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
     let decoder_opts = Default::default();
     let probed = get_audio_probe(path)?;
@@ -41,15 +45,20 @@ pub fn load_audio_file<P: AsRef<Path>>(
 
     let decoder = symphonia::default::get_codecs().make(&track.codec_params, &decoder_opts)?;
     // Decode loop
-    let samples = decode_loop(track.id, decoder, format);
+    let samples = match progress_callback {
+        Some(p) => decode_loop(track.id, decoder, format, ProgressCallback::new(p)),
+        None => decode_loop(track.id, decoder, format, Nop::new()),
+    };
     Ok(SupportedAudioSample::F32(samples))
 }
 
 // This will return f32 audio normalized for whisper
-// TODO: maybe don't wrap in the struct at the end?
+// The optional progress callback returns the number of bytes read per iteration of the decoding loop.
+// TODO: determine whether mut is necessary here.
 #[cfg(feature = "resampler")]
 pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     path: P,
+    progress_callback: Option<impl FnMut(usize)>,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
     let decoder_opts = Default::default();
     let probed = get_audio_probe(path)?;
@@ -78,7 +87,11 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     let needs_normalizing = needs_normalizing(&track);
     let decoder = symphonia::default::get_codecs().make(&track.codec_params, &decoder_opts)?;
     // Decode loop
-    let samples = decode_loop(track.id, decoder, format);
+
+    let samples = match progress_callback {
+        Some(p) => decode_loop(track.id, decoder, format, ProgressCallback::new(p)),
+        None => decode_loop(track.id, decoder, format, Nop::new()),
+    };
 
     // Normalize
     if needs_normalizing? {
@@ -89,42 +102,51 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     }
 }
 
-// TODO: add decode_loop with progress callback
-// TODO: clean this up
+// The progress callback returns the number of bytes read: Samples * sizeOf f32
 fn decode_loop(
     track_id: u32,
     mut decoder: Box<dyn Decoder>,
     mut reader: Box<dyn FormatReader>,
+    mut progress_callback: impl Callback<Argument = usize>,
 ) -> Vec<f32> {
     let mut samples = vec![];
     let mut sample_buf = None;
 
-    // TODO: error handling, remove the panic
     loop {
-        let packet = match reader.next_packet() {
-            Ok(p) => p,
-            Err(e) => panic!("{}", e),
-        };
+        let next_packet = reader.next_packet();
+        // This is the only recoverable error - and only applies to chained OGG
+        // For all other containers, afaik, this can be "The end" of the stream
+        // if let Err(Error::ResetRequired) = next_packet.as_ref() {
+        //     break;
+        // }
+        // Otherwise, an unrecoverable error has occured; break the decoding loop
+        if let Err(_) = next_packet.as_ref() {
+            break;
+        }
+        // Otherwise, unpack the packet and let the error bubble up
+        let packet = next_packet.unwrap();
 
         // Consume metadata; not really sure what to do with this.
         while !reader.metadata().is_latest() {
             reader.metadata().pop();
         }
 
+        // Skip over irrelevant tracks
         if packet.track_id() != track_id {
             continue;
         }
+
         match decoder.decode(&packet) {
             Ok(audio_buffer) => {
                 if sample_buf.is_none() {
-                    let spec = *audio_buffer.spec();
+                    let spec = *(audio_buffer.spec());
                     let duration = audio_buffer.capacity() as u64;
                     sample_buf = Some(SampleBuffer::<f32>::new(duration, spec));
                 }
 
                 let in_mono = audio_buffer.spec().channels.iter().count() == 1;
 
-                if let Some(buf) = &mut sample_buf {
+                if let Some(buf) = sample_buf.as_mut() {
                     if in_mono {
                         buf.copy_planar_ref(audio_buffer);
                     } else {
@@ -132,12 +154,15 @@ fn decode_loop(
                     }
 
                     samples.extend_from_slice(buf.samples());
+                    progress_callback.call(buf.samples().len() * size_of::<f32>())
                 }
             }
-            // TODO: proper error handling
+            // Skip malformed data
             Err(Error::DecodeError(_)) => (),
+            // On an IO/Seek error, just break the loop.
             Err(_) => break,
         };
     }
+    // Return all decoded samples
     samples
 }

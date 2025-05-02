@@ -8,6 +8,7 @@ use sdl2::AudioSubsystem;
 use crate::audio::recorder::{AudioRecorderSliceSender, AudioRecorderVecSender};
 use crate::utils::errors::WhisperRealtimeError;
 
+// TODO: fix naming; possibly don't expose and hide with a macro
 #[inline]
 pub fn get_desired_audio_spec(
     freq: Option<i32>,

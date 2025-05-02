@@ -15,15 +15,17 @@ use crate::utils::errors::WhisperRealtimeError;
 // TODO: test this implementation
 
 // This is to restrict the audio to supported formats.
+// TODO: determine whether reference is fine.
 pub enum AudioSample<'a> {
     I16(&'a [i16]),
     F32(&'a [f32]),
     F64(&'a [f64]),
 }
 
-/// Resamples audio to 16kHz for Whisper processing
+/// Resamples decoded audio to 16kHz for Whisper processing
 /// Packages into a SupportedAudioSample which can be passed to a StaticTranscriber
-/// Audio will be converted to f32, because it is the most convenient
+/// Audio will be converted to f32 because it is the most convenient for the application
+/// TODO: return a vector, not a SupportedAudioSample; the struct wrapping is not appropriate here.
 pub fn resample(
     samples: &AudioSample,
     out_sample_rate: f64,

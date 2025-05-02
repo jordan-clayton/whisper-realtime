@@ -5,17 +5,18 @@ pub use futures_core::stream::Stream;
 pub use reqwest::{self, Url};
 
 use crate::downloader::downloaders::{StreamDownloader, SyncDownloader};
+use crate::utils::callback::Nop;
 use crate::utils::errors::WhisperRealtimeError;
 
-/// Returns a StreamDownloader struct encapsulating the request bytestream, progress, total
-/// response size, and an optional callback function to receive progress updates.
+/// Returns a StreamDownloader struct encapsulating the request bytestream, progress,
+/// and total response size
+/// Use the .with_progress_callback() to set an optional progress callback
 /// This function must be awaited and should not be called on a UI thread.
-pub async fn async_download_request<CB: Fn(usize)>(
+pub async fn async_download_request(
     client: &reqwest::Client,
     url: &str,
-    progress_callback: Option<CB>,
 ) -> Result<
-    StreamDownloader<impl Stream<Item = Result<Bytes, reqwest::Error>>, CB>,
+    StreamDownloader<impl Stream<Item = Result<Bytes, reqwest::Error>>, Nop<usize>>,
     WhisperRealtimeError,
 > {
     let m_url = Url::parse(url)?;
@@ -36,7 +37,9 @@ pub async fn async_download_request<CB: Fn(usize)>(
         ))? as usize;
 
     let stream = res.bytes_stream();
-    Ok(StreamDownloader::new(stream, total_size, progress_callback))
+    // Return the appropriate streamdownloader.
+    // Uh.
+    Ok(StreamDownloader::new_with_parameters(stream, total_size))
 }
 
 /// Returns a SyncDownloader struct encapsulating the downloaded response, progress,
@@ -65,5 +68,5 @@ pub fn sync_download_request(
             "Failed to get content length".to_owned(),
         ))? as usize;
 
-    Ok(SyncDownloader::new(res, total_size))
+    Ok(SyncDownloader::new_with_parameters(res, total_size))
 }
