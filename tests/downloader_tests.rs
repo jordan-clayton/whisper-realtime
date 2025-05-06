@@ -5,16 +5,20 @@
 mod downloader_tests {
     use indicatif::{ProgressBar, ProgressStyle};
     use reqwest;
+    #[cfg(feature = "downloader-async")]
     use tokio::runtime::Runtime;
 
     use whisper_realtime::downloader;
-    use whisper_realtime::downloader::traits::{AsyncDownload, SyncDownload};
+    #[cfg(feature = "downloader-async")]
+    use whisper_realtime::downloader::traits::AsyncDownload;
+    use whisper_realtime::downloader::traits::SyncDownload;
     use whisper_realtime::utils::callback::ProgressCallback;
     use whisper_realtime::utils::errors::WhisperRealtimeError;
     use whisper_realtime::whisper::model;
 
     #[test]
     #[ignore]
+    #[cfg(feature = "downloader-async")]
     fn test_async_download() {
         let model: model::Model = model::Model::default();
 
@@ -31,7 +35,7 @@ mod downloader_tests {
         let rt = Runtime::new().unwrap();
         let handle = rt.handle();
 
-        // NOTE: callback url is public and can be set after creating the struct.
+        // NOTE: callback url is public and can be set after creating the struct by using the builder.
         let stream_downloader = downloader::request::async_download_request(&client, url);
 
         // Run the future -> At this time, tokio is not being used for async and this cannot be awaited in testing.
@@ -97,7 +101,7 @@ mod downloader_tests {
         let url = url.as_str();
         let client = reqwest::blocking::Client::new();
 
-        // NOTE: callback url is public and can be set after creating the struct.
+        // NOTE: callback url is public and can be set after creating the struct by using the builder.
         let sync_downloader = downloader::request::sync_download_request(&client, url);
 
         // Ensure proper struct creation + download.
@@ -107,12 +111,27 @@ mod downloader_tests {
             format!("{}", sync_downloader.err().unwrap())
         );
 
-        let mut sync_downloader = sync_downloader.unwrap();
+        let sync_downloader = sync_downloader.unwrap();
 
         // File Path:
         let file_directory = model.model_directory();
         let file_directory = file_directory.as_path();
         let file_name = model.model_file_name();
+
+        // Initiate a progress bar.
+        let pb = ProgressBar::new(sync_downloader.total_size() as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})").unwrap()
+            .progress_chars("#>-")
+        );
+
+        let pb_c = pb.clone();
+        let progress_callback_function = move |n: usize| {
+            pb_c.set_position(n as u64);
+        };
+        let progress_callback = ProgressCallback::new(progress_callback_function);
+
+        let mut sync_downloader = sync_downloader.with_progress_callback(progress_callback);
 
         // File copy:
         let download: Result<(), WhisperRealtimeError> =

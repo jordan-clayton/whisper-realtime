@@ -52,7 +52,8 @@ _gpu = []
 strum = ["dep:strum"]
 crossbeam = ["dep:crossbeam"]
 serde = ["dep:serde"]
-downloader = ["dep:reqwest", "dep:tokio", "dep:bytes", "dep:futures", "dep:futures-util", "dep:futures-core"]
+downloader = ["dep:reqwest"]
+downloader-async = ["downloader", "dep:tokio", "dep:bytes", "dep:futures", "dep:futures-util", "dep:futures-core"]
 resampler = ["dep:rubato"]
 extras = ["downloader", "resampler"]
 cuda = ["whisper-rs/cuda", "_gpu"]
@@ -80,6 +81,10 @@ required-features = ["downloader"]
 [[test]]
 name = "resampler_tests"
 required-features = ["resampler"]
+
+[[test]]
+name = "downloader_tests"
+required-features = ["downloader-async"]
 
 
 

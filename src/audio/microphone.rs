@@ -48,6 +48,14 @@ impl AudioBackend {
         })
     }
 
+    // If access to the sdl_ctx or the audio_subsystem are required, use the following to obtain a copy
+    pub fn sdl_ctx(&self) -> Arc<Sdl> {
+        self.sdl_ctx.clone()
+    }
+    pub fn audio_subsystem(&self) -> AudioSubsystem {
+        self.audio_subsystem.clone()
+    }
+
     #[cfg(feature = "crossbeam")]
     pub fn build_microphone<T: Default + Clone + Copy + Send + Sync + AudioFormatNum + 'static>(
         &self,

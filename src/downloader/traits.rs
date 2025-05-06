@@ -3,7 +3,6 @@ use std::path::Path;
 
 use crate::utils::errors::WhisperRealtimeError;
 
-// TODO: clean this up? Abstraction is a little leaky.
 pub trait SyncDownload: Writable {
     fn download(
         &mut self,
@@ -12,6 +11,7 @@ pub trait SyncDownload: Writable {
     ) -> Result<(), WhisperRealtimeError>;
 }
 
+#[cfg(feature = "downloader-async")]
 pub trait AsyncDownload: Writable {
     fn download(
         &mut self,

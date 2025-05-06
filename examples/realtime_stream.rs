@@ -11,12 +11,10 @@ use indicatif::{ProgressBar, ProgressStyle};
 use whisper_rs::install_logging_hooks;
 
 use whisper_realtime::audio::audio_ring_buffer::AudioRingBuffer;
-use whisper_realtime::audio::microphone;
 use whisper_realtime::audio::microphone::AudioBackend;
 #[cfg(feature = "downloader")]
 use whisper_realtime::downloader::request;
-#[cfg(feature = "downloader")]
-use whisper_realtime::downloader::traits::AsyncDownload;
+use whisper_realtime::downloader::traits::SyncDownload;
 use whisper_realtime::transcriber::{realtime_transcriber, static_transcriber};
 use whisper_realtime::transcriber::traits::Transcriber;
 use whisper_realtime::utils::callback::ProgressCallback;
@@ -44,18 +42,17 @@ fn main() {
 
         let url = model.url();
         let url = url.as_str();
-        let client = reqwest::Client::new();
+        let client = reqwest::blocking::Client::new();
 
-        let rt = tokio::runtime::Runtime::new().expect("Failed to build tokio runtime");
-        let handle = rt.handle();
+        let sync_downloader = request::sync_download_request(&client, url);
+        if let Err(e) = sync_downloader.as_ref() {
+            eprintln!("{}", e);
+        }
 
-        let stream_downloader = request::async_download_request(&client, url);
-        let stream_downloader = handle
-            .block_on(stream_downloader)
-            .expect("Failed to make download request");
+        let sync_downloader = sync_downloader.unwrap();
 
         // Initiate a progress bar.
-        let pb = ProgressBar::new(stream_downloader.total_size() as u64);
+        let pb = ProgressBar::new(sync_downloader.total_size() as u64);
         pb.set_style(ProgressStyle::default_bar()
             .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})").unwrap()
             .progress_chars("#>-")
@@ -69,17 +66,15 @@ fn main() {
             pb_c.set_position(n as u64);
         };
         let progress_callback = ProgressCallback::new(progress_callback_closure);
-        let mut stream_downloader = stream_downloader.with_progress_callback(progress_callback);
+        let mut sync_downloader = sync_downloader.with_progress_callback(progress_callback);
 
         // File Path:
         let file_directory = model.model_directory();
         let file_directory = file_directory.as_path();
         let file_name = model.model_file_name();
 
-        let download = stream_downloader.download(file_directory, file_name);
-
-        let _ = handle.block_on(download).expect("Failed to download model");
-
+        let download = sync_downloader.download(file_directory, file_name);
+        assert!(download.is_ok());
         assert!(model.is_downloaded());
     }
 
@@ -314,7 +309,7 @@ fn main() {
             .create_state()
             .expect("failed to create state for static re-transcription");
 
-        println!("Offline Transcribing: ");
+        println!("Offline Transcribing...");
 
         // Initiate a progress bar.
         let pb = ProgressBar::new(100);
