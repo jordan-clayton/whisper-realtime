@@ -28,7 +28,6 @@ fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, Whisp
 }
 
 // The optional progress callback returns the number of bytes read per iteration of the decoding loop.
-// TODO: determine whether mut is necessary here.
 pub fn load_audio_file<P: AsRef<Path>>(
     path: P,
     progress_callback: Option<impl FnMut(usize)>,
@@ -54,7 +53,6 @@ pub fn load_audio_file<P: AsRef<Path>>(
 
 // This will return f32 audio normalized for whisper
 // The optional progress callback returns the number of bytes read per iteration of the decoding loop.
-// TODO: determine whether mut is necessary here.
 #[cfg(feature = "resampler")]
 pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     path: P,

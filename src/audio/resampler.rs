@@ -4,7 +4,7 @@ use std::path::Path;
 use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
-use symphonia::core::formats::{FormatReader, Track};
+use symphonia::core::formats::Track;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::Hint;
 
