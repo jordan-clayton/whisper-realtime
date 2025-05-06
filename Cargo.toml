@@ -30,7 +30,7 @@ realfft = "3.3.0"
 hound = "3.5.1"
 crossbeam = { version = "0.8.4", optional = true }
 strum = { version = "0.27.1", features = ["derive"], optional = true }
-symphonia = "0.5.4"
+symphonia = { version = "0.5.4", features = ["mp3", "opt-simd"] }
 thiserror = "2.0.12"
 url = "2.5.4"
 
@@ -63,6 +63,11 @@ openblas = ["whisper-rs/openblas"]
 hipblas = ["whisper-rs/hipblas", "_gpu"]
 coreml = ["whisper-rs/coreml", "_gpu"]
 metal = ["whisper-rs/metal", "_gpu"]
+# Pass-through Symphonia feature flags.
+symphonia-all = ["symphonia/all-codecs"]
+symphonia-mpeg = ["symphonia/mpa"]
+symphonia-aac = ["symphonia/aac"]
+symphonia-alac = ["symphonia/alac"]
 
 [[bench]]
 name = "recorder_benchmark"

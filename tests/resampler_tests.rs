@@ -31,6 +31,13 @@ mod resampler_test {
 
         assert!(needs_normalizing);
     }
+
+    #[test]
+    fn test_needs_resampling_mp3() {
+        let needs_normalizing = file_needs_normalizing("tests/audio_files/test_mp3.mp3").unwrap();
+
+        assert!(needs_normalizing);
+    }
     // Loads some audio at 44.1 khz, resamples it to 16kHz, then writes it to an output file.
     // The audio will need to be checked manually to ensure the integrity
     #[test]
@@ -72,6 +79,48 @@ mod resampler_test {
             None::<fn(usize)>,
         )
         .unwrap();
+        let t_audio = Arc::new(Mutex::new(audio));
+
+        let mut configs = Configs::default();
+        // This presumes a model is already downloaded. Handle accordingly.
+        configs.model = ModelType::MediumEn;
+        let c_configs = Arc::new(configs);
+
+        let mut static_transcriber = StaticTranscriber::new_with_configs(
+            t_audio.clone(),
+            None,
+            c_configs.clone(),
+            SupportedChannels::MONO,
+        );
+        // Set up whisper
+        let mut proj_dir = std::env::current_dir().unwrap();
+        proj_dir.push("data");
+        let model = Model::new_with_type_and_dir(ModelType::MediumEn, proj_dir.to_path_buf());
+
+        let whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
+        let ctx = whisper_rs::WhisperContext::new_with_params(
+            model.file_path().to_str().unwrap(),
+            whisper_ctx_params,
+        )
+        .expect("Failed to load model.");
+
+        let mut state = ctx.create_state().expect("Failed to create state");
+        let run_transcription = Arc::new(AtomicBool::new(true));
+        // Transcribe the audio
+        let transcription =
+            static_transcriber.process_audio(&mut state, run_transcription, None::<fn(i32)>);
+
+        assert_eq!(transcription, expected_transcription);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_resample_whisper_from_mp3() {
+        let expected_transcription =
+            "Mary has many dreams but can't touch Tennessee by way of flight.";
+
+        let audio = load_normalized_audio_file("tests/audio_files/test_mp3.mp3", None::<fn(usize)>)
+            .unwrap();
         let t_audio = Arc::new(Mutex::new(audio));
 
         let mut configs = Configs::default();
