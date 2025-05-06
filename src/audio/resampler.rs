@@ -12,10 +12,7 @@ use crate::transcriber::static_transcriber::SupportedAudioSample;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
-// TODO: test this implementation
-
-// This is to restrict the audio to supported formats.
-// TODO: determine whether reference is fine.
+// This is to restrict the audio to formats supported by rubato.
 pub enum AudioSample<'a> {
     I16(&'a [i16]),
     F32(&'a [f32]),
@@ -25,7 +22,6 @@ pub enum AudioSample<'a> {
 /// Resamples decoded audio to 16kHz for Whisper processing
 /// Packages into a SupportedAudioSample which can be passed to a StaticTranscriber
 /// Audio will be converted to f32 because it is the most convenient for the application
-/// TODO: return a vector, not a SupportedAudioSample; the struct wrapping is not appropriate here.
 pub fn resample(
     samples: &AudioSample,
     out_sample_rate: f64,
@@ -37,7 +33,6 @@ pub fn resample(
             "Zero channels.".to_owned(),
         ));
     }
-    // TODO: check rubato examples
     let params = SincInterpolationParameters {
         sinc_len: 256,
         f_cutoff: 0.95,
@@ -74,7 +69,7 @@ pub fn resample(
 // These two functions have to take ownership of the resources for resampling
 // The original slice provided is untouched; these work on a copy of the samples.
 #[inline]
-pub fn resample_mono(
+fn resample_mono(
     samples: Vec<f32>,
     mut resampler: SincFixedIn<f32>,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
@@ -84,7 +79,7 @@ pub fn resample_mono(
 }
 
 #[inline]
-pub fn resample_stereo(
+fn resample_stereo(
     samples: Vec<f32>,
     mut resampler: SincFixedIn<f32>,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {
@@ -126,7 +121,6 @@ pub fn normalize_audio(
     }
 }
 
-// Probe and return a boolean
 pub fn file_needs_normalizing<P: AsRef<Path>>(path: P) -> Result<bool, WhisperRealtimeError> {
     let file = Box::new(File::open(path)?);
     let mss = MediaSourceStream::new(file, Default::default());
@@ -145,7 +139,6 @@ pub fn file_needs_normalizing<P: AsRef<Path>>(path: P) -> Result<bool, WhisperRe
     needs_normalizing(track)
 }
 
-// Possibly just inline the codec_params instead of accessing.
 #[inline]
 pub fn needs_normalizing(track: &Track) -> Result<bool, WhisperRealtimeError> {
     let sample_rate = track

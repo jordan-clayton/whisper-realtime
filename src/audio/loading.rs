@@ -14,8 +14,6 @@ use crate::transcriber::static_transcriber::SupportedAudioSample;
 use crate::utils::callback::{Callback, Nop, ProgressCallback};
 use crate::utils::errors::WhisperRealtimeError;
 
-// TODO: finish cleanup
-
 fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, WhisperRealtimeError> {
     let file = Box::new(File::open(path)?);
     let mss = MediaSourceStream::new(file, Default::default());

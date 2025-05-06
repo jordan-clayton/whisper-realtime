@@ -19,8 +19,7 @@ unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Sync for Audio
 
 unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Send for AudioRingBuffer<T> {}
 
-// TODO: is it though? -> This can probably be refactored out.
-/// A zero-length / zero-sample-rate buffer is considered invalid
+/// A zero-length / zero-sample-rate buffer is considered invalid; a 0-length RingBuffer is useless
 /// Sending invalid parameters will return None
 impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
     // A 1 second @ WHISPER_SAMPLE_RATE buffer
@@ -79,20 +78,6 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
         drop(buf);
         Some(self)
     }
-    fn get_buffer(&self) -> MutexGuard<'_, Vec<T>> {
-        // Get the buffer.
-        let try_guard = self.buffer.lock();
-
-        let buf = if let Err(e) = try_guard {
-            eprintln!("Audio ringbuffer mutex poisoned, {}", e);
-            self.buffer.clear_poison();
-            e.into_inner()
-        } else {
-            try_guard.unwrap()
-        };
-        buf
-    }
-
     pub fn with_sample_rate(self, sample_rate: f64) -> Option<Self> {
         if sample_rate <= 0.0 {
             return None;
@@ -111,6 +96,7 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
         drop(buf);
         Some(self)
     }
+
     pub fn audio_len(&self) -> usize {
         self.audio_len.load(Ordering::Acquire)
     }
@@ -120,7 +106,6 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
     pub fn buffer_len(&self) -> usize {
         self.buffer_len.load(Ordering::Acquire)
     }
-
     pub fn get_head_position(&self) -> usize {
         self.head.load(Ordering::Acquire)
     }
@@ -182,6 +167,7 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
             self.audio_len.store(new_audio_len, Ordering::Release);
         }
     }
+
     pub fn get_audio(&self, len_ms: usize, result: &mut Vec<T>) {
         let mut ms = len_ms.clone();
 
@@ -243,7 +229,6 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
             copy_buffer.copy_from_slice(stream);
         }
     }
-
     // Move the head and update audio length to 0
     // New data will overwrite old data, and grabbing audio from an empty ringbuffer will just
     // result in an empty vector
@@ -288,5 +273,19 @@ impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
         let new_len = audio_len - n_samples + constants::N_SAMPLES_KEEP;
         self.audio_len.store(new_len, Ordering::Release);
         self.head.store(start_pos, Ordering::Release);
+    }
+
+    fn get_buffer(&self) -> MutexGuard<'_, Vec<T>> {
+        // Get the buffer.
+        let try_guard = self.buffer.lock();
+
+        let buf = if let Err(e) = try_guard {
+            eprintln!("Audio ringbuffer mutex poisoned, {}", e);
+            self.buffer.clear_poison();
+            e.into_inner()
+        } else {
+            try_guard.unwrap()
+        };
+        buf
     }
 }

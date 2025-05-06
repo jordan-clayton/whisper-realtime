@@ -12,6 +12,7 @@ use whisper_rs::install_logging_hooks;
 
 use whisper_realtime::audio::audio_ring_buffer::AudioRingBuffer;
 use whisper_realtime::audio::microphone;
+use whisper_realtime::audio::microphone::AudioBackend;
 #[cfg(feature = "downloader")]
 use whisper_realtime::downloader::request;
 #[cfg(feature = "downloader")]
@@ -124,22 +125,21 @@ fn main() {
     })
     .expect("failed to set SIGINT handler");
 
-    // SDL
-    let ctx = sdl2::init().expect("Failed to initialize sdl");
-    let audio_subsystem = ctx.audio().expect("Failed to initialize audio");
-    let desired_audio_spec = microphone::get_desired_audio_spec(
-        Some(constants::WHISPER_SAMPLE_RATE as i32),
-        Some(1),
-        Some(1024),
-    );
+    let audio_backend = AudioBackend::new();
+    if let Err(e) = audio_backend.as_ref() {
+        eprintln!("{}", e);
+    }
 
-    // Setup
-    let mic_stream =
-        microphone::build_audio_stream(&audio_subsystem, &desired_audio_spec, a_sender);
+    let audio_backend = audio_backend.unwrap();
+    let microphone = audio_backend
+        .build_microphone(a_sender)
+        .with_sample_rate(Some(constants::WHISPER_SAMPLE_RATE as i32))
+        .with_num_channels(Some(1))
+        .with_sample_size(Some(1024));
 
+    let mic_stream = microphone.build();
     if let Err(e) = mic_stream.as_ref() {
         eprintln!("{}", e);
-        return;
     }
 
     let mic_stream = mic_stream.unwrap();
@@ -203,8 +203,8 @@ fn main() {
 
                 // Check for RecvError -> No senders
                 match output {
-                    Ok(mut audio_data) => {
-                        audio_p_mic.push_audio(&mut audio_data);
+                    Ok(audio_data) => {
+                        audio_p_mic.push_audio(&audio_data);
 
                         if let Some(a_vec) = t_static_audio_buffer.as_mut() {
                             // This might be a borrow problem.
@@ -314,7 +314,7 @@ fn main() {
             .create_state()
             .expect("failed to create state for static re-transcription");
 
-        println!("Static Transcribing: ");
+        println!("Offline Transcribing: ");
 
         // Initiate a progress bar.
         let pb = ProgressBar::new(100);
@@ -337,8 +337,7 @@ fn main() {
             }),
         );
         pb.finish_and_clear();
-        clear_stdout();
-        println!("Static re-transcription:");
+        println!("\nOffline re-transcription:");
         println!("{}", &output);
     }
 }
