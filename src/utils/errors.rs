@@ -32,4 +32,7 @@ pub enum WhisperRealtimeError {
     #[error("Download Error {0}")]
     #[cfg(feature = "downloader")]
     DownloadError(String),
+    #[error("JSON Parse Error {0}")]
+    #[cfg(feature = "integrity")]
+    JsonParseError(#[from] serde_json::Error),
 }

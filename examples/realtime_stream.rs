@@ -7,6 +7,8 @@ use std::sync::mpsc::{channel, sync_channel};
 use std::thread::scope;
 use std::time::Duration;
 
+#[cfg(feature = "crossbeam")]
+use crossbeam::channel;
 use indicatif::{ProgressBar, ProgressStyle};
 use whisper_rs::install_logging_hooks;
 
@@ -20,31 +22,34 @@ use whisper_realtime::transcriber::traits::Transcriber;
 use whisper_realtime::utils::callback::ProgressCallback;
 use whisper_realtime::utils::constants;
 use whisper_realtime::whisper::{configs, model};
+use whisper_realtime::whisper::model::Model;
 
 fn main() {
     // Download the model.
-    let mut proj_dir = std::env::current_dir().unwrap();
-    proj_dir.push("data");
-    let mut model = model::OldModel::new_with_data_dir(proj_dir.to_path_buf());
+    let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
 
     // GPU acceleration is currently required to run larger models in realtime.
-    model.model_type = if cfg!(feature = "_gpu") {
+    let model_type = if cfg!(feature = "_gpu") {
         model::DefaultModelType::Medium
     } else {
         model::DefaultModelType::Small
     };
 
-    if !model.is_downloaded() {
+    let model = Model::new_with_parameters(
+        model_type.as_ref(),
+        model_type.to_file_name(),
+        proj_dir.as_path(),
+    );
+
+    if !model.exists_in_directory() {
         println!("Downloading model:");
         stdout().flush().unwrap();
 
         // Downloading.
-
-        let url = model.url();
-        let url = url.as_str();
+        let url = model_type.url();
         let client = reqwest::blocking::Client::new();
 
-        let sync_downloader = request::sync_download_request(&client, url);
+        let sync_downloader = request::sync_download_request(&client, url.as_str());
         if let Err(e) = sync_downloader.as_ref() {
             eprintln!("{}", e);
         }
@@ -96,13 +101,13 @@ fn main() {
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(constants::INPUT_BUFFER_CAPACITY);
     #[cfg(feature = "crossbeam")]
-    let (a_sender, a_receiver) = crossbeam::channel::bounded(constants::INPUT_BUFFER_CAPACITY);
+    let (a_sender, a_receiver) = channel::bounded(constants::INPUT_BUFFER_CAPACITY);
 
     // Output sender
     #[cfg(not(feature = "crossbeam"))]
     let (o_sender, o_receiver) = channel();
     #[cfg(feature = "crossbeam")]
-    let (o_sender, o_receiver) = crossbeam::channel::unbounded();
+    let (o_sender, o_receiver) = channel::unbounded();
 
     let o_sender_p = o_sender.clone();
 

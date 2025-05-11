@@ -17,13 +17,13 @@ use crate::whisper::configs::Configs;
 // Workaround for whisper-rs issue #134 -- moving memory in rust causes a segmentation fault
 // in the progress callback.
 // Solution from: https://github.com/thewh1teagle/vibe/blob/main/core/src/transcribe.rs
-
+// TODO: migrate to once_cell
 lazy_static! {
     static ref PROGRESS_CALLBACK: Mutex<Option<Box<dyn FnMut(i32) + Send + Sync>>> =
         Mutex::new(None);
 }
 
-// TODO: these probably shouldn't be vectors; use [T]
+// TODO: these probably shouldn't be vectors; use [T] if possible/sensible.
 pub enum SupportedAudioSample {
     I16(Vec<i16>),
     F32(Vec<f32>),

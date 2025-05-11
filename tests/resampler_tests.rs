@@ -19,7 +19,7 @@ mod resampler_test {
     use whisper_realtime::transcriber::traits::Transcriber;
     use whisper_realtime::utils::constants;
     use whisper_realtime::whisper::configs::Configs;
-    use whisper_realtime::whisper::model::{DefaultModelType, OldModel};
+    use whisper_realtime::whisper::model::{DefaultModelType, Model};
 
     // Tests the resampling from a file path, which will also implicitly using the track handle
     #[test]
@@ -41,7 +41,6 @@ mod resampler_test {
     // Loads some audio at 44.1 khz, resamples it to 16kHz, then writes it to an output file.
     // The audio will need to be checked manually to ensure the integrity
     #[test]
-    #[ignore]
     fn test_resample() {
         let audio = load_normalized_audio_file(
             "tests/audio_files/128896__joshenanigans__sentence-recitation.wav",
@@ -69,7 +68,6 @@ mod resampler_test {
     // transcribe. The audio is simple enough such that the transcription should be 1:1
     // A successful transcription means the resampling is correct.
     #[test]
-    #[ignore]
     fn test_resample_whisper() {
         let expected_transcription =
             "Mary has many dreams but can't touch Tennessee by way of flight.";
@@ -93,10 +91,13 @@ mod resampler_test {
             SupportedChannels::MONO,
         );
         // Set up whisper
-        let mut proj_dir = std::env::current_dir().unwrap();
-        proj_dir.push("data");
-        let model =
-            OldModel::new_with_type_and_dir(DefaultModelType::MediumEn, proj_dir.to_path_buf());
+        let proj_dir = std::env::current_dir().unwrap().join("data");
+        let model_type = DefaultModelType::MediumEn;
+        let model = Model::new_with_parameters(
+            model_type.as_ref(),
+            model_type.to_file_name(),
+            proj_dir.as_path(),
+        );
 
         let whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
         let ctx = whisper_rs::WhisperContext::new_with_params(
@@ -115,7 +116,6 @@ mod resampler_test {
     }
 
     #[test]
-    #[ignore]
     fn test_resample_whisper_from_mp3() {
         let expected_transcription =
             "Mary has many dreams but can't touch Tennessee by way of flight.";
@@ -135,11 +135,15 @@ mod resampler_test {
             c_configs.clone(),
             SupportedChannels::MONO,
         );
+
         // Set up whisper
-        let mut proj_dir = std::env::current_dir().unwrap();
-        proj_dir.push("data");
-        let model =
-            OldModel::new_with_type_and_dir(DefaultModelType::MediumEn, proj_dir.to_path_buf());
+        let proj_dir = std::env::current_dir().unwrap().join("data");
+        let model_type = DefaultModelType::MediumEn;
+        let model = Model::new_with_parameters(
+            model_type.as_ref(),
+            model_type.to_file_name(),
+            proj_dir.as_path(),
+        );
 
         let whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
         let ctx = whisper_rs::WhisperContext::new_with_params(

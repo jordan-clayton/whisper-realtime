@@ -18,9 +18,7 @@ use crate::whisper::configs::Configs;
 // Realtime on CPU has not yet been tested and may or may not be feasible.
 // Building with GPU support is currently recommended.
 
-// Possible feature: Non-vad implementation using token_buffer to seed next transcription.
-// ^^ Bad idea, not really necessary, window overlaps during realtime and VAD helps with word-boundaries
-// TODO: cleanup, remove panicking
+// TODO: clean up implementation, encapsulate whisper context and setup logic.
 #[cfg(not(feature = "crossbeam"))]
 pub struct RealtimeTranscriber {
     configs: Arc<Configs>,
@@ -242,7 +240,7 @@ impl Transcriber for RealtimeTranscriber {
             }
 
             t_last = t_now;
-            // TODO: this doesn't make a lot of sense; the configurations do not change during runtime, as far as I remember.
+            // TODO: correct this. This doesn't make a lot of sense; the configurations do not change during runtime, as far as I remember.
             // And if they do, they shouldn't
             let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
             Self::set_full_params(&mut params, &self.configs, None);

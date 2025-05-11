@@ -1,9 +1,8 @@
 // Model unit tests
-// TODO: these will need to be refactored once the implementation has been redesigned
-// TODO: also, make the tests a little more useful
+// TODO: implement meaningful testing or remove this module, the old tests do not provide useful information.
 #[cfg(test)]
 mod model_tests {
-    use whisper_realtime::whisper::model::OldModel;
+    use whisper_realtime::whisper::model::DefaultModelType;
 
     #[test]
     fn test_model_file_path() {
@@ -18,6 +17,7 @@ mod model_tests {
             model_directory.push("RoamingAppData");
             model_directory.push("whisper_realtime");
             model_directory.push("data");
+            model_directory.push("models");
         }
 
         // NOTE: This has not been tested.
@@ -26,6 +26,7 @@ mod model_tests {
             model_directory.push("Library");
             model_directory.push("Application Support");
             model_directory.push("com.jordan.whisper_realtime");
+            model_directory.push("models");
         }
         #[cfg(target_os = "linux")]
         {
@@ -33,17 +34,22 @@ mod model_tests {
             model_directory.push("share");
             model_directory.push("whisper_realtime");
             model_directory.push("data");
+            model_directory.push("models");
         }
 
-        let model: OldModel = OldModel::default().with_data_dir(model_directory.clone());
+        let model = DefaultModelType::default()
+            .to_model()
+            .with_path_prefix(model_directory.as_path());
 
-        model_directory.push("models");
+        let test_dir = model.path_prefix().to_path_buf();
+        let test_dir_str = test_dir.as_os_str();
+        let expected_dir_str = model_directory.as_os_str();
 
-        let test_dir = model.model_directory();
-        let test_dir = test_dir.as_os_str();
-        let expected_dir = model_directory.as_os_str();
-
-        assert_eq!(test_dir, expected_dir,);
+        assert_eq!(
+            test_dir_str, expected_dir_str,
+            "Path mismatch. Test: {:?}, Expected: {:?}",
+            test_dir, expected_dir_str
+        );
     }
     #[test]
     fn test_file_path() {
@@ -57,6 +63,7 @@ mod model_tests {
             model_directory.push("RoamingAppData");
             model_directory.push("whisper_realtime");
             model_directory.push("data");
+            model_directory.push("models");
         }
 
         // NOTE: This has not been tested.
@@ -66,6 +73,7 @@ mod model_tests {
             model_directory.push("Application Support");
             model_directory.push("com.jordan.whisper_realtime");
             model_directory.push("data");
+            model_directory.push("models");
         }
         #[cfg(target_os = "linux")]
         {
@@ -73,29 +81,39 @@ mod model_tests {
             model_directory.push("share");
             model_directory.push("whisper_realtime");
             model_directory.push("data");
+            model_directory.push("models");
         }
 
-        let model: OldModel = OldModel::default().with_data_dir(model_directory.clone());
+        let model = DefaultModelType::default()
+            .to_model()
+            .with_path_prefix(model_directory.as_path());
 
         model_directory.push("models");
         model_directory.push("tiny.en.bin");
         let test_file_path = model.file_path();
-        let test_file = test_file_path.as_os_str();
-        let expected_file = model_directory.as_os_str();
+        let test_file_str = test_file_path.as_os_str();
+        let expected_file_str = model_directory.as_os_str();
 
-        assert_eq!(test_file, expected_file,);
+        assert_eq!(
+            test_file_str, expected_file_str,
+            "File path mismatch. Test: {:?}, Expected: {:?}",
+            test_file_str, expected_file_str
+        );
     }
 
     #[test]
     fn test_url() {
-        let model: OldModel = OldModel::default();
+        let model_type = DefaultModelType::default();
 
-        let test_url = model.url();
-        let test_url = test_url.as_str();
+        let test_url = model_type.url();
+        let test_url_str = test_url.as_str();
+        const EXPECTED_URL_STR: &'static str =
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin";
 
         assert_eq!(
-            test_url,
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
+            test_url_str, EXPECTED_URL_STR,
+            "Url malformed. Test: {}, Expected: {}",
+            test_url_str, EXPECTED_URL_STR
         )
     }
 }

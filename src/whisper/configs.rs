@@ -1,9 +1,8 @@
 use crate::utils::constants;
 use crate::whisper::model;
 
-// TODO: think about ModelType implementation and refactor accordingly
-// TODO: get rid of pub -> use a builder/accessors
-// TODO: migration to new schema: use a versioning Enum or some sort
+// TODO: get rid of pub and properly encapsulate Config parameters
+// TODO: migration to new schema: consider using a versioning Enum or some sort to handle migration somewhat gracefully.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
 pub struct Configs {
@@ -15,6 +14,8 @@ pub struct Configs {
 
     // EXPERIMENTAL:
     // pub speed_up: bool,
+    // TODO: this will cause problems with the new implementation, use model in ConfigsV2: the sequel
+    // Model derives serialize/deserialize, so this should hold a model that should persist
     pub model: model::DefaultModelType,
 
     // in milliseconds.

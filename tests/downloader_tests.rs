@@ -1,34 +1,45 @@
-///NOTE: These have to be run with the downloader feature enabled
-/// At the moment all tests pass.
 #[cfg(test)]
-#[cfg(feature = "downloader")]
+#[cfg(feature = "downloader-async")]
 mod downloader_tests {
     use indicatif::{ProgressBar, ProgressStyle};
     use reqwest;
-    #[cfg(feature = "downloader-async")]
     use tokio::runtime::Runtime;
 
     use whisper_realtime::downloader;
-    #[cfg(feature = "downloader-async")]
     use whisper_realtime::downloader::traits::AsyncDownload;
     use whisper_realtime::downloader::traits::SyncDownload;
     use whisper_realtime::utils::callback::ProgressCallback;
     use whisper_realtime::utils::errors::WhisperRealtimeError;
-    use whisper_realtime::whisper::model;
+    use whisper_realtime::whisper::model::DefaultModelType;
+
+    fn delete_model(file_path: &std::path::Path) -> std::io::Result<()> {
+        std::fs::remove_file(file_path)
+    }
 
     #[test]
-    #[ignore]
-    #[cfg(feature = "downloader-async")]
     fn test_async_download() {
-        let model: model::OldModel = model::OldModel::default();
+        let path = std::env::current_dir().unwrap().join("data").join("models");
+        let model_type = DefaultModelType::default();
+        let model = model_type.to_model().with_path_prefix(path.as_path());
+        let file_path = model.file_path();
+        let file_name = model.file_name();
+        let file_directory = model.path_prefix();
 
-        // Delete the model
-        model.delete();
+        if model.exists_in_directory() {
+            let deleted = delete_model(file_path.as_path());
+            assert!(
+                deleted.is_ok(),
+                "Failed to delete model: {}",
+                deleted.unwrap_err()
+            )
+        }
 
-        assert!(!model.is_downloaded());
+        assert!(
+            !model.exists_in_directory(),
+            "File still exists in directory."
+        );
 
-        let url = model.url();
-        let url = url.as_str();
+        let url = model_type.url();
         let client = reqwest::Client::new();
 
         // Tokio runtime for block_on.
@@ -36,7 +47,7 @@ mod downloader_tests {
         let handle = rt.handle();
 
         // NOTE: callback url is public and can be set after creating the struct by using the builder.
-        let stream_downloader = downloader::request::async_download_request(&client, url);
+        let stream_downloader = downloader::request::async_download_request(&client, url.as_str());
 
         // Run the future -> At this time, tokio is not being used for async and this cannot be awaited in testing.
         let stream_downloader = handle.block_on(stream_downloader);
@@ -45,7 +56,7 @@ mod downloader_tests {
         assert!(
             stream_downloader.is_ok(),
             "{}",
-            format!("{}", stream_downloader.err().unwrap())
+            stream_downloader.err().unwrap()
         );
 
         let stream_downloader = stream_downloader.unwrap();
@@ -65,11 +76,6 @@ mod downloader_tests {
 
         let mut stream_downloader = stream_downloader.with_progress_callback(progress_callback);
 
-        // File Path:
-        let file_directory = model.model_directory();
-        let file_directory = file_directory.as_path();
-        let file_name = model.model_file_name();
-
         let download = stream_downloader.download(file_directory, file_name);
 
         let download = handle.block_on(download);
@@ -81,42 +87,48 @@ mod downloader_tests {
         );
 
         assert!(
-            model.is_downloaded(),
+            model.exists_in_directory(),
             "Model not successfully downloaded or file path incorrect."
         );
     }
 
     #[test]
-    #[ignore]
     fn test_sync_download() {
-        let model: model::OldModel = model::OldModel::default();
-        // model.model_type = model::ModelType::MediumEn;
+        let path = std::env::current_dir().unwrap().join("data").join("models");
+        let model_type = DefaultModelType::default();
+        let model = model_type.to_model().with_path_prefix(path.as_path());
+        let file_path = model.file_path();
+        let file_name = model.file_name();
+        let file_directory = model.path_prefix();
 
-        // Delete the model
-        model.delete();
+        if model.exists_in_directory() {
+            let deleted = delete_model(file_path.as_path());
+            assert!(
+                deleted.is_ok(),
+                "Failed to delete model: {}",
+                deleted.unwrap_err()
+            )
+        }
 
-        assert!(!model.is_downloaded());
+        assert!(
+            !model.exists_in_directory(),
+            "File still exists in directory."
+        );
 
-        let url = model.url();
-        let url = url.as_str();
+        let url = model_type.url();
         let client = reqwest::blocking::Client::new();
 
         // NOTE: callback url is public and can be set after creating the struct by using the builder.
-        let sync_downloader = downloader::request::sync_download_request(&client, url);
+        let sync_downloader = downloader::request::sync_download_request(&client, url.as_str());
 
         // Ensure proper struct creation + download.
         assert!(
             sync_downloader.is_ok(),
             "{}",
-            format!("{}", sync_downloader.err().unwrap())
+            sync_downloader.err().unwrap()
         );
 
         let sync_downloader = sync_downloader.unwrap();
-
-        // File Path:
-        let file_directory = model.model_directory();
-        let file_directory = file_directory.as_path();
-        let file_name = model.model_file_name();
 
         // Initiate a progress bar.
         let pb = ProgressBar::new(sync_downloader.total_size() as u64);
@@ -137,14 +149,10 @@ mod downloader_tests {
         let download: Result<(), WhisperRealtimeError> =
             sync_downloader.download(file_directory, file_name);
 
-        assert!(
-            download.is_ok(),
-            "{}",
-            format!("{}", download.err().unwrap())
-        );
+        assert!(download.is_ok(), "{}", format!("{}", download.unwrap_err()));
 
         assert!(
-            model.is_downloaded(),
+            model.exists_in_directory(),
             "Model not successfully copied or file path incorrect."
         );
     }
