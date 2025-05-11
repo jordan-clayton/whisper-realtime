@@ -3,7 +3,7 @@
 // TODO: also, make the tests a little more useful
 #[cfg(test)]
 mod model_tests {
-    use whisper_realtime::whisper::model::Model;
+    use whisper_realtime::whisper::model::OldModel;
 
     #[test]
     fn test_model_file_path() {
@@ -35,7 +35,7 @@ mod model_tests {
             model_directory.push("data");
         }
 
-        let model: Model = Model::default().with_data_dir(model_directory.clone());
+        let model: OldModel = OldModel::default().with_data_dir(model_directory.clone());
 
         model_directory.push("models");
 
@@ -75,7 +75,7 @@ mod model_tests {
             model_directory.push("data");
         }
 
-        let model: Model = Model::default().with_data_dir(model_directory.clone());
+        let model: OldModel = OldModel::default().with_data_dir(model_directory.clone());
 
         model_directory.push("models");
         model_directory.push("tiny.en.bin");
@@ -88,7 +88,7 @@ mod model_tests {
 
     #[test]
     fn test_url() {
-        let model: Model = Model::default();
+        let model: OldModel = OldModel::default();
 
         let test_url = model.url();
         let test_url = test_url.as_str();

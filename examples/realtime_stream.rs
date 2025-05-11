@@ -25,13 +25,13 @@ fn main() {
     // Download the model.
     let mut proj_dir = std::env::current_dir().unwrap();
     proj_dir.push("data");
-    let mut model = model::Model::new_with_data_dir(proj_dir.to_path_buf());
+    let mut model = model::OldModel::new_with_data_dir(proj_dir.to_path_buf());
 
     // GPU acceleration is currently required to run larger models in realtime.
     model.model_type = if cfg!(feature = "_gpu") {
-        model::ModelType::Medium
+        model::DefaultModelType::Medium
     } else {
-        model::ModelType::Small
+        model::DefaultModelType::Small
     };
 
     if !model.is_downloaded() {

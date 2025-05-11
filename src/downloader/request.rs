@@ -3,8 +3,8 @@ use std::io::Read;
 #[cfg(feature = "downloader-async")]
 pub use bytes::Bytes;
 #[cfg(feature = "downloader-async")]
-pub use futures_core::stream::Stream;
-pub use reqwest::{self, Url};
+use futures_core::stream::Stream;
+use reqwest::{self, Url};
 
 #[cfg(feature = "downloader-async")]
 use crate::downloader::downloaders::StreamDownloader;

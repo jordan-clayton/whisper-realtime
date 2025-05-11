@@ -1,3 +1,5 @@
+// Expose Strum.
+pub use strum;
 // Expose whisper_rs.
 pub use whisper_rs;
 

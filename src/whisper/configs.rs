@@ -3,19 +3,19 @@ use crate::whisper::model;
 
 // TODO: think about ModelType implementation and refactor accordingly
 // TODO: get rid of pub -> use a builder/accessors
+// TODO: migration to new schema: use a versioning Enum or some sort
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
 pub struct Configs {
     pub n_threads: std::ffi::c_int,
     pub set_translate: bool,
     pub language: Option<String>,
-    // This is more or less a necessity for realtime in debug mode.
-    // CPU realtime has not yet been tested.
+    // This is more or less a necessity for realtime.
     pub use_gpu: bool,
 
     // EXPERIMENTAL:
     // pub speed_up: bool,
-    pub model: model::ModelType,
+    pub model: model::DefaultModelType,
 
     // in milliseconds.
     pub realtime_timeout: u128,
@@ -54,7 +54,7 @@ impl Default for Configs {
             use_gpu: cfg!(feature = "_gpu"),
             // use_vad: true,
             // speed_up: false,
-            model: model::ModelType::default(),
+            model: model::DefaultModelType::default(),
             // Currently set to 1 hr
             realtime_timeout: constants::REALTIME_AUDIO_TIMEOUT,
             audio_sample_ms: constants::AUDIO_SAMPLE_MS,

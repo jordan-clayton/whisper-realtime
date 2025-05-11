@@ -7,6 +7,9 @@ use voice_activity_detector::VoiceActivityDetector;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
+// TODO: refactor this into a naiveVAD feature flag of some sort. The naive VAD is not as good as silero.
+
+// TODO: Hide this behind a feature flag or remove entirely; this does not need to exist in global scope unless using the naive VAD.
 // This is for the naive strategy to avoid extra memory allocations at runtime.
 lazy_static! {
     static ref FFT_Planner: Mutex<RealFftPlanner<f64>> = Mutex::new(RealFftPlanner::<f64>::new());
@@ -272,6 +275,7 @@ fn naive_frame_energy_vad(
 }
 
 // IMPLEMENTATION TESTS
+// TODO: this should in some way exist in the testing folder.
 // noinspection DuplicatedCode
 #[cfg(test)]
 mod vad_tests {

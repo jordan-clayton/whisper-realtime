@@ -9,13 +9,13 @@ pub trait Callback {
 /// Use if you require to supply a callback explicitly, otherwise, just use the API.
 pub struct ProgressCallback<T, CB: FnMut(T)> {
     callback: CB,
-    phantom: PhantomData<T>,
+    _marker: PhantomData<T>,
 }
 impl<T, CB: FnMut(T)> ProgressCallback<T, CB> {
     pub fn new(callback: CB) -> Self {
         Self {
             callback,
-            phantom: PhantomData,
+            _marker: PhantomData,
         }
     }
 }
@@ -29,13 +29,13 @@ impl<T, CB: FnMut(T)> Callback for ProgressCallback<T, CB> {
 /// This is to deal with optional progress callbacks without repeated branching in hot loops.
 /// When the callback is unnecessary, supply NOP
 pub struct Nop<T> {
-    phantom_data: PhantomData<T>,
+    _marker: PhantomData<T>,
 }
 
 impl<T> Nop<T> {
     pub fn new() -> Self {
         Self {
-            phantom_data: PhantomData,
+            _marker: PhantomData,
         }
     }
 }

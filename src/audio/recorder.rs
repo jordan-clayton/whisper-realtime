@@ -1,118 +1,78 @@
+use std::marker::PhantomData;
 use std::sync::Arc;
-#[cfg(not(feature = "crossbeam"))]
-use std::sync::mpsc::SyncSender;
 
 use sdl2::audio::{AudioCallback, AudioFormatNum};
 
-/// AudioRecorder*: trait object to be passed to sdl2's AudioSubsystem.
+/// This is a workaround for trait aliasing until nightly moves to stable.
+pub trait RecorderSample: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static {}
+impl<T: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static> RecorderSample for T {}
+
+#[cfg(not(feature = "crossbeam"))]
+pub(crate) type Sender<T> = std::sync::mpsc::SyncSender<T>;
+#[cfg(feature = "crossbeam")]
+pub(crate) type Sender<T> = crossbeam::channel::Sender<T>;
+
+pub trait AudioInputAdapter<T: RecorderSample> {
+    type SenderOutput: Send + 'static;
+    fn convert(input: &[T]) -> Self::SenderOutput;
+}
+
+pub struct UseVec;
+pub struct UseArc;
+
+impl<T: RecorderSample> AudioInputAdapter<T> for UseVec {
+    type SenderOutput = Vec<T>;
+    fn convert(input: &[T]) -> Self::SenderOutput {
+        input.to_vec()
+    }
+}
+impl<T: RecorderSample> AudioInputAdapter<T> for UseArc {
+    type SenderOutput = Arc<[T]>;
+    fn convert(input: &[T]) -> Self::SenderOutput {
+        Arc::from(input)
+    }
+}
+
+/// AudioRecorder: trait object to be passed to sdl2's AudioSubsystem.
 ///
 /// Incoming audio data is passed through a message channel to obtain the data elsewhere,
-/// The VecSender sends as Vec<T>, the SliceSender sends as Arc<[T]>
-/// For single-thread prefer SliceSender for performance.
-/// In multithreaded applications, the bottleneck will be the work done by other threads, so
-/// use either struct as they suit your needs. SliceSender will still be noticeably more performant,
-/// especially so for lighter work threads.
+/// For single-thread prefer UseArc for performance unless vectors are absolutely required.
+/// In multithreaded applications the bottleneck will always be the work done by other threads;
+/// use the sender that suits your needs.
+///
+/// In all cases, UseArc will be noticeably faster for sending out data.
 
-// AudioRecorderVecSender
-#[cfg(not(feature = "crossbeam"))]
-pub struct AudioRecorderVecSender<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> {
-    pub sender: SyncSender<Vec<T>>,
+pub struct AudioRecorder<T: RecorderSample, AC: AudioInputAdapter<T>> {
+    sender: Sender<AC::SenderOutput>,
+    _marker: PhantomData<AC>,
 }
 
-#[cfg(not(feature = "crossbeam"))]
-impl<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> AudioRecorderVecSender<T> {
-    pub fn new(sender: SyncSender<Vec<T>>) -> Self {
-        Self { sender }
+impl<T: RecorderSample, AC: AudioInputAdapter<T> + Send> AudioRecorder<T, AC> {
+    pub fn new(sender: Sender<AC::SenderOutput>) -> Self {
+        Self {
+            sender,
+            _marker: PhantomData,
+        }
     }
 }
 
-#[cfg(not(feature = "crossbeam"))]
-impl<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> AudioCallback
-    for AudioRecorderVecSender<T>
-{
+impl<T: RecorderSample, AC: AudioInputAdapter<T> + Send> AudioCallback for AudioRecorder<T, AC> {
     type Channel = T;
-
     fn callback(&mut self, input: &mut [T]) {
-        let _ = self.sender.send(input.to_vec());
+        if let Err(e) = self.sender.send(AC::convert(input)) {
+            eprintln!("Channel disconnected: {}", e);
+        }
     }
 }
 
-#[cfg(feature = "crossbeam")]
-pub struct AudioRecorderVecSender<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> {
-    pub sender: crossbeam::channel::Sender<Vec<T>>,
-}
-
-#[cfg(feature = "crossbeam")]
-impl<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> AudioRecorderVecSender<T> {
-    pub fn new(sender: crossbeam::channel::Sender<Vec<T>>) -> Self {
-        Self { sender }
+impl<T: RecorderSample> AudioRecorder<T, UseVec> {
+    pub fn new_vec(sender: Sender<Vec<T>>) -> Self {
+        Self::new(sender)
     }
 }
 
-#[cfg(feature = "crossbeam")]
-impl<T: Default + Clone + Copy + AudioFormatNum + Send + 'static> AudioCallback
-    for AudioRecorderVecSender<T>
-{
-    type Channel = T;
-
-    fn callback(&mut self, input: &mut [T]) {
-        let _ = self.sender.send(input.to_vec());
-    }
-}
-
-// AudioRecorderSliceSender
-#[cfg(not(feature = "crossbeam"))]
-pub struct AudioRecorderSliceSender<
-    T: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static,
-> {
-    pub sender: SyncSender<Arc<[T]>>,
-}
-
-#[cfg(not(feature = "crossbeam"))]
-impl<T: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static>
-    AudioRecorderSliceSender<T>
-{
-    pub fn new(sender: SyncSender<Arc<[T]>>) -> Self {
-        Self { sender }
-    }
-}
-
-#[cfg(not(feature = "crossbeam"))]
-impl<T: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static> AudioCallback
-    for AudioRecorderSliceSender<T>
-{
-    type Channel = T;
-
-    fn callback(&mut self, input: &mut [T]) {
-        let out: Arc<[T]> = Arc::from(&input[..]);
-        let _ = self.sender.send(out.clone());
-    }
-}
-
-#[cfg(feature = "crossbeam")]
-pub struct AudioRecorderSliceSender<
-    T: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static,
-> {
-    pub sender: crossbeam::channel::Sender<Arc<[T]>>,
-}
-
-#[cfg(feature = "crossbeam")]
-impl<T: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static>
-    AudioRecorderSliceSender<T>
-{
-    pub fn new(sender: crossbeam::channel::Sender<Arc<[T]>>) -> Self {
-        Self { sender }
-    }
-}
-
-#[cfg(feature = "crossbeam")]
-impl<T: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static> AudioCallback
-    for AudioRecorderSliceSender<T>
-{
-    type Channel = T;
-
-    fn callback(&mut self, input: &mut [T]) {
-        let out: Arc<[T]> = Arc::from(&input[..]);
-        let _ = self.sender.send(out.clone());
+impl<T: RecorderSample> AudioRecorder<T, UseArc> {
+    pub fn new_arc(sender: Sender<Arc<[T]>>) -> Self {
+        Self::new(sender)
     }
 }

@@ -20,7 +20,7 @@ mod downloader_tests {
     #[ignore]
     #[cfg(feature = "downloader-async")]
     fn test_async_download() {
-        let model: model::Model = model::Model::default();
+        let model: model::OldModel = model::OldModel::default();
 
         // Delete the model
         model.delete();
@@ -89,7 +89,7 @@ mod downloader_tests {
     #[test]
     #[ignore]
     fn test_sync_download() {
-        let model: model::Model = model::Model::default();
+        let model: model::OldModel = model::OldModel::default();
         // model.model_type = model::ModelType::MediumEn;
 
         // Delete the model

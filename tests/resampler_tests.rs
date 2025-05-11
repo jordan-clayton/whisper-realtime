@@ -19,7 +19,7 @@ mod resampler_test {
     use whisper_realtime::transcriber::traits::Transcriber;
     use whisper_realtime::utils::constants;
     use whisper_realtime::whisper::configs::Configs;
-    use whisper_realtime::whisper::model::{Model, ModelType};
+    use whisper_realtime::whisper::model::{DefaultModelType, OldModel};
 
     // Tests the resampling from a file path, which will also implicitly using the track handle
     #[test]
@@ -83,7 +83,7 @@ mod resampler_test {
 
         let mut configs = Configs::default();
         // This presumes a model is already downloaded. Handle accordingly.
-        configs.model = ModelType::MediumEn;
+        configs.model = DefaultModelType::MediumEn;
         let c_configs = Arc::new(configs);
 
         let mut static_transcriber = StaticTranscriber::new_with_configs(
@@ -95,7 +95,8 @@ mod resampler_test {
         // Set up whisper
         let mut proj_dir = std::env::current_dir().unwrap();
         proj_dir.push("data");
-        let model = Model::new_with_type_and_dir(ModelType::MediumEn, proj_dir.to_path_buf());
+        let model =
+            OldModel::new_with_type_and_dir(DefaultModelType::MediumEn, proj_dir.to_path_buf());
 
         let whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
         let ctx = whisper_rs::WhisperContext::new_with_params(
@@ -125,7 +126,7 @@ mod resampler_test {
 
         let mut configs = Configs::default();
         // This presumes a model is already downloaded. Handle accordingly.
-        configs.model = ModelType::MediumEn;
+        configs.model = DefaultModelType::MediumEn;
         let c_configs = Arc::new(configs);
 
         let mut static_transcriber = StaticTranscriber::new_with_configs(
@@ -137,7 +138,8 @@ mod resampler_test {
         // Set up whisper
         let mut proj_dir = std::env::current_dir().unwrap();
         proj_dir.push("data");
-        let model = Model::new_with_type_and_dir(ModelType::MediumEn, proj_dir.to_path_buf());
+        let model =
+            OldModel::new_with_type_and_dir(DefaultModelType::MediumEn, proj_dir.to_path_buf());
 
         let whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
         let ctx = whisper_rs::WhisperContext::new_with_params(

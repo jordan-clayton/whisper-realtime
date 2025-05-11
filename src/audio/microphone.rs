@@ -1,11 +1,12 @@
+use std::marker::PhantomData;
 use std::sync::Arc;
-#[cfg(not(feature = "crossbeam"))]
-use std::sync::mpsc::SyncSender;
 
 use sdl2::{AudioSubsystem, Sdl};
-use sdl2::audio::{AudioDevice, AudioFormatNum, AudioSpecDesired};
+use sdl2::audio::{AudioDevice, AudioSpecDesired};
 
-use crate::audio::recorder::{AudioRecorderSliceSender, AudioRecorderVecSender};
+use crate::audio::recorder::{
+    AudioInputAdapter, AudioRecorder, RecorderSample, Sender, UseArc, UseVec,
+};
 use crate::utils::errors::WhisperRealtimeError;
 
 /// Basic Audio Backend that uses SDL to gain access to the microphone
@@ -24,22 +25,19 @@ impl AudioBackend {
     /// It is not encouraged to call new more than once, but it is not an error to do so.
     /// Returns an error if the backend fails to initialize.
     pub fn new() -> Result<Self, WhisperRealtimeError> {
-        let ctx = sdl2::init();
-        if let Err(reason) = &ctx {
-            return Err(WhisperRealtimeError::ParameterError(format!(
+        let ctx = sdl2::init().map_err(|e| {
+            WhisperRealtimeError::ParameterError(format!(
                 "Failed to create SDL context, error: {}",
-                reason
-            )));
-        };
-        let ctx = ctx.unwrap();
-        let audio_subsystem = ctx.audio();
-        if let Err(reason) = &audio_subsystem {
-            return Err(WhisperRealtimeError::ParameterError(format!(
+                e
+            ))
+        })?;
+
+        let audio_subsystem = ctx.audio().map_err(|e| {
+            WhisperRealtimeError::ParameterError(format!(
                 "Failed to initialize audio subsystem, error: {}",
-                reason
-            )));
-        };
-        let audio_subsystem = audio_subsystem.unwrap();
+                e
+            ))
+        })?;
 
         let sdl_ctx = Arc::new(ctx);
         Ok(Self {
@@ -56,57 +54,54 @@ impl AudioBackend {
         self.audio_subsystem.clone()
     }
 
-    #[cfg(feature = "crossbeam")]
-    pub fn build_microphone<T: Default + Clone + Copy + Send + Sync + AudioFormatNum + 'static>(
+    pub fn build_microphone<T: RecorderSample>(
         &self,
-        audio_sender: crossbeam::channel::Sender<Arc<[T]>>,
-    ) -> MicrophoneBuilder<Arc<[T]>> {
-        MicrophoneBuilder::<Arc<[T]>>::new(&self.audio_subsystem, audio_sender)
+        audio_sender: Sender<Arc<[T]>>,
+    ) -> MicrophoneBuilder<T, UseArc> {
+        self.build_microphone_arc(audio_sender)
     }
 
-    #[cfg(not(feature = "crossbeam"))]
-    pub fn build_microphone<T: Default + Clone + Copy + Send + Sync + AudioFormatNum + 'static>(
+    pub fn build_microphone_arc<T: RecorderSample>(
         &self,
-        audio_sender: SyncSender<Arc<[T]>>,
-    ) -> MicrophoneBuilder<Arc<[T]>> {
-        MicrophoneBuilder::<Arc<[T]>>::new(&self.audio_subsystem, audio_sender)
-    }
-    #[cfg(feature = "crossbeam")]
-    pub fn build_microphone_vec_sender<
-        T: Default + Clone + Copy + Send + AudioFormatNum + 'static,
-    >(
-        &self,
-        audio_sender: crossbeam::channel::Sender<Vec<T>>,
-    ) -> MicrophoneBuilder<Vec<T>> {
-        MicrophoneBuilder::<Vec<T>>::new(&self.audio_subsystem, audio_sender)
+        audio_sender: Sender<Arc<[T]>>,
+    ) -> MicrophoneBuilder<T, UseArc> {
+        MicrophoneBuilder::new_arc(&self.audio_subsystem, audio_sender)
     }
 
-    #[cfg(not(feature = "crossbeam"))]
-    pub fn build_microphone_vec_sender<
-        T: Default + Clone + Copy + Send + AudioFormatNum + 'static,
-    >(
+    pub fn build_microphone_vec<T: RecorderSample>(
         &self,
-        audio_sender: SyncSender<Vec<T>>,
-    ) -> MicrophoneBuilder<Vec<T>> {
-        MicrophoneBuilder::<Vec<T>>::new(&self.audio_subsystem, audio_sender)
+        audio_sender: Sender<Vec<T>>,
+    ) -> MicrophoneBuilder<T, UseVec> {
+        MicrophoneBuilder::new_vec(&self.audio_subsystem, audio_sender)
     }
 }
 
-#[cfg(feature = "crossbeam")]
-pub struct MicrophoneBuilder<'a, T> {
+pub struct MicrophoneBuilder<'a, T: RecorderSample, AC: AudioInputAdapter<T>> {
     audio_subsystem: &'a AudioSubsystem,
     audio_spec_desired: AudioSpecDesired,
-    audio_sender: crossbeam::channel::Sender<T>,
+    audio_sender: Sender<AC::SenderOutput>,
+    _marker: PhantomData<AC>,
 }
 
-#[cfg(not(feature = "crossbeam"))]
-pub struct MicrophoneBuilder<'a, T> {
-    audio_subsystem: &'a AudioSubsystem,
-    audio_spec_desired: AudioSpecDesired,
-    audio_sender: SyncSender<T>,
-}
+impl<'a, T: RecorderSample, AC: AudioInputAdapter<T> + Send> MicrophoneBuilder<'a, T, AC> {
+    pub fn new(
+        audio_subsystem: &'a AudioSubsystem,
+        audio_sender: Sender<AC::SenderOutput>,
+    ) -> Self {
+        // AudioSpecDesired does not implement Default
+        let audio_spec_desired = AudioSpecDesired {
+            freq: None,
+            channels: None,
+            samples: None,
+        };
 
-impl<'a, T> MicrophoneBuilder<'a, T> {
+        Self {
+            audio_subsystem,
+            audio_spec_desired,
+            audio_sender,
+            _marker: Default::default(),
+        }
+    }
     pub fn with_audio_subsystem(mut self, audio_subsystem: &'a AudioSubsystem) -> Self {
         self.audio_subsystem = audio_subsystem;
         self
@@ -123,16 +118,7 @@ impl<'a, T> MicrophoneBuilder<'a, T> {
     /// Audio buffer size: must be a power of two.
     /// An invalid number of samples will default to the device sample size
     pub fn with_sample_size(mut self, samples: Option<u16>) -> Self {
-        let sample_size = if let Some(size) = samples {
-            if size.is_power_of_two() {
-                Some(size)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        self.audio_spec_desired.samples = sample_size;
+        self.audio_spec_desired.samples = samples.filter(|s| s.is_power_of_two());
         self
     }
 
@@ -141,91 +127,32 @@ impl<'a, T> MicrophoneBuilder<'a, T> {
         self
     }
 
-    #[cfg(feature = "crossbeam")]
-    pub fn with_vec_sender<S: Default + Clone + Copy + Send + AudioFormatNum + 'static>(
+    pub fn with_vec_sender<S: RecorderSample>(
         self,
-        sender: crossbeam::channel::Sender<Vec<S>>,
-    ) -> MicrophoneBuilder<'a, Vec<S>> {
+        sender: Sender<Vec<S>>,
+    ) -> MicrophoneBuilder<'a, S, UseVec> {
         MicrophoneBuilder {
             audio_subsystem: self.audio_subsystem,
             audio_spec_desired: self.audio_spec_desired,
             audio_sender: sender,
+            _marker: Default::default(),
         }
     }
 
-    #[cfg(not(feature = "crossbeam"))]
-    pub fn with_vec_sender<S: Default + Clone + Copy + Send + AudioFormatNum + 'static>(
+    pub fn with_arc_sender<S: RecorderSample>(
         self,
-        sender: SyncSender<Vec<S>>,
-    ) -> MicrophoneBuilder<'a, Vec<S>> {
+        sender: Sender<Arc<[S]>>,
+    ) -> MicrophoneBuilder<'a, S, UseArc> {
         MicrophoneBuilder {
             audio_subsystem: self.audio_subsystem,
             audio_spec_desired: self.audio_spec_desired,
             audio_sender: sender,
+            _marker: Default::default(),
         }
     }
 
-    #[cfg(feature = "crossbeam")]
-    pub fn with_slice_sender<S: Default + Clone + Copy + Send + Sync + AudioFormatNum + 'static>(
-        self,
-        sender: crossbeam::channel::Sender<Arc<[S]>>,
-    ) -> MicrophoneBuilder<'a, Arc<[S]>> {
-        MicrophoneBuilder {
-            audio_subsystem: self.audio_subsystem,
-            audio_spec_desired: self.audio_spec_desired,
-            audio_sender: sender,
-        }
-    }
-
-    #[cfg(not(feature = "crossbeam"))]
-    pub fn with_slice_sender<S: Default + Clone + Copy + Send + Sync + AudioFormatNum + 'static>(
-        self,
-        sender: SyncSender<Arc<[S]>>,
-    ) -> MicrophoneBuilder<'a, Arc<[S]>> {
-        MicrophoneBuilder {
-            audio_subsystem: self.audio_subsystem,
-            audio_spec_desired: self.audio_spec_desired,
-            audio_sender: sender,
-        }
-    }
-}
-
-impl<'a, T: Default + Clone + Copy + Send + AudioFormatNum + 'static>
-    MicrophoneBuilder<'a, Vec<T>>
-{
-    #[cfg(feature = "crossbeam")]
-    pub fn new(
-        audio_subsystem: &'a AudioSubsystem,
-        audio_sender: crossbeam::channel::Sender<Vec<T>>,
-    ) -> Self {
-        let audio_spec_desired = AudioSpecDesired {
-            freq: None,
-            channels: None,
-            samples: None,
-        };
-        Self {
-            audio_subsystem,
-            audio_spec_desired,
-            audio_sender,
-        }
-    }
-
-    #[cfg(not(feature = "crossbeam"))]
-    pub fn new(audio_subsystem: &'a AudioSubsystem, audio_sender: SyncSender<Vec<T>>) -> Self {
-        let audio_spec_desired = AudioSpecDesired {
-            freq: None,
-            channels: None,
-            samples: None,
-        };
-        Self {
-            audio_subsystem,
-            audio_spec_desired,
-            audio_sender,
-        }
-    }
-
-    pub fn build(self) -> Result<AudioDevice<AudioRecorderVecSender<T>>, WhisperRealtimeError> {
-        build_audio_stream_vec_sender(
+    pub fn build(self) -> Result<AudioDevice<AudioRecorder<T, AC>>, WhisperRealtimeError> {
+        build_audio_stream(
             &self.audio_subsystem,
             &self.audio_spec_desired,
             self.audio_sender,
@@ -233,49 +160,21 @@ impl<'a, T: Default + Clone + Copy + Send + AudioFormatNum + 'static>
     }
 }
 
-impl<'a, T: Default + Clone + Copy + Send + Sync + AudioFormatNum + 'static>
-    MicrophoneBuilder<'a, Arc<[T]>>
-{
-    #[cfg(feature = "crossbeam")]
-    pub fn new(
-        audio_subsystem: &'a AudioSubsystem,
-        audio_sender: crossbeam::channel::Sender<Arc<[T]>>,
-    ) -> Self {
-        let audio_spec_desired = AudioSpecDesired {
-            freq: None,
-            channels: None,
-            samples: None,
-        };
-        Self {
-            audio_subsystem,
-            audio_spec_desired,
-            audio_sender,
-        }
+impl<'a, T: RecorderSample> MicrophoneBuilder<'a, T, UseVec> {
+    pub fn new_vec(audio_subsystem: &'a AudioSubsystem, audio_sender: Sender<Vec<T>>) -> Self {
+        Self::new(audio_subsystem, audio_sender)
     }
-    #[cfg(not(feature = "crossbeam"))]
-    pub fn new(audio_subsystem: &'a AudioSubsystem, audio_sender: SyncSender<Arc<[T]>>) -> Self {
-        let audio_spec_desired = AudioSpecDesired {
-            freq: None,
-            channels: None,
-            samples: None,
-        };
-        Self {
-            audio_subsystem,
-            audio_spec_desired,
-            audio_sender,
-        }
-    }
-    pub fn build(self) -> Result<AudioDevice<AudioRecorderSliceSender<T>>, WhisperRealtimeError> {
-        build_audio_stream_slice_sender(
-            &self.audio_subsystem,
-            &self.audio_spec_desired,
-            self.audio_sender,
-        )
+}
+
+impl<'a, T: RecorderSample> MicrophoneBuilder<'a, T, UseArc> {
+    pub fn new_arc(audio_subsystem: &'a AudioSubsystem, audio_sender: Sender<Arc<[T]>>) -> Self {
+        Self::new(audio_subsystem, audio_sender)
     }
 }
 
 /// The following functions are exposed but their use is not encouraged unless required.
 /// Prefer the AudioBackend and MicrophoneBuilder API wherever possible.
+/// These are considered deprecated and will eventually be removed.
 #[inline]
 pub fn get_desired_audio_spec(
     freq: Option<i32>,
@@ -289,22 +188,37 @@ pub fn get_desired_audio_spec(
     }
 }
 
-#[cfg(not(feature = "crossbeam"))]
 #[inline]
-pub fn build_audio_stream_vec_sender<
-    T: Default + Clone + Copy + Send + AudioFormatNum + 'static,
->(
+pub fn build_audio_stream<T: RecorderSample, AC: AudioInputAdapter<T> + Send>(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
-    audio_sender: SyncSender<Vec<T>>,
-) -> Result<AudioDevice<AudioRecorderVecSender<T>>, WhisperRealtimeError> {
+    audio_sender: Sender<AC::SenderOutput>,
+) -> Result<AudioDevice<AudioRecorder<T, AC>>, WhisperRealtimeError> {
+    let audio_stream = audio_subsystem
+        .open_capture(
+            // Device - should be default, SDL should change if the user changes devices in their sysprefs.
+            None,
+            desired_spec,
+            |_spec| AudioRecorder::new(audio_sender),
+        )
+        .map_err(|e| {
+            WhisperRealtimeError::ParameterError(format!("Failed to build audio stream: {}", e))
+        })?;
+
+    Ok(audio_stream)
+}
+
+#[inline]
+pub fn build_audio_stream_vec_sender<T: RecorderSample>(
+    audio_subsystem: &AudioSubsystem,
+    desired_spec: &AudioSpecDesired,
+    audio_sender: Sender<Vec<T>>,
+) -> Result<AudioDevice<AudioRecorder<T, UseVec>>, WhisperRealtimeError> {
     let audio_stream = audio_subsystem.open_capture(
         // Device - should be default, SDL should change if the user changes devices in their sysprefs.
         None,
         desired_spec,
-        |_spec| AudioRecorderVecSender {
-            sender: audio_sender,
-        },
+        |_spec| AudioRecorder::new_vec(audio_sender),
     );
     match audio_stream {
         Err(e) => Err(WhisperRealtimeError::ParameterError(format!(
@@ -315,80 +229,22 @@ pub fn build_audio_stream_vec_sender<
     }
 }
 
-#[cfg(not(feature = "crossbeam"))]
 #[inline]
-pub fn build_audio_stream_slice_sender<
-    T: Default + Clone + Copy + Send + Sync + AudioFormatNum + 'static,
->(
+pub fn build_audio_stream_slice_sender<T: RecorderSample>(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
-    audio_sender: SyncSender<Arc<[T]>>,
-) -> Result<AudioDevice<AudioRecorderSliceSender<T>>, WhisperRealtimeError> {
-    let audio_stream = audio_subsystem.open_capture(
-        // Device - should be default, SDL should change if the user changes devices in their sysprefs.
-        None,
-        desired_spec,
-        |_spec| AudioRecorderSliceSender {
-            sender: audio_sender,
-        },
-    );
-    match audio_stream {
-        Err(e) => Err(WhisperRealtimeError::ParameterError(format!(
-            "Failed to build audio stream: {}",
-            e
-        ))),
-        Ok(audio) => Ok(audio),
-    }
-}
+    audio_sender: Sender<Arc<[T]>>,
+) -> Result<AudioDevice<AudioRecorder<T, UseArc>>, WhisperRealtimeError> {
+    let audio_stream = audio_subsystem
+        .open_capture(
+            // Device - should be default, SDL should change if the user changes devices in their sysprefs.
+            None,
+            desired_spec,
+            |_spec| AudioRecorder::new_arc(audio_sender),
+        )
+        .map_err(|e| {
+            WhisperRealtimeError::ParameterError(format!("Failed to build audio stream: {}", e))
+        })?;
 
-#[cfg(feature = "crossbeam")]
-#[inline]
-pub fn build_audio_stream_vec_sender<
-    T: Default + Clone + Copy + Send + AudioFormatNum + 'static,
->(
-    audio_subsystem: &AudioSubsystem,
-    desired_spec: &AudioSpecDesired,
-    audio_sender: crossbeam::channel::Sender<Vec<T>>,
-) -> Result<AudioDevice<AudioRecorderVecSender<T>>, WhisperRealtimeError> {
-    let audio_stream = audio_subsystem.open_capture(
-        // Device - should be default, SDL should change if the user changes devices in their sysprefs.
-        None,
-        desired_spec,
-        |_spec| AudioRecorderVecSender {
-            sender: audio_sender,
-        },
-    );
-    match audio_stream {
-        Err(e) => Err(WhisperRealtimeError::ParameterError(format!(
-            "Failed to build audio stream: {}",
-            e
-        ))),
-        Ok(audio) => Ok(audio),
-    }
-}
-
-#[cfg(feature = "crossbeam")]
-#[inline]
-pub fn build_audio_stream_slice_sender<
-    T: Default + Clone + Copy + Send + Sync + AudioFormatNum + 'static,
->(
-    audio_subsystem: &AudioSubsystem,
-    desired_spec: &AudioSpecDesired,
-    audio_sender: crossbeam::channel::Sender<Arc<[T]>>,
-) -> Result<AudioDevice<AudioRecorderSliceSender<T>>, WhisperRealtimeError> {
-    let audio_stream = audio_subsystem.open_capture(
-        // Device - should be default, SDL should change if the user changes devices in their sysprefs.
-        None,
-        desired_spec,
-        |_spec| AudioRecorderSliceSender {
-            sender: audio_sender,
-        },
-    );
-    match audio_stream {
-        Err(e) => Err(WhisperRealtimeError::ParameterError(format!(
-            "Failed to build audio stream: {}",
-            e
-        ))),
-        Ok(audio) => Ok(audio),
-    }
+    Ok(audio_stream)
 }
