@@ -100,8 +100,6 @@ impl Model {
         };
     }
 
-    // TODO: This should likely be removed/be changed in step with the sha checksums provided by the whisper.cpp respository.
-    // At the moment, this means sha1 only.
     #[allow(dead_code)]
     #[cfg(feature = "integrity")]
     fn compare_sha256(&self, checksum: &str) -> Result<bool, WhisperRealtimeError> {
@@ -124,7 +122,6 @@ impl Model {
     /// Returns a WhisperRealtimeError when the file does not exist.
     ///
     ///
-    /// NOTE: This may be refactored into a utility later if the use cases arise
     #[cfg(feature = "integrity")]
     fn compare_sha1(&self, checksum: &str) -> Result<bool, WhisperRealtimeError> {
         // Compute the checksum on the file
@@ -139,6 +136,7 @@ impl Model {
         Ok(checksum.to_lowercase() == byte_str)
     }
 
+    // TODO: Refactor this to allow for both sha256 and sha1 checksums; match and compute based on the checksum type
     #[cfg(feature = "integrity")]
     pub fn verify_checksum(&mut self, checksum: &str) -> Result<bool, WhisperRealtimeError> {
         if !self.exists_in_directory() {

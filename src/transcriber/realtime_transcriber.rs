@@ -11,7 +11,7 @@ use crate::audio::audio_ring_buffer::AudioRingBuffer;
 use crate::transcriber::{traits::Transcriber, vad, vad::VoiceActivityDetection};
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
-use crate::whisper::configs::Configs;
+use crate::whisper::configs::WhisperConfigsV1;
 
 // This implementation is a modified port of the whisper.cpp stream example, see:
 // https://github.com/ggerganov/whisper.cpp/tree/master/examples/stream
@@ -21,7 +21,7 @@ use crate::whisper::configs::Configs;
 // TODO: clean up implementation, encapsulate whisper context and setup logic.
 #[cfg(not(feature = "crossbeam"))]
 pub struct RealtimeTranscriber {
-    configs: Arc<Configs>,
+    configs: Arc<WhisperConfigsV1>,
     audio: Arc<AudioRingBuffer<f32>>,
     output_buffer: Vec<String>,
     data_sender: mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>,
@@ -30,7 +30,7 @@ pub struct RealtimeTranscriber {
 
 #[cfg(feature = "crossbeam")]
 pub struct RealtimeTranscriber {
-    configs: Arc<Configs>,
+    configs: Arc<WhisperConfigsV1>,
     audio: Arc<AudioRingBuffer<f32>>,
     output_buffer: Vec<String>,
     data_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
@@ -49,7 +49,7 @@ impl RealtimeTranscriber {
         let vad = Self::init_vad(strategy);
 
         Self {
-            configs: Arc::new(Configs::default()),
+            configs: Arc::new(WhisperConfigsV1::default()),
             audio,
             output_buffer,
             data_sender,
@@ -68,7 +68,7 @@ impl RealtimeTranscriber {
         let vad = Self::init_vad(strategy);
 
         Self {
-            configs: Arc::new(Configs::default()),
+            configs: Arc::new(WhisperConfigsV1::default()),
             audio,
             output_buffer,
             data_sender,
@@ -80,7 +80,7 @@ impl RealtimeTranscriber {
     pub fn new_with_configs(
         audio: Arc<AudioRingBuffer<f32>>,
         data_sender: mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>,
-        configs: Arc<Configs>,
+        configs: Arc<WhisperConfigsV1>,
         vad_strategy: Option<vad::VadStrategy>,
     ) -> Self {
         let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());
@@ -99,7 +99,7 @@ impl RealtimeTranscriber {
     pub fn new_with_configs(
         audio: Arc<AudioRingBuffer<f32>>,
         data_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
-        configs: Arc<Configs>,
+        configs: Arc<WhisperConfigsV1>,
         vad_strategy: Option<vad::VadStrategy>,
     ) -> Self {
         let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());

@@ -12,7 +12,7 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
 use crate::transcriber::traits::Transcriber;
 use crate::utils::errors::WhisperRealtimeError;
-use crate::whisper::configs::Configs;
+use crate::whisper::configs::WhisperConfigsV1;
 
 // Workaround for whisper-rs issue #134 -- moving memory in rust causes a segmentation fault
 // in the progress callback.
@@ -38,7 +38,7 @@ pub enum SupportedChannels {
 
 #[cfg(not(feature = "crossbeam"))]
 pub struct StaticTranscriber {
-    configs: Arc<Configs>,
+    configs: Arc<WhisperConfigsV1>,
     data_sender: Option<mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>>,
     audio: Arc<Mutex<SupportedAudioSample>>,
     channels: SupportedChannels,
@@ -48,7 +48,7 @@ pub struct StaticTranscriber {
 // TODO: rename to OfflineTranscriber
 #[cfg(feature = "crossbeam")]
 pub struct StaticTranscriber {
-    configs: Arc<Configs>,
+    configs: Arc<WhisperConfigsV1>,
     data_sender: Option<crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>>,
     audio: Arc<Mutex<SupportedAudioSample>>,
     channels: SupportedChannels,
@@ -62,7 +62,7 @@ impl StaticTranscriber {
         channels: SupportedChannels,
     ) -> Self {
         Self {
-            configs: Arc::<Configs>::default(),
+            configs: Arc::<WhisperConfigsV1>::default(),
             data_sender,
             audio,
             channels,
@@ -78,7 +78,7 @@ impl StaticTranscriber {
         channels: SupportedChannels,
     ) -> Self {
         Self {
-            configs: Arc::<Configs>::default(),
+            configs: Arc::<WhisperConfigsV1>::default(),
             data_sender,
             audio,
             channels,
@@ -89,7 +89,7 @@ impl StaticTranscriber {
     pub fn new_with_configs(
         audio: Arc<Mutex<SupportedAudioSample>>,
         data_sender: Option<mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>>,
-        configs: Arc<Configs>,
+        configs: Arc<WhisperConfigsV1>,
         channels: SupportedChannels,
     ) -> Self {
         Self {
@@ -106,7 +106,7 @@ impl StaticTranscriber {
         data_sender: Option<
             crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
         >,
-        configs: Arc<Configs>,
+        configs: Arc<WhisperConfigsV1>,
         channels: SupportedChannels,
     ) -> Self {
         Self {

@@ -300,7 +300,7 @@ mod vad_tests {
         let sample_rate = spec.sample_rate;
         let sample_format = spec.sample_format;
 
-        let configs = configs::Configs::default();
+        let configs = configs::WhisperConfigsV1::default();
         let audio: Vec<f64> = match sample_format {
             SampleFormat::Float => reader
                 .samples::<f32>()
@@ -392,7 +392,7 @@ mod vad_tests {
         let sample_rate = spec.sample_rate;
         let sample_format = spec.sample_format;
 
-        let configs = configs::Configs::default();
+        let configs = configs::WhisperConfigsV1::default();
         let mut audio: Vec<f64> = match sample_format {
             SampleFormat::Float => reader
                 .samples::<f32>()
@@ -485,7 +485,7 @@ mod vad_tests {
                 .collect(),
         };
 
-        let mut configs = configs::Configs::default();
+        let mut configs = configs::WhisperConfigsV1::default();
         // Given the length of the audio track, this is being reduced to avoid
         // unnecessary panicking.
         // The provided audio track has around 60% speech.
@@ -567,7 +567,7 @@ mod vad_tests {
                 .collect(),
         };
 
-        let mut configs = configs::Configs::default();
+        let mut configs = configs::WhisperConfigsV1::default();
         // No high-pass
         configs.naive_vad_freq_threshold = 0.0;
         // The audio track contains around 60% speech.
@@ -623,7 +623,7 @@ mod vad_tests {
                 .collect(),
         };
 
-        let mut configs = configs::Configs::default();
+        let mut configs = configs::WhisperConfigsV1::default();
 
         // The audio track contains around 60% speech.
         configs.voice_probability_threshold = 0.5;
@@ -680,7 +680,7 @@ mod vad_tests {
         };
 
         // This might not be mutable.
-        let mut configs = configs::Configs::default();
+        let mut configs = configs::WhisperConfigsV1::default();
 
         let mut vad = VoiceActivityDetector::builder()
             .sample_rate(sample_rate as i64)

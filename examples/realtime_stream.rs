@@ -87,7 +87,7 @@ fn main() {
     let c_model = model.clone();
 
     // Configs ptr -> This should just be the default.
-    let configs: Arc<configs::Configs> = Arc::new(configs::Configs::default());
+    let configs: Arc<configs::WhisperConfigsV1> = Arc::new(configs::WhisperConfigsV1::default());
     let c_configs = configs.clone();
 
     // Audio buffer
