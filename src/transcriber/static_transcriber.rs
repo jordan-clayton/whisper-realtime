@@ -1,13 +1,12 @@
 use std::error::Error;
 use std::ffi::c_void;
 use std::ops::DerefMut;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(not(feature = "crossbeam"))]
 use std::sync::mpsc;
 use std::sync::Mutex;
 
-use lazy_static::lazy_static;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
 use crate::transcriber::traits::Transcriber;
@@ -17,11 +16,8 @@ use crate::whisper::configs::WhisperConfigsV1;
 // Workaround for whisper-rs issue #134 -- moving memory in rust causes a segmentation fault
 // in the progress callback.
 // Solution from: https://github.com/thewh1teagle/vibe/blob/main/core/src/transcribe.rs
-// TODO: migrate to once_cell
-lazy_static! {
-    static ref PROGRESS_CALLBACK: Mutex<Option<Box<dyn FnMut(i32) + Send + Sync>>> =
-        Mutex::new(None);
-}
+static PROGRESS_CALLBACK: LazyLock<Mutex<Option<Box<dyn FnMut(i32) + Send + Sync>>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 // TODO: these probably shouldn't be vectors; use [T] if possible/sensible.
 pub enum SupportedAudioSample {
@@ -133,7 +129,6 @@ impl Transcriber for StaticTranscriber {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         Self::set_full_params(&mut params, &self.configs, None);
 
-        // At the moment, the
         if let Some(callback) = progress_callback {
             {
                 let mut guard = PROGRESS_CALLBACK

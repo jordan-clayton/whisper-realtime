@@ -1,8 +1,8 @@
 use std::{fs, io};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
 
-use lazy_static::lazy_static;
 use regex::Regex;
 use reqwest::blocking;
 
@@ -16,16 +16,14 @@ const REPO_URL: &str = "https://huggingface.co/api/models/ggerganov/whisper.cpp"
 // As of this implementation, the checksums are made available in README.md
 const README_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/raw/main/README.md";
 
-// TODO: migrate to once_cell
-lazy_static! {
-    // (Very specific) Regex: Used to extract the required fields from README.md
-    // |whitespace*(non-whitespace+)whitespace*|, First field: Model name, first capture group
-    // |whitespace*[parse up to pipe]whitespace*|, Second field: File size, no capture
-    // |whitespace*(sha1 digest)whitespace*|, Optionally consumes ` literal, Third Field: Sha1, second capture group
-    pub static ref CHECKSUM_RE: Regex =
-        Regex::new(r"\|\s*(\S+)\s*\|\s*[^|]+?\s*\|\s*`?([a-fA-F0-9]{40})`?\s*\|")
-            .expect("Failed to build checksum RE");
-}
+// (Very specific) Regex: Used to extract the required fields from README.md
+// |whitespace*(non-whitespace+)whitespace*|, First field: Model name, first capture group
+// |whitespace*[parse up to pipe]whitespace*|, Second field: File size, no capture
+// |whitespace*(sha1 digest)whitespace*|, Optionally consumes ` literal, Third Field: Sha1, second capture group
+pub static CHECKSUM_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\|\s*(\S+)\s*\|\s*[^|]+?\s*\|\s*`?([a-fA-F0-9]{40})`?\s*\|")
+        .expect("Failed to build checksum RE")
+});
 
 pub enum ChecksumStatus {
     UpToDate(String),

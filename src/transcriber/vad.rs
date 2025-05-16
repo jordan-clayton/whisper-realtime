@@ -1,22 +1,25 @@
 use std::{f64::consts::PI, sync::Mutex};
+use std::sync::LazyLock;
 
-use lazy_static::lazy_static;
 use realfft::RealFftPlanner;
 use voice_activity_detector::VoiceActivityDetector;
 
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
-// TODO: refactor this into a naiveVAD feature flag of some sort. The naive VAD is not as good as silero.
-
-// TODO: Hide this behind a feature flag or remove entirely; this does not need to exist in global scope unless using the naive VAD.
+// TODO: nuke the hand-rolled solution.
+// TODO: multiple backends.
+// So far:
+// -SILERO
+// -WEBRTC
+// -EARSHOT (fallback)
 // This is for the naive strategy to avoid extra memory allocations at runtime.
-lazy_static! {
-    static ref FFT_Planner: Mutex<RealFftPlanner<f64>> = Mutex::new(RealFftPlanner::<f64>::new());
-}
+static FFT_PLANNER: LazyLock<Mutex<RealFftPlanner<f64>>> =
+    LazyLock::new(|| Mutex::new(RealFftPlanner::<f64>::new()));
 
 // Silero is considerably faster than my hand-rolled VAD. Only use the hand-rolled VAD if silero is
 // somehow not supported.
+// If using the enum, the discriminant should contain the object required to compute the voice activity probability.
 pub enum VadStrategy {
     Naive,
     Silero,
@@ -109,6 +112,7 @@ fn high_pass_filter(samples: &mut Vec<f64>, frequency_threshold: f64, sample_rat
     }
 }
 
+// TODO: if keeping this implementation, expose the functions.
 // Audio volume correction after high-pass
 fn calculate_rms(data: &[f64]) -> f64 {
     let sum_of_squares: f64 = data.iter().fold(0.0, |acc, x| acc + (*x).powi(2));
@@ -203,7 +207,7 @@ fn calculate_normalized_short_time_energy(
         ));
     }
 
-    let planner = &mut FFT_Planner.lock().expect("Failed to get FFT mutex");
+    let planner = &mut FFT_PLANNER.lock().expect("Failed to get FFT mutex");
 
     let fft = planner.plan_fft_forward(frames[0].len());
 
@@ -281,6 +285,8 @@ fn naive_frame_energy_vad(
 mod vad_tests {
     use hound;
     use hound::SampleFormat;
+    use rayon::iter::IntoParallelIterator;
+    use rayon::iter::ParallelIterator;
 
     use crate::whisper::configs;
 
@@ -643,7 +649,6 @@ mod vad_tests {
         assert!(voice_detected, "Failed to detect voice");
     }
 
-    // This is known to work, but for testing speed on cpu.
     #[test]
     #[ignore]
     fn test_silero_vad() {
@@ -716,49 +721,43 @@ mod vad_tests {
         );
     }
 
+    // TODO: this should be moved to benchmarks.
+    // Also, Silero is considerably faster than the hand-rolled solution.
+    // TODO: consider removing the Naive VAD implementation.
     #[test]
     #[ignore]
     fn speed_test() {
         let mut time = std::time::Instant::now();
-        for _i in 0..1000 {
-            test_naive_voice_detection();
-        }
+        (0..1000)
+            .into_par_iter()
+            .for_each(|_| test_naive_voice_detection());
         let mut now = std::time::Instant::now();
         let naive_diff = (now - time).as_millis();
 
-        let naive_avg = naive_diff as f64 / 1000f64;
-
         time = std::time::Instant::now();
 
-        for _i in 0..1000 {
-            test_naive_voice_detection_with_high_pass();
-        }
+        (0..1000)
+            .into_par_iter()
+            .for_each(|_| test_naive_voice_detection_with_high_pass());
 
         now = std::time::Instant::now();
 
         let high_pass_diff = (now - time).as_millis();
 
-        let high_pass_avg = high_pass_diff as f64 / 1000f64;
-
         time = std::time::Instant::now();
 
-        for _i in 0..1000 {
-            test_silero_vad()
-        }
+        (0..1000).into_par_iter().for_each(|_| test_silero_vad());
 
         now = std::time::Instant::now();
         let silero_diff = (now - time).as_millis();
 
-        let silero_avg = silero_diff as f64 / 1000f64;
-
         // Need to use --nocapture or --show-output to get this output.
-
         println!(
             "Per 1000 iterations: \n\
         Naive: {}ms\n\
         High-Pass: {}ms\n\
         Silero: {}ms",
-            naive_avg, high_pass_avg, silero_avg
+            naive_diff, high_pass_diff, silero_diff
         );
     }
 }
