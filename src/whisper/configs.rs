@@ -77,12 +77,6 @@ pub struct WhisperConfigsV2 {
     language: Option<Language>,
     // Don't use past transcriptions as an initial prompt for the decoder.
     use_no_context: bool,
-    // TODO: determine whether or not to bother with these; if keeping, implement builder and accessor methods.
-    stdout_print_special: bool,
-    stdout_print_progress: bool,
-    stdout_print_realtime: bool,
-    stdout_print_timestamps: bool,
-
     // Whisper Context data
     model: Model,
     use_gpu: bool,
@@ -99,10 +93,6 @@ impl WhisperConfigsV2 {
             use_gpu: false,
             use_no_context: false,
             model: Default::default(),
-            stdout_print_special: false,
-            stdout_print_progress: false,
-            stdout_print_realtime: false,
-            stdout_print_timestamps: false,
         }
     }
 
@@ -192,10 +182,6 @@ impl WhisperConfigsV2 {
             params.set_language(Some(lang.into()))
         }
         params.set_no_context(self.use_no_context);
-        params.set_print_special(self.stdout_print_special);
-        params.set_print_progress(self.stdout_print_progress);
-        params.set_print_realtime(self.stdout_print_realtime);
-        params.set_print_timestamps(self.stdout_print_timestamps);
         params
     }
 }
@@ -379,10 +365,6 @@ pub struct WhisperConfigsV1 {
     // This is more or less a necessity for realtime.
     pub use_gpu: bool,
 
-    // EXPERIMENTAL:
-    // pub speed_up: bool,
-    // TODO: this will cause problems with the new implementation, use model in ConfigsV2: the sequel
-    // Model derives serialize/deserialize, so this should hold a model that should persist
     pub model: DefaultModelType,
 
     // in milliseconds.
