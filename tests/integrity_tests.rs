@@ -7,7 +7,7 @@ mod model_integrity_tests {
     use std::collections::HashMap;
 
     use whisper_realtime::whisper::integrity_utils::CHECKSUM_RE;
-    use whisper_realtime::whisper::model::DefaultModelType;
+    use whisper_realtime::whisper::model::{Checksum, DefaultModelType};
 
     fn delete_model(file_path: &std::path::Path) -> std::io::Result<()> {
         std::fs::remove_file(file_path)
@@ -102,7 +102,8 @@ mod model_integrity_tests {
         let checksum = model_type.get_checksum(model_path.as_path(), None);
         assert!(checksum.is_ok(), "{}", checksum.unwrap_err());
         let checksum = checksum.unwrap();
-        let verified = model.verify_checksum(checksum.as_str());
+        let c = Checksum::Sha1(checksum.as_str());
+        let verified = model.verify_checksum(&c);
         assert!(verified.is_ok(), "File error: {}", verified.unwrap_err());
 
         assert!(
@@ -126,8 +127,9 @@ mod model_integrity_tests {
         let checksum = model_type.get_checksum(model_path.as_path(), None);
         assert!(checksum.is_ok(), "{}", checksum.unwrap_err());
         let checksum = checksum.unwrap();
+        let c = Checksum::Sha1(checksum.as_str());
 
-        let verified = model.verify_checksum(checksum.as_str());
+        let verified = model.verify_checksum(&c);
         assert!(verified.is_ok(), "File error: {}", verified.unwrap_err());
 
         assert!(

@@ -136,15 +136,18 @@ impl Model {
         Ok(checksum.to_lowercase() == byte_str)
     }
 
-    // TODO: Refactor this to allow for both sha256 and sha1 checksums; match and compute based on the checksum type
     #[cfg(feature = "integrity")]
-    pub fn verify_checksum(&mut self, checksum: &str) -> Result<bool, WhisperRealtimeError> {
+    pub fn verify_checksum(&mut self, checksum: &Checksum) -> Result<bool, WhisperRealtimeError> {
         if !self.exists_in_directory() {
             self.checksum_verified = false;
             return Ok(false);
         }
+        let is_equal = match checksum {
+            Checksum::Sha1(c) => self.compare_sha1(c),
+            Checksum::Sha256(c) => self.compare_sha256(c),
+        };
 
-        match self.compare_sha1(checksum) {
+        match is_equal {
             Ok(equal) => {
                 self.checksum_verified = equal;
                 Ok(equal)
@@ -303,4 +306,10 @@ impl Default for DefaultModelType {
     fn default() -> Self {
         DefaultModelType::TinyEn
     }
+}
+
+#[cfg(feature = "integrity")]
+pub enum Checksum<'a> {
+    Sha1(&'a str),
+    Sha256(&'a str),
 }
