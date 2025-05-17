@@ -288,11 +288,7 @@ impl WebRTCBuilder {
     }
 }
 
-// NOTE TO SELF: This operates on frames that are of length 10ms, 20ms, or 30ms @ the given sample rate.
-// eg. for 8 kHz, length must be 80 frames long.
-// NOTE TO SELF PART 2: THE SEQUEL: sample_rate and aggressiveness need to be passed in from the builder
-// Webrtc's reset method resets the state as well as the configurations, so the initial configurations need to be stored.
-// Additionally, SampleRate needs to be matched for computing padding and the number of frames.
+// TODO: properly document this to provide relevant information, like Silero.
 pub struct WebRtc {
     vad: webrtc_vad::Vad,
     // Since webrtc_vad does not implement Copy or Clone, use the wrapper structs.

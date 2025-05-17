@@ -14,6 +14,7 @@ whisper-rs = { version = "0.14.2", features = ["log_backend", "tracing_backend"]
 # Whisper-rs raw-api, for callback-signature function argument types: this can and will likely break, change accordingly
 whisper-rs-sys = "0.12.1"
 log = "0.4.21"
+# TODO: move to example/dev dependencies
 ctrlc = "3.4.4"
 # voice_activity_detector builds without HW acceleration atm; might look into this, but speed is not an issue.
 voice_activity_detector = "0.2.0"
@@ -24,6 +25,7 @@ futures-util = { version = "0.3.30", optional = true }
 futures-core = { version = "0.3.30", optional = true }
 bytes = { version = "1.6.1", optional = true }
 tokio = { version = "1.39.2", features = ["rt-multi-thread"], optional = true }
+# TODO: remove once VAD is cleaned up.
 num-traits = "0.2.19"
 realfft = "3.3.0"
 crossbeam = { version = "0.8.4", optional = true }
