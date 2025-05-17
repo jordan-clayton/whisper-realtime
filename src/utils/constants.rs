@@ -1,5 +1,6 @@
 const KEEP_MS: f64 = 200f64;
 pub const WHISPER_SAMPLE_RATE: f64 = 16000f64;
+pub const SILERO_CHUNK_SIZE: usize = 1024;
 
 // For resolving word-boundaries when not using VAD, and when clearing samples
 pub const N_SAMPLES_KEEP: usize = ((1e-3 * KEEP_MS) * WHISPER_SAMPLE_RATE) as usize;
