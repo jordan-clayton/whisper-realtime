@@ -26,7 +26,6 @@ bytes = { version = "1.6.1", optional = true }
 tokio = { version = "1.39.2", features = ["rt-multi-thread"], optional = true }
 num-traits = "0.2.19"
 realfft = "3.3.0"
-hound = "3.5.1"
 crossbeam = { version = "0.8.4", optional = true }
 strum = { version = "0.27.1", features = ["derive"] }
 symphonia = { version = "0.5.4", features = ["mp3", "opt-simd"] }
@@ -42,6 +41,7 @@ webrtc-vad = "0.4.0"
 criterion = "0.5.1"
 indicatif = "0.17.8"
 rayon = "1.10.0"
+hound = "3.5.1"
 
 # See: https://github.com/tazz4843/whisper-rs/blob/master/BUILDING.md for building on Windows/MacOS
 [target.aarch64-apple-darwin]

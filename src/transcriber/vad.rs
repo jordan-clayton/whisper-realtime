@@ -2,17 +2,461 @@ use std::{f64::consts::PI, sync::Mutex};
 use std::sync::LazyLock;
 
 use realfft::RealFftPlanner;
-use voice_activity_detector::VoiceActivityDetector;
 
+use crate::audio::pcm::IntoPcmS16;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
-// TODO: nuke the hand-rolled solution.
-// TODO: multiple backends.
-// So far:
-// -SILERO
-// -WEBRTC
-// -EARSHOT (fallback)
+// TODO: nuke the legacy hand-rolled solution.
+// TODO: test and benchmarks.
+
+/// TODO: properly document this trait to explain why it's here, what it's for, and what's available
+/// eg. Three provided VAD implementations: Silero, WebRtc, Earshot (a WebRtc) impl
+/// tl;dr, Silero is very fast and efficient. Earshot should mainly be used as a fallback;
+/// as far as I know, it's much less accurate, but it is very fast--YMMV.
+pub trait VAD<T> {
+    fn voice_detected(&mut self, samples: &[T]) -> bool;
+    fn reset_session(&mut self);
+}
+
+/// A basic builder that produces a Silero VAD backend for use in realtime transcription.
+/// In effect, this adapts voice_activity_detector's builder and includes a starting detection probability.
+/// The probability threshold can be swapped after building a Silero VAD backend if needed.
+/// To mainatain the same flexibility as the supporting library, the sample rates and chunk sizes
+/// are not constrained. Their limitations are mentioned below:
+///
+/// See: https://docs.rs/voice_activity_detector/0.2.0/voice_activity_detector/index.html#standalone-voice-activity-detector
+/// The provided model is trained using chunk sizes of 256, 512, and 768 samples for an 8kHz sample rate
+/// It is also trained using chunk sizes of 512, 768, and 1024 for a 16kHz sample rate.
+/// These are not hard-requirements, but are recommended for performance
+/// The only hard requirement is that the sample rate must be no larger than 31.25 times the chunk size.
+/// NOTE: detection_probability_threshold is considered to be a lower bound and is noninclusive;
+/// computed probabilities higher than this threshold are considered to have detected some amount
+/// of voice activity.
+
+pub struct SileroBuilder {
+    sample_rate: i64,
+    chunk_size: usize,
+    detection_probability_threshold: f32,
+}
+
+impl SileroBuilder {
+    pub fn new() -> Self {
+        Self {
+            sample_rate: 0,
+            chunk_size: 0,
+            detection_probability_threshold: 0.,
+        }
+    }
+    pub fn with_sample_rate(mut self, sample_rate: i64) -> Self {
+        self.sample_rate = sample_rate;
+        self
+    }
+    pub fn with_chunk_size(mut self, chunk_size: usize) -> Self {
+        self.chunk_size = chunk_size;
+        self
+    }
+    pub fn with_detection_probability_threshold(mut self, probability: f32) -> Self {
+        self.detection_probability_threshold = probability;
+        self
+    }
+
+    // It's not entirely clear as to what might cause VoiceActivityDetectorBuilder::build() to fail
+    // but this function returns None if the Silero Vad struct fails to build.
+    pub fn build(self) -> Result<Silero, WhisperRealtimeError> {
+        voice_activity_detector::VoiceActivityDetector::builder()
+            .sample_rate(self.sample_rate)
+            .chunk_size(self.chunk_size)
+            .build()
+            .map(|vad| Silero {
+                vad,
+                detection_probability_threshold: self.detection_probability_threshold,
+            })
+            .map_err(|e| {
+                // TODO: this is not the right type of error; write a proper error to encapsulate the kind of error this is.
+                WhisperRealtimeError::ParameterError(format!(
+                    "Failed to build Silero VAD. Error: {}",
+                    e
+                ))
+            })
+    }
+}
+
+/// Represents the Silero VAD backend for use in realtime transcription
+/// Adapts voice_activity_detector::VoiceActivityDetector to predict voice activity using
+/// Silero and the ONNX runtime.
+/// NOTE: on Windows, this may or may not have telemetry, see: https://docs.rs/ort/latest/ort/#strategies
+/// If this is a problem, please file an issue.
+pub struct Silero {
+    vad: voice_activity_detector::VoiceActivityDetector,
+    detection_probability_threshold: f32,
+}
+
+impl Silero {
+    pub fn with_detection_probability_threshold(mut self, probability: f32) -> Self {
+        self.detection_probability_threshold = probability;
+        self
+    }
+
+    /// A "Default" whisper-ready Silero configuration
+    pub fn try_new_whisper_default() -> Result<Self, WhisperRealtimeError> {
+        SileroBuilder::new()
+            .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
+            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
+            .with_detection_probability_threshold(constants::VOICE_PROBABILITY_THRESHOLD)
+            .build()
+    }
+}
+
+impl<T: voice_activity_detector::Sample> VAD<T> for Silero {
+    /// NOTE: This implementation assumes that the samples are at the same sample rate as the configured VAD
+    fn voice_detected(&mut self, samples: &[T]) -> bool {
+        self.detection_probability_threshold > self.vad.predict(samples.iter().copied())
+    }
+    fn reset_session(&mut self) {
+        // VoiceActivityDetector does not reset configurations to default settings when resetting the context
+        // so this method is just a simple delegate.
+        self.vad.reset()
+    }
+}
+
+/// Wrapper Enumeration for WebRtcImplementations
+/// These are intended for the WebRTCBuilder which handles constructing the desired
+/// WebRtc backend.
+#[derive(Copy, Clone, Debug)]
+pub enum WebRtcSampleRate {
+    R8kHz,
+    R16kHz,
+    R32kHz,
+    R48kHz,
+}
+
+impl WebRtcSampleRate {
+    fn to_webrtc_sample_rate(&self) -> webrtc_vad::SampleRate {
+        match self {
+            Self::R8kHz => webrtc_vad::SampleRate::Rate8kHz,
+            Self::R16kHz => webrtc_vad::SampleRate::Rate16kHz,
+            Self::R32kHz => webrtc_vad::SampleRate::Rate32kHz,
+            Self::R48kHz => webrtc_vad::SampleRate::Rate48kHz,
+        }
+    }
+    fn to_sample_rate_hz(&self) -> usize {
+        match self {
+            Self::R8kHz => 8000usize,
+            Self::R16kHz => 16000usize,
+            Self::R32kHz => 32000usize,
+            Self::R48kHz => 488000usize,
+        }
+    }
+}
+
+// TODO: reword, implementation can and will be generalized for both WebRTC implementors.
+/// Wrapper Enumeration for webrtc_vad::VadMode and earshot::VoiceActivityProfile.
+/// These are intended for the WebRTCBuilder which handles constructing the desired WebRtc backend.
+///
+/// This parameter sets the "mode" from which predetermined speech threshold constants are selected for filtering out non-speech.
+/// See: https://chromium.googlesource.com/external/webrtc/+/refs/heads/master/common_audio/vad/vad_core.c#68
+/// Quality = low filtering, detects most speech and then some. May introduce some false positives
+/// VeryAggressive = high filtering, only clear speech passes. Might introduce false negatives
+///
+/// For small samples (and clear enough audio), higher aggressiveness is likely to produce better results
+#[derive(Copy, Clone, Debug)]
+pub enum WebRtcFilterAggressiveness {
+    Quality,
+    LowBitrate,
+    Aggressive,
+    VeryAggressive,
+}
+
+impl WebRtcFilterAggressiveness {
+    fn to_webrtc_vad_mode(&self) -> webrtc_vad::VadMode {
+        match self {
+            Self::Quality => webrtc_vad::VadMode::Quality,
+            Self::LowBitrate => webrtc_vad::VadMode::LowBitrate,
+            Self::Aggressive => webrtc_vad::VadMode::Aggressive,
+            Self::VeryAggressive => webrtc_vad::VadMode::VeryAggressive,
+        }
+    }
+    fn to_earshot_vad_profile(&self) -> earshot::VoiceActivityProfile {
+        match self {
+            Self::Quality => earshot::VoiceActivityProfile::QUALITY,
+            Self::LowBitrate => earshot::VoiceActivityProfile::LBR,
+            Self::Aggressive => earshot::VoiceActivityProfile::AGGRESSIVE,
+            Self::VeryAggressive => earshot::VoiceActivityProfile::VERY_AGGRESSIVE,
+        }
+    }
+}
+
+/// Since WebRTC expects frames of specific fixed length, this enumeration captures the only possible
+/// valid lengths. It is not used directly in the implementation or the VAD backend; its purpose is
+/// to provide information required to compute the necessary sample padding/truncation to fit the
+/// frame size requirements
+/// This is more or less equivalent to voice_activity_detector's more flexible chunk_size parameter,
+/// except measured in milliseconds instead of individual PCM samples.
+
+#[derive(Copy, Clone, Debug)]
+pub enum WebRtcFrameLengthMillis {
+    MS10 = 10,
+    MS20 = 20,
+    MS30 = 30,
+}
+
+impl WebRtcFrameLengthMillis {
+    fn to_ms(&self) -> usize {
+        match self {
+            Self::MS10 => 10usize,
+            Self::MS20 => 20usize,
+            Self::MS30 => 30usize,
+        }
+    }
+}
+
+/// A builder that can produce either a WebRtc or Earshot backend for use in realtime transcription.
+/// Due to the way WebRTC is implemented, detection_probability_threshold should be treated as the
+/// minimum proportion of frames that are detected to have speech.
+/// This is a non-inclusive lower-bound; samples with VAD frame proportions higher than this
+/// threshold are thus considered to contain speech
+pub struct WebRTCBuilder {
+    sample_rate: WebRtcSampleRate,
+    aggressiveness: WebRtcFilterAggressiveness,
+    frame_length: WebRtcFrameLengthMillis,
+    detection_probability_threshold: f32,
+}
+
+impl WebRTCBuilder {
+    pub fn new() -> Self {
+        Self {
+            sample_rate: WebRtcSampleRate::R8kHz,
+            aggressiveness: WebRtcFilterAggressiveness::Quality,
+            frame_length: WebRtcFrameLengthMillis::MS10,
+            detection_probability_threshold: 0.0,
+        }
+    }
+    pub fn with_sample_rate(mut self, sample_rate: WebRtcSampleRate) -> Self {
+        self.sample_rate = sample_rate;
+        self
+    }
+    pub fn with_filter_aggressiveness(
+        mut self,
+        aggressiveness: WebRtcFilterAggressiveness,
+    ) -> Self {
+        self.aggressiveness = aggressiveness;
+        self
+    }
+    pub fn with_detection_probability_threshold(mut self, probability_threshold: f32) -> Self {
+        self.detection_probability_threshold = probability_threshold;
+        self
+    }
+    pub fn with_frame_length_millis(mut self, frame_length: WebRtcFrameLengthMillis) -> Self {
+        self.frame_length = frame_length;
+        self
+    }
+
+    // This returns none if webrtc_vad panics, which will happen in the case of a memory allocation error.
+    // (eg. OOM).
+    pub fn build_webrtc_vad(self) -> Result<WebRtc, WhisperRealtimeError> {
+        std::panic::catch_unwind(|| {
+            webrtc_vad::Vad::new_with_rate_and_mode(
+                self.sample_rate.to_webrtc_sample_rate(),
+                self.aggressiveness.to_webrtc_vad_mode(),
+            )
+        })
+        .map(|vad| WebRtc {
+            vad,
+            // WebRtcSampleRate and WebRtcFilterAgressiveness both have Copy semantics
+            sample_rate: self.sample_rate,
+            aggressiveness: self.aggressiveness,
+            frame_length_in_ms: self.frame_length.to_ms(),
+            detection_probability_threshold: self.detection_probability_threshold,
+            // TODO: As above with the Silero impl, this requires a proper error member,
+            // ParameterError is inappropriate and should be replaced
+        })
+        .map_err(|_| {
+            WhisperRealtimeError::ParameterError(
+                "Failed to build WebRTC due to memory allocation error.".to_string(),
+            )
+        })
+    }
+    pub fn build_earshot(self) -> Result<Earshot, WhisperRealtimeError> {
+        let vad = earshot::VoiceActivityDetector::new(self.aggressiveness.to_earshot_vad_profile());
+        Ok(Earshot {
+            vad,
+            sample_rate: self.sample_rate,
+            frame_length_in_ms: 0,
+            detection_probability_threshold: 0.0,
+        })
+    }
+}
+
+// NOTE TO SELF: This operates on frames that are of length 10ms, 20ms, or 30ms @ the given sample rate.
+// eg. for 8 kHz, length must be 80 frames long.
+// NOTE TO SELF PART 2: THE SEQUEL: sample_rate and aggressiveness need to be passed in from the builder
+// Webrtc's reset method resets the state as well as the configurations, so the initial configurations need to be stored.
+// Additionally, SampleRate needs to be matched for computing padding and the number of frames.
+pub struct WebRtc {
+    vad: webrtc_vad::Vad,
+    // Since webrtc_vad does not implement Copy or Clone, use the wrapper structs.
+    // These have matching methods to produce the internal enumeration equivalent as needed
+    sample_rate: WebRtcSampleRate,
+    aggressiveness: WebRtcFilterAggressiveness,
+    // This value will always be restricted to either 10ms, 20ms, 30ms as per the Enumeration
+    // used in the accompanying builder
+    frame_length_in_ms: usize,
+    detection_probability_threshold: f32,
+}
+
+impl WebRtc {
+    pub fn with_detection_probability_threshold(mut self, probability: f32) -> Self {
+        self.detection_probability_threshold = probability;
+        self
+    }
+    /// A "Default" whisper-ready WebRtc configuration
+    pub fn try_new_whisper_default() -> Result<Self, WhisperRealtimeError> {
+        WebRTCBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R16kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
+            .with_detection_probability_threshold(constants::VOICE_PROBABILITY_THRESHOLD)
+            .build_webrtc_vad()
+    }
+}
+
+impl<T: IntoPcmS16 + Copy> VAD<T> for WebRtc {
+    // NOTE: This implementation assumes that the samples are at the same sample rate as the configured VAD
+    // Samples of insufficient length are zero-padded/truncated to avoid internal panicking.
+    fn voice_detected(&mut self, samples: &[T]) -> bool {
+        let (int_audio, frame_size) = prepare_webrtc_frames(
+            samples,
+            self.frame_length_in_ms,
+            self.sample_rate.to_sample_rate_hz(),
+        );
+        let frames = int_audio.chunks_exact(frame_size);
+
+        let total_num_frames = frames.len();
+        let speech_frames = frames.filter(|&frame| {
+            // This should never, ever panic unless my arithmetic is busted
+            // Unwrap to force a panic to catch errors in the implementation.
+            self.vad
+                .is_voice_segment(frame)
+                .expect("The frame size should be valid.")
+        });
+
+        let voiced_proportion = (speech_frames.count() as f32) / (total_num_frames as f32);
+        voiced_proportion > self.detection_probability_threshold
+    }
+    fn reset_session(&mut self) {
+        // WebRtc_vad reverts to default settings when the context is cleared.
+        // The vad must be reconfigured accordingly.
+        self.vad.reset();
+        self.vad
+            .set_sample_rate(self.sample_rate.to_webrtc_sample_rate());
+        self.vad.set_mode(self.aggressiveness.to_webrtc_vad_mode());
+    }
+}
+pub struct Earshot {
+    vad: earshot::VoiceActivityDetector,
+    // For dispatching the appropriate method
+    sample_rate: WebRtcSampleRate,
+    frame_length_in_ms: usize,
+    detection_probability_threshold: f32,
+}
+
+impl Earshot {
+    pub fn with_detection_probability_threshold(mut self, probability: f32) -> Self {
+        self.detection_probability_threshold = probability;
+        self
+    }
+
+    /// A "Default" whisper-ready Earhshot configuration
+    pub fn try_new_whisper_default() -> Result<Self, WhisperRealtimeError> {
+        WebRTCBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R16kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
+            .with_detection_probability_threshold(constants::VOICE_PROBABILITY_THRESHOLD)
+            .build_earshot()
+    }
+}
+
+impl<T: IntoPcmS16 + Copy> VAD<T> for Earshot {
+    fn voice_detected(&mut self, samples: &[T]) -> bool {
+        let (int_audio, frame_size) = prepare_webrtc_frames(
+            samples,
+            self.frame_length_in_ms,
+            self.sample_rate.to_sample_rate_hz(),
+        );
+        let frames = int_audio.chunks_exact(frame_size);
+
+        let total_num_frames = frames.len();
+        // This is a little heavy-handed, but it's cheaper than Boxing a predicate and avoids the
+        // need for a Rusty boilerplate abstraction to play with closures.
+        let speech_frames_count = match self.sample_rate {
+            WebRtcSampleRate::R8kHz => {
+                let speech_frames = frames.filter(|&frame| {
+                    self.vad
+                        .predict_8khz(frame)
+                        .expect("Frame size should be valid.")
+                });
+                speech_frames.count() as f32
+            }
+
+            WebRtcSampleRate::R16kHz => {
+                let speech_frames = frames.filter(|&frame| {
+                    self.vad
+                        .predict_16khz(frame)
+                        .expect("Frame size should be valid.")
+                });
+
+                speech_frames.count() as f32
+            }
+            WebRtcSampleRate::R32kHz => {
+                let speech_frames = frames.filter(|&frame| {
+                    self.vad
+                        .predict_32khz(frame)
+                        .expect("Frame size should be valid.")
+                });
+
+                speech_frames.count() as f32
+            }
+            WebRtcSampleRate::R48kHz => {
+                let speech_frames = frames.filter(|&frame| {
+                    self.vad
+                        .predict_48khz(frame)
+                        .expect("Frame size should be valid.")
+                });
+                speech_frames.count() as f32
+            }
+        };
+        let voiced_proportion = (speech_frames_count) / (total_num_frames as f32);
+        voiced_proportion > self.detection_probability_threshold
+    }
+
+    fn reset_session(&mut self) {
+        // Earshot does not revert back to default settings when resetting the context,
+        // so this method is just a delegate.
+        self.vad.reset()
+    }
+}
+
+/// This small utility function handles the padding/truncation required by WebRTC implementations
+/// It returns the converted and padded audio, as well as the frame size so that methods consuming
+/// this function do not need to recompute the frame size.
+fn prepare_webrtc_frames<T: IntoPcmS16 + Copy>(
+    samples: &[T],
+    frame_length_in_ms: usize,
+    sample_rate: usize,
+) -> (Vec<i16>, usize) {
+    // Convert to integer audio
+    let mut int_audio: Vec<i16> = samples.iter().map(|s| s.into_pcm_s16()).collect();
+    // Because of implementation details in WebRTC, frames need to be either 10ms, 20ms, or 30ms in length
+    // This means the length must be a multiple of (sample_rate * audio_length) / 1000
+    // eg. 8kHz -> 80, 160, 240
+    let frame_size = (sample_rate * frame_length_in_ms) / 1000;
+    let zero_pad = frame_size - int_audio.len().rem_euclid(frame_size);
+    int_audio.resize(int_audio.len() + zero_pad, 0);
+    (int_audio, frame_size)
+}
+
+// LEGACY
+
 // This is for the naive strategy to avoid extra memory allocations at runtime.
 static FFT_PLANNER: LazyLock<Mutex<RealFftPlanner<f64>>> =
     LazyLock::new(|| Mutex::new(RealFftPlanner::<f64>::new()));
@@ -44,12 +488,12 @@ pub trait VoiceActivityDetection<
 >
 {
     fn is_voice_detected_silero(
-        vad: &mut VoiceActivityDetector,
+        vad: &mut voice_activity_detector::VoiceActivityDetector,
         samples: &Vec<T>,
         voice_probability_threshold: f32,
     ) -> bool {
-        let samples = samples.clone();
-        let probability = vad.predict(samples);
+        let s = samples.clone();
+        let probability = vad.predict(s);
         probability > voice_probability_threshold
     }
 
@@ -687,7 +1131,7 @@ mod vad_tests {
         // This might not be mutable.
         let mut configs = configs::WhisperConfigsV1::default();
 
-        let mut vad = VoiceActivityDetector::builder()
+        let mut vad = voice_activity_detector::VoiceActivityDetector::builder()
             .sample_rate(sample_rate as i64)
             .chunk_size(1024usize)
             .build()
