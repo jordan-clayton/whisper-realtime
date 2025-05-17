@@ -279,11 +279,18 @@ impl WebRTCBuilder {
     }
     pub fn build_earshot(self) -> Result<Earshot, WhisperRealtimeError> {
         let vad = earshot::VoiceActivityDetector::new(self.aggressiveness.to_earshot_vad_profile());
+        let predicate = match self.sample_rate {
+            WebRtcSampleRate::R8kHz => earshot::VoiceActivityDetector::predict_8khz,
+            WebRtcSampleRate::R16kHz => earshot::VoiceActivityDetector::predict_16khz,
+            WebRtcSampleRate::R32kHz => earshot::VoiceActivityDetector::predict_32khz,
+            WebRtcSampleRate::R48kHz => earshot::VoiceActivityDetector::predict_48khz,
+        };
         Ok(Earshot {
             vad,
-            sample_rate: self.sample_rate,
+            sample_rate: self.sample_rate.to_sample_rate_hz(),
             frame_length_in_ms: 0,
             detection_probability_threshold: 0.0,
+            prediction_predicate: predicate,
         })
     }
 }
@@ -348,12 +355,16 @@ impl<T: IntoPcmS16 + Copy> VAD<T> for WebRtc {
         self.vad.set_mode(self.aggressiveness.to_webrtc_vad_mode());
     }
 }
+
+type EarshotPredictionFilterPredicate =
+    fn(&mut earshot::VoiceActivityDetector, &[i16]) -> Result<bool, earshot::Error>;
 pub struct Earshot {
     vad: earshot::VoiceActivityDetector,
     // For dispatching the appropriate method
-    sample_rate: WebRtcSampleRate,
+    sample_rate: usize,
     frame_length_in_ms: usize,
     detection_probability_threshold: f32,
+    prediction_predicate: EarshotPredictionFilterPredicate,
 }
 
 impl Earshot {
@@ -374,54 +385,16 @@ impl Earshot {
 
 impl<T: IntoPcmS16 + Copy> VAD<T> for Earshot {
     fn voice_detected(&mut self, samples: &[T]) -> bool {
-        let (int_audio, frame_size) = prepare_webrtc_frames(
-            samples,
-            self.frame_length_in_ms,
-            self.sample_rate.to_sample_rate_hz(),
-        );
+        let (int_audio, frame_size) =
+            prepare_webrtc_frames(samples, self.frame_length_in_ms, self.sample_rate);
         let frames = int_audio.chunks_exact(frame_size);
 
         let total_num_frames = frames.len();
-        // This is a little heavy-handed, but it's cheaper than Boxing a predicate and avoids the
-        // need for a Rusty boilerplate abstraction to play with closures.
-        let speech_frames_count = match self.sample_rate {
-            WebRtcSampleRate::R8kHz => {
-                let speech_frames = frames.filter(|&frame| {
-                    self.vad
-                        .predict_8khz(frame)
-                        .expect("Frame size should be valid.")
-                });
-                speech_frames.count() as f32
-            }
-
-            WebRtcSampleRate::R16kHz => {
-                let speech_frames = frames.filter(|&frame| {
-                    self.vad
-                        .predict_16khz(frame)
-                        .expect("Frame size should be valid.")
-                });
-
-                speech_frames.count() as f32
-            }
-            WebRtcSampleRate::R32kHz => {
-                let speech_frames = frames.filter(|&frame| {
-                    self.vad
-                        .predict_32khz(frame)
-                        .expect("Frame size should be valid.")
-                });
-
-                speech_frames.count() as f32
-            }
-            WebRtcSampleRate::R48kHz => {
-                let speech_frames = frames.filter(|&frame| {
-                    self.vad
-                        .predict_48khz(frame)
-                        .expect("Frame size should be valid.")
-                });
-                speech_frames.count() as f32
-            }
-        };
-        let voiced_proportion = (speech_frames_count) / (total_num_frames as f32);
+        let vad = &mut self.vad;
+        let speech_frames = frames.filter(|&frame| {
+            (self.prediction_predicate)(vad, frame).expect("Frame size should be valid.")
+        });
+        let voiced_proportion = (speech_frames.count() as f32) / (total_num_frames as f32);
         voiced_proportion > self.detection_probability_threshold
     }
 
