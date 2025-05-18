@@ -2,6 +2,7 @@ use std::{f64::consts::PI, sync::Mutex};
 use std::sync::LazyLock;
 
 use realfft::RealFftPlanner;
+use voice_activity_detector::{IteratorExt, LabeledAudio};
 
 use crate::audio::pcm::IntoPcmS16;
 use crate::utils::constants;
@@ -12,10 +13,16 @@ use crate::utils::errors::WhisperRealtimeError;
 
 /// TODO: properly document this trait to explain why it's here, what it's for, and what's available
 /// eg. Three provided VAD implementations: Silero, WebRtc, Earshot (a WebRtc) impl
-/// tl;dr, Silero is very fast and efficient. Earshot should mainly be used as a fallback;
+/// tl;dr:
+/// Silero is accurate and efficient; it's fast enough for realtime.
+/// WebRtc is extremely fast and is accurate-enough; it's built for realtime.
+/// Earshot is marginally faster than WebRtc and has poor accuracy; use as a fallback on lower hardware;
 /// as far as I know, it's much less accurate, but it is very fast--YMMV.
-pub trait VAD<T> {
+pub trait VAD<T>: Resettable {
     fn voice_detected(&mut self, samples: &[T]) -> bool;
+}
+
+pub trait Resettable {
     fn reset_session(&mut self);
 }
 
@@ -108,15 +115,49 @@ impl Silero {
     }
 }
 
-impl<T: voice_activity_detector::Sample> VAD<T> for Silero {
-    /// NOTE: This implementation assumes that the samples are at the same sample rate as the configured VAD
-    fn voice_detected(&mut self, samples: &[T]) -> bool {
-        self.detection_probability_threshold > self.vad.predict(samples.iter().copied())
-    }
+impl Resettable for Silero {
     fn reset_session(&mut self) {
         // VoiceActivityDetector does not reset configurations to default settings when resetting the context
         // so this method is just a simple delegate.
         self.vad.reset()
+    }
+}
+
+impl<T: voice_activity_detector::Sample> VAD<T> for Silero {
+    /// NOTE: This implementation assumes that the samples are at the same sample rate as the configured VAD
+    fn voice_detected(&mut self, samples: &[T]) -> bool {
+        // If a zero-length slice of samples are sent, there is obviously no voice
+        if samples.len() == 0 {
+            return false;
+        }
+        // Create a LabelIterator to stream the prediction over the sample chunks at the given detection threshold.
+        // LabelIterator allows for padding to compensate for sudden speech cutoffs/gaps in audio;
+        // 3 frames is expected to be sufficient.
+        let probabilites = samples.iter().copied().label(
+            &mut self.vad,
+            self.detection_probability_threshold,
+            3usize,
+        );
+
+        // Since LabelIterator/ProbabilityIterator do not have a non-consuming way to compare
+        // the number of voiced frames versus the total number of frames, the accmumulation has to
+        // be done explicitly.
+        let mut total_frames = 0usize;
+        let mut voiced_frames = 0usize;
+        for label in probabilites {
+            match label {
+                LabeledAudio::Speech(_) => {
+                    total_frames += 1;
+                    voiced_frames += 1
+                }
+                LabeledAudio::NonSpeech(_) => total_frames += 1,
+            }
+        }
+
+        assert_ne!(total_frames, 0);
+        // If more than half the frames meet the given threshold, treat the sample as containing speech
+        let voiced_proportion = voiced_frames as f32 / total_frames as f32;
+        voiced_proportion > 0.5
     }
 }
 
@@ -145,7 +186,7 @@ impl WebRtcSampleRate {
             Self::R8kHz => 8000usize,
             Self::R16kHz => 16000usize,
             Self::R32kHz => 32000usize,
-            Self::R48kHz => 488000usize,
+            Self::R48kHz => 48000usize,
         }
     }
 }
@@ -216,14 +257,14 @@ impl WebRtcFrameLengthMillis {
 /// minimum proportion of frames that are detected to have speech.
 /// This is a non-inclusive lower-bound; samples with VAD frame proportions higher than this
 /// threshold are thus considered to contain speech
-pub struct WebRTCBuilder {
+pub struct WebRtcBuilder {
     sample_rate: WebRtcSampleRate,
     aggressiveness: WebRtcFilterAggressiveness,
     frame_length: WebRtcFrameLengthMillis,
     detection_probability_threshold: f32,
 }
 
-impl WebRTCBuilder {
+impl WebRtcBuilder {
     pub fn new() -> Self {
         Self {
             sample_rate: WebRtcSampleRate::R8kHz,
@@ -254,7 +295,7 @@ impl WebRTCBuilder {
 
     // This returns none if webrtc_vad panics, which will happen in the case of a memory allocation error.
     // (eg. OOM).
-    pub fn build_webrtc_vad(self) -> Result<WebRtc, WhisperRealtimeError> {
+    pub fn build_webrtc(self) -> Result<WebRtc, WhisperRealtimeError> {
         std::panic::catch_unwind(|| {
             webrtc_vad::Vad::new_with_rate_and_mode(
                 self.sample_rate.to_webrtc_sample_rate(),
@@ -288,8 +329,8 @@ impl WebRTCBuilder {
         Ok(Earshot {
             vad,
             sample_rate: self.sample_rate.to_sample_rate_hz(),
-            frame_length_in_ms: 0,
-            detection_probability_threshold: 0.0,
+            frame_length_in_ms: self.frame_length.to_ms(),
+            detection_probability_threshold: self.detection_probability_threshold,
             prediction_predicate: predicate,
         })
     }
@@ -315,11 +356,22 @@ impl WebRtc {
     }
     /// A "Default" whisper-ready WebRtc configuration
     pub fn try_new_whisper_default() -> Result<Self, WhisperRealtimeError> {
-        WebRTCBuilder::new()
+        WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
             .with_detection_probability_threshold(constants::VOICE_PROBABILITY_THRESHOLD)
-            .build_webrtc_vad()
+            .build_webrtc()
+    }
+}
+
+impl Resettable for WebRtc {
+    fn reset_session(&mut self) {
+        // WebRtc_vad reverts to default settings when the context is cleared.
+        // The vad must be reconfigured accordingly.
+        self.vad.reset();
+        self.vad
+            .set_sample_rate(self.sample_rate.to_webrtc_sample_rate());
+        self.vad.set_mode(self.aggressiveness.to_webrtc_vad_mode());
     }
 }
 
@@ -327,14 +379,21 @@ impl<T: IntoPcmS16 + Copy> VAD<T> for WebRtc {
     // NOTE: This implementation assumes that the samples are at the same sample rate as the configured VAD
     // Samples of insufficient length are zero-padded/truncated to avoid internal panicking.
     fn voice_detected(&mut self, samples: &[T]) -> bool {
+        // If a zero-length slice of samples are sent, there is obviously no voice
+        if samples.len() == 0 {
+            return false;
+        }
         let (int_audio, frame_size) = prepare_webrtc_frames(
             samples,
             self.frame_length_in_ms,
             self.sample_rate.to_sample_rate_hz(),
         );
+
         let frames = int_audio.chunks_exact(frame_size);
 
         let total_num_frames = frames.len();
+        assert_ne!(total_num_frames, 0);
+
         let speech_frames = frames.filter(|&frame| {
             // This should never, ever panic unless my arithmetic is busted
             // Unwrap to force a panic to catch errors in the implementation.
@@ -343,16 +402,10 @@ impl<T: IntoPcmS16 + Copy> VAD<T> for WebRtc {
                 .expect("The frame size should be valid.")
         });
 
+        // Since WebRtc doesn't allow users to set the "threshold" directly, treat the threshold
+        // like a minimum proportion of frames that have to be detected to be considered speech
         let voiced_proportion = (speech_frames.count() as f32) / (total_num_frames as f32);
         voiced_proportion > self.detection_probability_threshold
-    }
-    fn reset_session(&mut self) {
-        // WebRtc_vad reverts to default settings when the context is cleared.
-        // The vad must be reconfigured accordingly.
-        self.vad.reset();
-        self.vad
-            .set_sample_rate(self.sample_rate.to_webrtc_sample_rate());
-        self.vad.set_mode(self.aggressiveness.to_webrtc_vad_mode());
     }
 }
 
@@ -375,7 +428,7 @@ impl Earshot {
 
     /// A "Default" whisper-ready Earhshot configuration
     pub fn try_new_whisper_default() -> Result<Self, WhisperRealtimeError> {
-        WebRTCBuilder::new()
+        WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
             .with_detection_probability_threshold(constants::VOICE_PROBABILITY_THRESHOLD)
@@ -383,25 +436,38 @@ impl Earshot {
     }
 }
 
+impl Resettable for Earshot {
+    fn reset_session(&mut self) {
+        // Earshot does not revert back to default settings when resetting the context,
+        // so this method is just a delegate.
+        self.vad.reset()
+    }
+}
+
 impl<T: IntoPcmS16 + Copy> VAD<T> for Earshot {
     fn voice_detected(&mut self, samples: &[T]) -> bool {
+        // If a zero-length slice of samples are sent, there is obviously no voice
+        if samples.len() == 0 {
+            return false;
+        }
+
         let (int_audio, frame_size) =
             prepare_webrtc_frames(samples, self.frame_length_in_ms, self.sample_rate);
         let frames = int_audio.chunks_exact(frame_size);
 
         let total_num_frames = frames.len();
+        assert_ne!(total_num_frames, 0);
         let vad = &mut self.vad;
         let speech_frames = frames.filter(|&frame| {
             (self.prediction_predicate)(vad, frame).expect("Frame size should be valid.")
         });
+
+        // Like WebRtc, (this is a WebRtc implementation),
+        // doesn't allow users to set the "threshold" directly, treat the threshold
+        // like a minimum proportion of frames that have to be detected to be considered speech
+
         let voiced_proportion = (speech_frames.count() as f32) / (total_num_frames as f32);
         voiced_proportion > self.detection_probability_threshold
-    }
-
-    fn reset_session(&mut self) {
-        // Earshot does not revert back to default settings when resetting the context,
-        // so this method is just a delegate.
-        self.vad.reset()
     }
 }
 

@@ -1,1 +1,151 @@
-// See crate/transcriber/vad.rs for implementation tests, due to private function implementations
+#[cfg(test)]
+mod vad_tests {
+    use std::sync::LazyLock;
+
+    use hound::SampleFormat;
+
+    use whisper_realtime::audio::pcm::IntoPcmS16;
+    use whisper_realtime::audio::resampler::{AudioSample, resample};
+    use whisper_realtime::transcriber::static_transcriber::SupportedAudioSample;
+    use whisper_realtime::transcriber::vad::{
+        Earshot, Resettable, Silero, SileroBuilder, VAD, WebRtc,
+        WebRtcBuilder, WebRtcFilterAggressiveness, WebRtcFrameLengthMillis, WebRtcSampleRate,
+    };
+    use whisper_realtime::utils::constants::WHISPER_SAMPLE_RATE;
+
+// This audio file contains a speaker who methodically reads out a series of random sentences.
+    // The voice clip is not super clear, nor loud, and there are significant gaps between phrases,
+    // making it a relatively good candidate for testing the accuracy of the voice detection.
+    // Tests that probe this sample for speech are expected to determine there is, in fact, speech.
+
+    // The sample rate for this file is 8kHz, and it should be in Mono.
+    static AUDIO_SAMPLE: LazyLock<Vec<i16>> = LazyLock::new(|| {
+        let mut reader =
+            hound::WavReader::open("tests/audio_files/OSR_us_000_0060_8k.wav").unwrap();
+        let spec = reader.spec();
+        let sample_format = spec.sample_format;
+        match sample_format {
+            SampleFormat::Float => reader
+                .samples::<f32>()
+                .map(|s| s.expect("Audio expected to read properly.").into_pcm_s16())
+                .collect(),
+            SampleFormat::Int => reader
+                .samples::<i16>()
+                .map(|s| s.expect("Audio expected to read properly."))
+                .collect(),
+        }
+    });
+
+    // Build a 10-second silent audio clip at 16kHz to tease out false positives.
+    static SILENCE: LazyLock<Vec<i16>> = LazyLock::new(|| {
+        let secs = 10.;
+        vec![0; (secs * WHISPER_SAMPLE_RATE) as usize]
+    });
+
+    #[test]
+    fn test_silero_detection() {
+        let mut vad = SileroBuilder::new()
+            .with_sample_rate(8000)
+            .with_chunk_size(512)
+            .with_detection_probability_threshold(0.65)
+            .build()
+            .expect("Silero VAD expected to build without issues.");
+
+        let voice_detected = vad.voice_detected(&AUDIO_SAMPLE);
+        assert!(
+            voice_detected,
+            "Silero failed to detect voice in audio samples @ 65% threshold"
+        );
+
+        let mut whisper_vad = Silero::try_new_whisper_default()
+            .expect("Whisper-ready Silero VAD expected to build without issues");
+        let voice_detected = whisper_vad.voice_detected(&SILENCE);
+        assert!(
+            !voice_detected,
+            "Silero detected voice in a silent clip with whisper parameters."
+        )
+    }
+    #[test]
+    fn test_webrtc_detection() {
+        let mut vad = WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R8kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
+            .with_frame_length_millis(WebRtcFrameLengthMillis::MS10)
+            .with_detection_probability_threshold(0.65)
+            .build_webrtc()
+            .expect("WebRtc expected to build without issues.");
+        let voice_detected = vad.voice_detected(&AUDIO_SAMPLE);
+        assert!(voice_detected, "WebRtc failed to detect voice in audio samples @ 65% threshold with LowBitrate aggressiveness.");
+
+        let mut whisper_vad = WebRtc::try_new_whisper_default()
+            .expect("Whisper-ready WebRtc VAD expected to build without issues");
+        let voice_detected = whisper_vad.voice_detected(&SILENCE);
+        assert!(
+            !voice_detected,
+            "WebRtc detected voice in a silent clip with whisper parameters."
+        )
+    }
+
+    #[test]
+    fn test_earshot_detection() {
+        let mut vad = WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R8kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
+            .with_frame_length_millis(WebRtcFrameLengthMillis::MS10)
+            .with_detection_probability_threshold(0.65)
+            .build_earshot()
+            .expect("Earshot expected to build without issues.");
+        let voice_detected = vad.voice_detected(&AUDIO_SAMPLE);
+        assert!(voice_detected, "Earshot failed to detect voice in audio samples @ 65% threshold with LowBitrate aggressiveness.");
+
+        let mut whisper_vad = Earshot::try_new_whisper_default()
+            .expect("Whisper-ready WebRtc VAD expected to build without issues");
+        let voice_detected = whisper_vad.voice_detected(&SILENCE);
+        assert!(
+            !voice_detected,
+            "Earshot detected voice in a silent clip with whisper parameters."
+        )
+    }
+
+    // Due to limitations with a dependency this test cannot control for/rule the filter_aggressiveness
+    // being maintained across resets.
+    // This is likely the best test that I could write given the limitations.
+    #[test]
+    fn test_webrtc_reset() {
+        // The audio is known to contain speech, but the audio quality is poor enough that it should be possible to
+        // overtune the configurations intentionally produce a false negative.
+        let mut vad = WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R16kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::Quality)
+            .with_frame_length_millis(WebRtcFrameLengthMillis::MS10)
+            // The entire audio clip is around ~50% speech with lots of pauses
+            // A high-enough threshold will produce a false-negative.
+            .with_detection_probability_threshold(0.75)
+            .build_webrtc()
+            .expect("WebRtc expected to build without issues.");
+
+        // Resample the audio track to 16 kHz to match the VAD
+        let upsampled_audio = resample(&AudioSample::I16(&AUDIO_SAMPLE), 16000., 8000., 1)
+            .expect("Resampling audio should pass");
+        let upsampled_audio = match upsampled_audio {
+            SupportedAudioSample::I16(_) => unreachable!(),
+            SupportedAudioSample::F32(audio) => audio,
+        };
+
+        // Run on the sample to produce a false negative.
+        let voice_detected = vad.voice_detected(&upsampled_audio);
+        assert!(!voice_detected, "Not able to produce a false negative");
+
+        // Reset the vad
+        vad.reset_session();
+
+        // If the settings are not properly maintained, this VAD will then have a sample rate of
+        // 8kHz at Quality aggressiveness. If this is true, running the VAD on the 8kHz sample is
+        // also expected to produce a false negative.
+
+        // If the VAD's sampling rate is still at 16kHz, it should overestimate the speech, so test for a
+        // false (but not really false, actually true) positive to conclude the sample rate is maintained.
+        let voice_detected = vad.voice_detected(&AUDIO_SAMPLE);
+        assert!(voice_detected, "Still produced a false negative.");
+    }
+}

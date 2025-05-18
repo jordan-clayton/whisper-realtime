@@ -82,6 +82,10 @@ symphonia-alac = ["symphonia/alac"]
 name = "recorder_benchmark"
 harness = false
 
+[[bench]]
+name = "vad_benchmark"
+harness = false
+
 [[example]]
 name = "realtime_stream"
 required-features = ["downloader"]

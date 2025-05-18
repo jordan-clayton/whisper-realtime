@@ -19,8 +19,7 @@ pub enum AudioSample<'a> {
     F64(&'a [f64]),
 }
 
-/// Resamples decoded audio to 16kHz for Whisper processing
-/// Packages into a SupportedAudioSample which can be passed to a StaticTranscriber
+/// Resamples decoded audio to the desired sample rate.
 /// Audio will be converted to f32 because it is the most convenient for the application
 pub fn resample(
     samples: &AudioSample,
