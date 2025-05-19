@@ -59,20 +59,20 @@ impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
 
     pub fn build(self) -> Result<RealtimeTranscriber<V>, WhisperRealtimeError> {
         let configs = self.configs.ok_or(WhisperRealtimeError::ParameterError(
-            "No configurations provided".to_string(),
+            "Configs missing in RealtimeTranscriberBuilder.".to_string(),
         ))?;
         let audio_feed = self.audio_feed.ok_or(WhisperRealtimeError::ParameterError(
-            "No audio feed provided".to_string(),
+            "Audio feed missing in RealtimeTranscriberBuilder".to_string(),
         ))?;
         let output_sender = self
             .output_sender
             .ok_or(WhisperRealtimeError::ParameterError(
-                "No output sender provided".to_string(),
+                "Output sender missing in RealtimeTranscriberBuilder".to_string(),
             ))?;
         let vad = self
             .voice_activity_detector
             .ok_or(WhisperRealtimeError::ParameterError(
-                "No VAD provided".to_string(),
+                "Voice activity detector missing in RealtimeTranscriberBuilder.".to_string(),
             ))?;
         Ok(RealtimeTranscriber {
             configs,
@@ -122,10 +122,7 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
         let mut pause_detected = true;
 
         // Set up whisper
-        let WhisperRealtimeConfigs {
-            whisper: whisper_configs,
-            realtime: realtime_configs,
-        } = &*self.configs;
+        let (whisper_configs, realtime_configs) = self.configs.to_decomposed();
 
         let full_params = whisper_configs.to_whisper_full_params();
         let whisper_context_params = whisper_configs.to_whisper_context_params();
@@ -213,7 +210,6 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
             // It's not a big deal if there are invalid utf-8 characters
             // Use lossy to just swap it with the replacement character
             let segments = (0..num_segments)
-                .into_iter()
                 .map(|i| whisper_state.full_get_segment_text_lossy(i))
                 .collect::<Result<Vec<String>, _>>()?;
 

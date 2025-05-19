@@ -13,7 +13,7 @@ mod resampler_test {
 
     use whisper_realtime::audio::loading::load_normalized_audio_file;
     use whisper_realtime::audio::resampler::file_needs_normalizing;
-    use whisper_realtime::transcriber::static_transcriber::{
+    use whisper_realtime::transcriber::offline_transcriber::{
         StaticTranscriber, SupportedAudioSample, SupportedChannels,
     };
     use whisper_realtime::transcriber::transcriber::Transcriber;
@@ -88,7 +88,7 @@ mod resampler_test {
             t_audio.clone(),
             None,
             c_configs.clone(),
-            SupportedChannels::MONO,
+            SupportedChannels::Mono,
         );
         // Set up whisper
         let proj_dir = std::env::current_dir().unwrap().join("data");
@@ -133,7 +133,7 @@ mod resampler_test {
             t_audio.clone(),
             None,
             c_configs.clone(),
-            SupportedChannels::MONO,
+            SupportedChannels::Mono,
         );
 
         // Set up whisper

@@ -8,7 +8,7 @@ use symphonia::core::formats::Track;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::Hint;
 
-use crate::transcriber::static_transcriber::SupportedAudioSample;
+use crate::transcriber::offline_transcriber::SupportedAudioSample;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 

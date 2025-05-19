@@ -363,6 +363,9 @@ impl WhisperRealtimeConfigs {
     pub fn to_whisper_context_params(&self) -> whisper_rs::WhisperContextParameters {
         self.whisper.to_whisper_context_params()
     }
+    pub fn to_decomposed(&self) -> (&WhisperConfigsV2, &RealtimeConfigs) {
+        (&self.whisper, &self.realtime)
+    }
 }
 
 impl Default for WhisperRealtimeConfigs {

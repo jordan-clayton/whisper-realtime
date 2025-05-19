@@ -10,7 +10,7 @@ use symphonia::core::probe::{Hint, ProbeResult};
 
 #[cfg(feature = "resampler")]
 use crate::audio::resampler::{needs_normalizing, normalize_audio, ResampleableAudio};
-use crate::transcriber::static_transcriber::SupportedAudioSample;
+use crate::transcriber::offline_transcriber::SupportedAudioSample;
 use crate::utils::callback::{Callback, Nop, ProgressCallback};
 use crate::utils::errors::WhisperRealtimeError;
 

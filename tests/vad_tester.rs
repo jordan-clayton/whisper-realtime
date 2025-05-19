@@ -6,7 +6,7 @@ mod vad_tests {
 
     use whisper_realtime::audio::pcm::IntoPcmS16;
     use whisper_realtime::audio::resampler::{resample, ResampleableAudio};
-    use whisper_realtime::transcriber::static_transcriber::SupportedAudioSample;
+    use whisper_realtime::transcriber::offline_transcriber::SupportedAudioSample;
     use whisper_realtime::transcriber::vad::{
         Earshot, Resettable, Silero, SileroBuilder, VAD, WebRtc,
         WebRtcBuilder, WebRtcFilterAggressiveness, WebRtcFrameLengthMillis, WebRtcSampleRate,

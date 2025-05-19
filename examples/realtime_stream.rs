@@ -17,7 +17,7 @@ use whisper_realtime::audio::microphone::AudioBackend;
 #[cfg(feature = "downloader")]
 use whisper_realtime::downloader::request;
 use whisper_realtime::downloader::traits::SyncDownload;
-use whisper_realtime::transcriber::{realtime_transcriber, static_transcriber};
+use whisper_realtime::transcriber::{offline_transcriber, realtime_transcriber};
 use whisper_realtime::transcriber::transcriber::Transcriber;
 use whisper_realtime::utils::callback::ProgressCallback;
 use whisper_realtime::utils::constants;
@@ -302,16 +302,16 @@ fn main() {
         .expect("Failed to get static audio mutex");
 
     if let Some(audio_recording) = static_audio_buffer.to_owned() {
-        let audio_recording = Arc::new(Mutex::new(static_transcriber::SupportedAudioSample::F32(
+        let audio_recording = Arc::new(Mutex::new(offline_transcriber::SupportedAudioSample::F32(
             audio_recording,
         )));
         let configs = configs.clone();
 
-        let mut static_transcriber = static_transcriber::StaticTranscriber::new_with_configs(
+        let mut static_transcriber = offline_transcriber::StaticTranscriber::new_with_configs(
             audio_recording,
             None,
             configs,
-            static_transcriber::SupportedChannels::MONO,
+            offline_transcriber::SupportedChannels::Mono,
         );
 
         // new state for static re-transcription.

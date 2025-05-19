@@ -4,6 +4,9 @@ use std::sync::atomic::AtomicBool;
 use crate::utils::callback::Callback;
 use crate::utils::errors::WhisperRealtimeError;
 
+pub trait WhisperProgressCallback: Callback<Argument = i32> + Send + Sync + 'static {}
+impl<T: Callback<Argument = i32> + Send + Sync + 'static> WhisperProgressCallback for T {}
+
 pub trait Transcriber {
     fn process_audio(
         &mut self,
@@ -11,31 +14,28 @@ pub trait Transcriber {
     ) -> Result<String, WhisperRealtimeError>;
 }
 
-pub enum WhisperCallback<CB: Callback<Argument = i32> + Send + Sync> {
-    Loadable(CB),
-    Loaded,
+pub trait CallbackTranscriber<P>: Transcriber
+where
+    P: WhisperProgressCallback,
+{
+    fn process_with_callbacks(
+        &mut self,
+        run_transcription: Arc<AtomicBool>,
+        callbacks: WhisperCallbacks<P>,
+    ) -> Result<String, WhisperRealtimeError>;
 }
 
-impl<CB: Callback<Argument = i32> + Send + Sync> WhisperCallback<CB> {
-    pub fn try_get_progress_callback(&mut self) -> Option<CB> {
-        match std::mem::replace(self, WhisperCallback::Loaded) {
-            WhisperCallback::Loadable(callback) => Some(callback),
-            WhisperCallback::Loaded => None,
-        }
-    }
-
-    /// If and only if the callback is the exact same type, can it be loaded into the old
-    /// callback object. The callback must also not already have a callback.
-    pub fn return_callback(&mut self, cb: CB) -> Result<(), WhisperRealtimeError> {
-        if let WhisperCallback::Loadable(_) = self {
-            return Err(WhisperRealtimeError::ParameterError(
-                "Whisper Callback already loaded.".to_string(),
-            ));
-        }
-        *self = WhisperCallback::Loadable(cb);
-        Ok(())
-    }
+/// This struct encapsulates various whisper callbacks which can be set before running transcription
+/// Other callbacks will be added as needed/desired. File an issue to bring attention to this.
+/// At the moment, all fields are public; encapsulation is not needed at this time.
+pub struct WhisperCallbacks<P>
+where
+    P: WhisperProgressCallback,
+{
+    pub progress: Option<P>,
 }
+
+impl<P> WhisperCallbacks<P> where P: WhisperProgressCallback {}
 
 pub enum WhisperOutput {
     ContinuedPhrase(String),

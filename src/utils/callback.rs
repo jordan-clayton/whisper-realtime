@@ -6,7 +6,7 @@ pub trait Callback {
 }
 
 /// Basic callback struct to encapsulate an FnMut closure
-/// Use if you require to supply a callback explicitly, otherwise, just use the API.
+/// Use if you require to supply a callback explicitly, otherwise, just provide a Nop.
 pub struct ProgressCallback<T, CB: FnMut(T)> {
     callback: CB,
     _marker: PhantomData<T>,
@@ -20,6 +20,29 @@ impl<T, CB: FnMut(T)> ProgressCallback<T, CB> {
     }
 }
 impl<T, CB: FnMut(T)> Callback for ProgressCallback<T, CB> {
+    type Argument = T;
+    fn call(&mut self, arg: T) {
+        (&mut self.callback)(arg);
+    }
+}
+
+/// This is the static equivalent of a ProgressCallback
+/// Use when 'static lifetimes are required, (eg. WhisperProgressCallback)
+pub struct StaticProgressCallback<T, CB: FnMut(T) + 'static> {
+    callback: CB,
+    _marker: PhantomData<T>,
+}
+
+impl<T, CB: FnMut(T) + 'static> StaticProgressCallback<T, CB> {
+    pub fn new(callback: CB) -> Self {
+        Self {
+            callback,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T, CB: FnMut(T) + 'static> Callback for StaticProgressCallback<T, CB> {
     type Argument = T;
     fn call(&mut self, arg: T) {
         (&mut self.callback)(arg);
