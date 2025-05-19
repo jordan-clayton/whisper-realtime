@@ -62,7 +62,7 @@ impl Configs {
     }
 }
 
-/// A configurations type that holds a subset of useful configurations for whisper-rs::FullParam,
+/// A configurations type that holds a subset of useful configurations for whisper-rs::FullParams and whisper-rs::WhisperContextParams,
 /// a transcription model, and a flag to indicate whether the GPU should be used to run the transcription.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
@@ -80,6 +80,7 @@ pub struct WhisperConfigsV2 {
     // Whisper Context data
     model: Model,
     use_gpu: bool,
+    flash_attention: bool,
 }
 
 impl WhisperConfigsV2 {
@@ -91,6 +92,7 @@ impl WhisperConfigsV2 {
             translate: false,
             language: None,
             use_gpu: false,
+            flash_attention: false,
             use_no_context: false,
             model: Default::default(),
         }
@@ -120,6 +122,10 @@ impl WhisperConfigsV2 {
         self.use_no_context = use_no_context;
         self
     }
+    pub fn set_flash_attention(mut self, flash_attention: bool) -> Self {
+        self.flash_attention = flash_attention;
+        self
+    }
 
     pub fn with_sampling_strategy(mut self, sampling_strategy: WhisperSamplingStrategy) -> Self {
         self.sampling_strategy = sampling_strategy;
@@ -147,6 +153,9 @@ impl WhisperConfigsV2 {
     }
     pub fn using_no_context(&self) -> bool {
         self.use_no_context
+    }
+    pub fn using_flash_attention(&self) -> bool {
+        self.flash_attention
     }
     pub fn model(&self) -> &Model {
         &self.model
@@ -182,6 +191,18 @@ impl WhisperConfigsV2 {
             params.set_language(Some(lang.into()))
         }
         params.set_no_context(self.use_no_context);
+        // Explicitly disable printing to stdout; these features are considered to be opt-in.
+        params.set_print_realtime(false);
+        params.set_print_progress(false);
+        params.set_print_special(false);
+        params.set_print_timestamps(false);
+        params
+    }
+
+    pub fn to_whisper_context_params(&self) -> whisper_rs::WhisperContextParameters {
+        let mut params = whisper_rs::WhisperContextParameters::default();
+        params.use_gpu(self.use_gpu);
+        params.flash_attn(self.flash_attention);
         params
     }
 }
@@ -201,7 +222,7 @@ impl Default for WhisperConfigsV2 {
             .with_n_threads(n_threads)
             .with_max_past_prompt_tokens(max_prompt_tokens)
             .with_sampling_strategy(WhisperSamplingStrategy::Greedy { best_of: 1 })
-            .set_gpu(true)
+            .set_gpu(cfg!(feature = "_gpu"))
     }
 }
 
@@ -214,7 +235,7 @@ pub enum WhisperSamplingStrategy {
 
 /// A configurations component that holds relevant configurations for tweaking realtime transcription.
 /// All timeouts/audio lengths are measured in milliseconds
-// TODO: return to this struct and include VAD configurations if allowing multiple.
+/// VAD configurations should be handled at the application level.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
 pub struct RealtimeConfigs {
@@ -223,7 +244,6 @@ pub struct RealtimeConfigs {
     audio_sample_len: usize,
     vad_sample_len: usize,
     phrase_timeout: usize,
-    voice_probability_threshold: f32,
 }
 
 impl RealtimeConfigs {
@@ -233,7 +253,6 @@ impl RealtimeConfigs {
             audio_sample_len: 0,
             vad_sample_len: 0,
             phrase_timeout: 0,
-            voice_probability_threshold: 0.,
         }
     }
     pub fn with_realtime_timeout(mut self, realtime_timeout: u128) -> Self {
@@ -252,10 +271,6 @@ impl RealtimeConfigs {
         self.phrase_timeout = len_ms;
         self
     }
-    pub fn with_voice_probability_threshold(mut self, p_threshold: f32) -> Self {
-        self.voice_probability_threshold = p_threshold;
-        self
-    }
     pub fn realtime_timeout(&self) -> u128 {
         self.realtime_timeout
     }
@@ -267,9 +282,6 @@ impl RealtimeConfigs {
     }
     pub fn phrase_timeout(&self) -> usize {
         self.phrase_timeout
-    }
-    pub fn voice_probability_threshold(&self) -> f32 {
-        self.voice_probability_threshold
     }
 }
 
@@ -284,8 +296,6 @@ impl Default for RealtimeConfigs {
             .with_vad_sample_len(constants::VAD_SAMPLE_MS)
             // 3 seconds / 3000 ms
             .with_phrase_timeout(constants::PHRASE_TIMEOUT)
-            // 0.65
-            .with_voice_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
     }
 }
 
@@ -345,6 +355,14 @@ impl WhisperRealtimeConfigs {
     pub fn into_realtime(self) -> RealtimeConfigs {
         self.realtime
     }
+
+    // Convenience delegates
+    pub fn to_full_params(&self) -> whisper_rs::FullParams {
+        self.whisper.to_whisper_full_params()
+    }
+    pub fn to_whisper_context_params(&self) -> whisper_rs::WhisperContextParameters {
+        self.whisper.to_whisper_context_params()
+    }
 }
 
 impl Default for WhisperRealtimeConfigs {
@@ -356,6 +374,10 @@ impl Default for WhisperRealtimeConfigs {
 }
 
 // LEGACY
+/// NOTE: voice_probability_threshold has been moved out of the configurations for v2
+/// These should be handled at the application level.
+/// To retain a serialized voice_probability_threshold value, access the public field to cache the
+/// value before converting to V2/Realtime V1
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
 pub struct WhisperConfigsV1 {
@@ -431,6 +453,7 @@ impl WhisperConfigsV1 {
             .set_gpu(self.use_gpu)
             // To avoid losing the stored model type
             // Note: this does not preserve the data directory and will need to be handled.
+            // Use into_v2_with_models_directory() to supply a model path.
             .with_model(model)
     }
 
@@ -442,7 +465,6 @@ impl WhisperConfigsV1 {
             .with_vad_sample_len(self.vad_sample_ms)
             .with_realtime_timeout(self.realtime_timeout)
             .with_phrase_timeout(self.phrase_timeout)
-            .with_voice_probability_threshold(self.voice_probability_threshold)
     }
 }
 

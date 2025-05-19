@@ -10,6 +10,8 @@ pub trait Transcriber {
         &mut self,
         whisper_state: &mut whisper_rs::WhisperState,
         run_transcription: Arc<AtomicBool>,
+        // This should be stored within Static(Offline)/Transcriber
+        // Use the callback API.
         progress_callback: Option<impl FnMut(i32) + Send + Sync + 'static>,
     ) -> String;
     // TODO: Rethink this. Setting full_params should only really need to happen once.

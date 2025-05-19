@@ -5,7 +5,11 @@ use sdl2::audio::AudioFormatNum;
 
 use crate::utils::constants;
 
-pub struct AudioRingBuffer<T: Default + Clone + Copy + AudioFormatNum + 'static> {
+/// This is a workaround for trait aliasing until nightly moves to stable.
+pub trait AudioSampleFormat: Default + Clone + Copy + AudioFormatNum + 'static {}
+impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioSampleFormat for T {}
+
+pub struct AudioRingBuffer<T: AudioSampleFormat> {
     head: AtomicUsize,
     audio_len: AtomicUsize,
     capacity_ms: AtomicUsize,
@@ -15,13 +19,13 @@ pub struct AudioRingBuffer<T: Default + Clone + Copy + AudioFormatNum + 'static>
 }
 
 // The ring buffer is internally protected with thread-safe guards, and is therefore thread-safe
-unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Sync for AudioRingBuffer<T> {}
+unsafe impl<T: AudioSampleFormat> Sync for AudioRingBuffer<T> {}
 
-unsafe impl<T: Default + Clone + Copy + AudioFormatNum + 'static> Send for AudioRingBuffer<T> {}
+unsafe impl<T: AudioSampleFormat> Send for AudioRingBuffer<T> {}
 
 /// A zero-length / zero-sample-rate buffer is considered invalid; a 0-length RingBuffer is useless
 /// Sending invalid parameters will return None
-impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioRingBuffer<T> {
+impl<T: AudioSampleFormat> AudioRingBuffer<T> {
     // A 1 second @ WHISPER_SAMPLE_RATE buffer
     pub fn new() -> Self {
         let buffer_size = constants::WHISPER_SAMPLE_RATE as usize;

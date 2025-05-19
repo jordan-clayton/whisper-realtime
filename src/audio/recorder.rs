@@ -3,14 +3,11 @@ use std::sync::Arc;
 
 use sdl2::audio::{AudioCallback, AudioFormatNum};
 
+use crate::utils::sender::Sender;
+
 /// This is a workaround for trait aliasing until nightly moves to stable.
 pub trait RecorderSample: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static {}
 impl<T: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static> RecorderSample for T {}
-
-#[cfg(not(feature = "crossbeam"))]
-pub(crate) type Sender<T> = std::sync::mpsc::SyncSender<T>;
-#[cfg(feature = "crossbeam")]
-pub(crate) type Sender<T> = crossbeam::channel::Sender<T>;
 
 pub trait AudioInputAdapter<T: RecorderSample> {
     type SenderOutput: Send + 'static;

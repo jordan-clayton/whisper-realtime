@@ -9,7 +9,6 @@ use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
 // TODO: nuke the legacy hand-rolled solution.
-// TODO: test and benchmarks.
 
 /// TODO: properly document this trait to explain why it's here, what it's for, and what's available
 /// eg. Three provided VAD implementations: Silero, WebRtc, Earshot (a WebRtc) impl

@@ -16,6 +16,7 @@ use crate::whisper::configs::WhisperConfigsV1;
 // Workaround for whisper-rs issue #134 -- moving memory in rust causes a segmentation fault
 // in the progress callback.
 // Solution from: https://github.com/thewh1teagle/vibe/blob/main/core/src/transcribe.rs
+// TODO: Type alias for the callback.
 static PROGRESS_CALLBACK: LazyLock<Mutex<Option<Box<dyn FnMut(i32) + Send + Sync>>>> =
     LazyLock::new(|| Mutex::new(None));
 
@@ -42,6 +43,8 @@ pub struct StaticTranscriber {
 
 // TODO: get rid of the mutex
 // TODO: rename to OfflineTranscriber
+// TODO: move the callback to the Static(Offline) transcriber struct
+// SupportedAudioSample doesn't need to be mutex-guarded; take ownership of the audio.
 #[cfg(feature = "crossbeam")]
 pub struct StaticTranscriber {
     configs: Arc<WhisperConfigsV1>,
