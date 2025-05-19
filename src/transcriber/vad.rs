@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use realfft::RealFftPlanner;
 use voice_activity_detector::{IteratorExt, LabeledAudio};
 
-use crate::audio::pcm::IntoPcmS16;
+use crate::audio::pcm::PcmS16Convertible;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
@@ -19,7 +19,11 @@ use crate::utils::errors::WhisperRealtimeError;
 /// Earshot is marginally faster than WebRtc and has poor accuracy; use as a fallback on lower hardware;
 /// as far as I know, it's much less accurate, but it is very fast--YMMV.
 pub trait VAD<T>: Resettable {
+    // For realtime VAD to determine pauses, ends of phrases, and to reduce the amount of whisper
+    // processing.
     fn voice_detected(&mut self, samples: &[T]) -> bool;
+    // For optimizing offline transcription by reducing the amount of audio that whisper needs to process
+    fn extract_voiced_frames(&mut self, samples: &[T]) -> Vec<T>;
 }
 
 pub trait Resettable {
@@ -40,7 +44,7 @@ pub trait Resettable {
 /// NOTE: detection_probability_threshold is considered to be a lower bound and is noninclusive;
 /// computed probabilities higher than this threshold are considered to have detected some amount
 /// of voice activity.
-
+#[derive(Copy, Clone)]
 pub struct SileroBuilder {
     sample_rate: i64,
     chunk_size: usize,
@@ -106,11 +110,19 @@ impl Silero {
     }
 
     /// A "Default" whisper-ready Silero configuration
-    pub fn try_new_whisper_default() -> Result<Self, WhisperRealtimeError> {
+    pub fn try_new_whisper_realtime_default() -> Result<Self, WhisperRealtimeError> {
         SileroBuilder::new()
             .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
             .with_chunk_size(constants::SILERO_CHUNK_SIZE)
-            .with_detection_probability_threshold(constants::VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
+            .build()
+    }
+
+    pub fn try_new_whisper_offline_default() -> Result<Self, WhisperRealtimeError> {
+        SileroBuilder::new()
+            .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
+            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
+            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
             .build()
     }
 }
@@ -158,6 +170,21 @@ impl<T: voice_activity_detector::Sample> VAD<T> for Silero {
         // If more than half the frames meet the given threshold, treat the sample as containing speech
         let voiced_proportion = voiced_frames as f32 / total_frames as f32;
         voiced_proportion > 0.5
+    }
+    fn extract_voiced_frames(&mut self, samples: &[T]) -> Vec<T> {
+        if samples.len() == 0 {
+            return vec![];
+        }
+
+        samples
+            .iter()
+            .copied()
+            .label(&mut self.vad, self.detection_probability_threshold, 3usize)
+            .filter(|frame| frame.is_speech())
+            // Extract the chunks which contain speech
+            .map(|frame| frame.iter().copied().collect::<Vec<T>>())
+            .flatten()
+            .collect()
     }
 }
 
@@ -257,6 +284,7 @@ impl WebRtcFrameLengthMillis {
 /// minimum proportion of frames that are detected to have speech.
 /// This is a non-inclusive lower-bound; samples with VAD frame proportions higher than this
 /// threshold are thus considered to contain speech
+#[derive(Copy, Clone)]
 pub struct WebRtcBuilder {
     sample_rate: WebRtcSampleRate,
     aggressiveness: WebRtcFilterAggressiveness,
@@ -346,6 +374,8 @@ pub struct WebRtc {
     // This value will always be restricted to either 10ms, 20ms, 30ms as per the Enumeration
     // used in the accompanying builder
     frame_length_in_ms: usize,
+    // TODO: this should probably be renamed to realtime_detection_probability_threshold
+    // This is not used in the offline frame extraction because WebRtc uses aggressiveness
     detection_probability_threshold: f32,
 }
 
@@ -355,11 +385,19 @@ impl WebRtc {
         self
     }
     /// A "Default" whisper-ready WebRtc configuration
-    pub fn try_new_whisper_default() -> Result<Self, WhisperRealtimeError> {
+    pub fn try_new_whisper_realtime_default() -> Result<Self, WhisperRealtimeError> {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-            .with_detection_probability_threshold(constants::VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
+            .build_webrtc()
+    }
+
+    pub fn try_new_whisper_offline_default() -> Result<Self, WhisperRealtimeError> {
+        WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R16kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
+            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
             .build_webrtc()
     }
 }
@@ -375,7 +413,7 @@ impl Resettable for WebRtc {
     }
 }
 
-impl<T: IntoPcmS16 + Copy> VAD<T> for WebRtc {
+impl<T: PcmS16Convertible + Copy> VAD<T> for WebRtc {
     // NOTE: This implementation assumes that the samples are at the same sample rate as the configured VAD
     // Samples of insufficient length are zero-padded/truncated to avoid internal panicking.
     fn voice_detected(&mut self, samples: &[T]) -> bool {
@@ -407,6 +445,26 @@ impl<T: IntoPcmS16 + Copy> VAD<T> for WebRtc {
         let voiced_proportion = (speech_frames.count() as f32) / (total_num_frames as f32);
         voiced_proportion > self.detection_probability_threshold
     }
+    fn extract_voiced_frames(&mut self, samples: &[T]) -> Vec<T> {
+        if samples.len() == 0 {
+            return vec![];
+        }
+        let (int_audio, frame_size) = prepare_webrtc_frames(
+            samples,
+            self.frame_length_in_ms,
+            self.sample_rate.to_sample_rate_hz(),
+        );
+        let frames = int_audio.chunks_exact(frame_size);
+        frames
+            .filter(|&frame| {
+                self.vad
+                    .is_voice_segment(frame)
+                    .expect("The Frame size should be valid")
+            })
+            .flatten()
+            .map(|&s| T::from_pcm_s16(s))
+            .collect()
+    }
 }
 
 type EarshotPredictionFilterPredicate =
@@ -416,6 +474,8 @@ pub struct Earshot {
     // For dispatching the appropriate method
     sample_rate: usize,
     frame_length_in_ms: usize,
+    // TODO: this should probably be renamed to realtime_detection_probability_threshold
+    // This is not used in the offline frame extraction because WebRtc uses aggressiveness
     detection_probability_threshold: f32,
     prediction_predicate: EarshotPredictionFilterPredicate,
 }
@@ -427,11 +487,19 @@ impl Earshot {
     }
 
     /// A "Default" whisper-ready Earhshot configuration
-    pub fn try_new_whisper_default() -> Result<Self, WhisperRealtimeError> {
+    pub fn try_new_whisper_realtime_default() -> Result<Self, WhisperRealtimeError> {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-            .with_detection_probability_threshold(constants::VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
+            .build_earshot()
+    }
+
+    pub fn try_new_whisper_offline_default() -> Result<Self, WhisperRealtimeError> {
+        WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R16kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
+            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
             .build_earshot()
     }
 }
@@ -444,7 +512,7 @@ impl Resettable for Earshot {
     }
 }
 
-impl<T: IntoPcmS16 + Copy> VAD<T> for Earshot {
+impl<T: PcmS16Convertible + Copy> VAD<T> for Earshot {
     fn voice_detected(&mut self, samples: &[T]) -> bool {
         // If a zero-length slice of samples are sent, there is obviously no voice
         if samples.len() == 0 {
@@ -469,12 +537,30 @@ impl<T: IntoPcmS16 + Copy> VAD<T> for Earshot {
         let voiced_proportion = (speech_frames.count() as f32) / (total_num_frames as f32);
         voiced_proportion > self.detection_probability_threshold
     }
+
+    fn extract_voiced_frames(&mut self, samples: &[T]) -> Vec<T> {
+        if samples.len() == 0 {
+            return vec![];
+        }
+
+        let (int_audio, frame_size) =
+            prepare_webrtc_frames(samples, self.frame_length_in_ms, self.sample_rate);
+        let frames = int_audio.chunks_exact(frame_size);
+        let vad = &mut self.vad;
+        frames
+            .filter(|&frame| {
+                (self.prediction_predicate)(vad, frame).expect("Frame size should be valid.")
+            })
+            .flatten()
+            .map(|&s| T::from_pcm_s16(s))
+            .collect()
+    }
 }
 
 /// This small utility function handles the padding/truncation required by WebRTC implementations
 /// It returns the converted and padded audio, as well as the frame size so that methods consuming
 /// this function do not need to recompute the frame size.
-fn prepare_webrtc_frames<T: IntoPcmS16 + Copy>(
+fn prepare_webrtc_frames<T: PcmS16Convertible + Copy>(
     samples: &[T],
     frame_length_in_ms: usize,
     sample_rate: usize,

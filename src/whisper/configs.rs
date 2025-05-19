@@ -285,7 +285,7 @@ impl Default for RealtimeConfigs {
             // 3 seconds / 3000 ms
             .with_phrase_timeout(constants::PHRASE_TIMEOUT)
             // 0.65
-            .with_voice_probability_threshold(constants::VOICE_PROBABILITY_THRESHOLD)
+            .with_voice_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
     }
 }
 
@@ -470,7 +470,7 @@ impl Default for WhisperConfigsV1 {
             naive_vad_energy_threshold: constants::VOICE_ENERGY_THRESHOLD,
             naive_window_len: constants::VAD_WIN_LEN,
             naive_window_step: constants::VAD_WIN_HOP,
-            voice_probability_threshold: constants::VOICE_PROBABILITY_THRESHOLD,
+            voice_probability_threshold: constants::REALTIME_VOICE_PROBABILITY_THRESHOLD,
             naive_vad_freq_threshold: constants::VAD_FREQ_THRESHOLD,
             print_special: false,
             print_progress: false,

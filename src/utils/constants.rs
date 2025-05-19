@@ -21,9 +21,12 @@ pub const VAD_SAMPLE_MS: usize = 300;
 pub const PHRASE_TIMEOUT: usize = 3000;
 pub const PAUSE_DURATION: u64 = 100;
 
+// THESE ARE RECOMMENDATIONS
 // This works best when within the range of 0.65-0.80
 // Higher thresholds are prone to false negatives.
-pub const VOICE_PROBABILITY_THRESHOLD: f32 = 0.65;
+pub const REALTIME_VOICE_PROBABILITY_THRESHOLD: f32 = 0.65;
+// TODO: this might need tweaking.
+pub const OFFLINE_VOICE_PROBABILITY_THRESHOLD: f32 = 0.75;
 
 // For Naive VAD implementation
 pub const VOICE_ENERGY_THRESHOLD: f64 = -35.0;

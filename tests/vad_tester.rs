@@ -11,6 +11,7 @@ mod vad_tests {
         Earshot, Resettable, Silero, SileroBuilder, VAD, WebRtc,
         WebRtcBuilder, WebRtcFilterAggressiveness, WebRtcFrameLengthMillis, WebRtcSampleRate,
     };
+    use whisper_realtime::utils::constants;
     use whisper_realtime::utils::constants::WHISPER_SAMPLE_RATE;
 
 // This audio file contains a speaker who methodically reads out a series of random sentences.
@@ -57,7 +58,7 @@ mod vad_tests {
             "Silero failed to detect voice in audio samples @ 65% threshold"
         );
 
-        let mut whisper_vad = Silero::try_new_whisper_default()
+        let mut whisper_vad = Silero::try_new_whisper_realtime_default()
             .expect("Whisper-ready Silero VAD expected to build without issues");
         let voice_detected = whisper_vad.voice_detected(&SILENCE);
         assert!(
@@ -77,7 +78,7 @@ mod vad_tests {
         let voice_detected = vad.voice_detected(&AUDIO_SAMPLE);
         assert!(voice_detected, "WebRtc failed to detect voice in audio samples @ 65% threshold with LowBitrate aggressiveness.");
 
-        let mut whisper_vad = WebRtc::try_new_whisper_default()
+        let mut whisper_vad = WebRtc::try_new_whisper_realtime_default()
             .expect("Whisper-ready WebRtc VAD expected to build without issues");
         let voice_detected = whisper_vad.voice_detected(&SILENCE);
         assert!(
@@ -98,7 +99,7 @@ mod vad_tests {
         let voice_detected = vad.voice_detected(&AUDIO_SAMPLE);
         assert!(voice_detected, "Earshot failed to detect voice in audio samples @ 65% threshold with LowBitrate aggressiveness.");
 
-        let mut whisper_vad = Earshot::try_new_whisper_default()
+        let mut whisper_vad = Earshot::try_new_whisper_realtime_default()
             .expect("Whisper-ready WebRtc VAD expected to build without issues");
         let voice_detected = whisper_vad.voice_detected(&SILENCE);
         assert!(
@@ -147,5 +148,271 @@ mod vad_tests {
         // false (but not really false, actually true) positive to conclude the sample rate is maintained.
         let voice_detected = vad.voice_detected(&AUDIO_SAMPLE);
         assert!(voice_detected, "Still produced a false negative.");
+    }
+
+    #[test]
+    fn silero_vad_extraction_loose() {
+        let mut vad = SileroBuilder::new()
+            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
+            .with_sample_rate(8000)
+            .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
+            .build()
+            .expect("Silero expected to build without issues");
+        let voiced_frames = vad.extract_voiced_frames(&AUDIO_SAMPLE);
+
+        assert!(
+            !voiced_frames.is_empty(),
+            "Failed to extract any voiced frames"
+        );
+
+        assert!(
+            voiced_frames.len() < AUDIO_SAMPLE.len(),
+            "Failed to exclude silent frames. Voiced: {}, Sample: {}",
+            voiced_frames.len(),
+            AUDIO_SAMPLE.len()
+        );
+
+        // Run the voice-detection over the extracted frames with the offline threshold to ensure
+        // that most frames are speech
+        vad = vad
+            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD);
+
+        let voice_detected = vad.voice_detected(&voiced_frames);
+        assert!(voice_detected, "Too many non-voiced samples.");
+    }
+    #[test]
+    fn silero_vad_extraction_strict() {
+        let mut vad = SileroBuilder::new()
+            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
+            .with_sample_rate(8000)
+            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
+            .build()
+            .expect("Silero expected to build without issues");
+        let voiced_frames = vad.extract_voiced_frames(&AUDIO_SAMPLE);
+
+        assert!(
+            !voiced_frames.is_empty(),
+            "Failed to extract any voiced frames; vad might be too strict."
+        );
+
+        assert!(
+            voiced_frames.len() < AUDIO_SAMPLE.len(),
+            "Failed to exclude silent frames. Voiced: {}, Sample: {}",
+            voiced_frames.len(),
+            AUDIO_SAMPLE.len()
+        );
+
+        // Run the voice-detection over the extracted frames with a much stricter threshold to
+        // confirm that most frames are speech
+        vad = vad.with_detection_probability_threshold(0.8);
+        let voice_detected = vad.voice_detected(&voiced_frames);
+        assert!(voice_detected, "Too many non-voiced samples.")
+    }
+
+    #[test]
+    fn webrtc_vad_extraction_loose() {
+        let builder = WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R8kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
+            .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD);
+
+        let mut vad = builder
+            .clone()
+            .build_webrtc()
+            .expect("WebRtc expected to build without issue.");
+
+        let voiced_frames = vad.extract_voiced_frames(&AUDIO_SAMPLE);
+
+        assert!(
+            !voiced_frames.is_empty(),
+            "Failed to extract any voiced frames"
+        );
+
+        assert!(
+            voiced_frames.len() < AUDIO_SAMPLE.len(),
+            "Failed to exclude silent frames. Voiced: {}, Sample: {}",
+            voiced_frames.len(),
+            AUDIO_SAMPLE.len()
+        );
+
+        // Run the voice-detection over the extracted frames with the offline threshold to ensure
+        // that most frames are speech
+        vad = builder
+            .clone()
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
+            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
+            .build_webrtc()
+            .expect("WebRtc expected to build without issue");
+
+        let voice_detected = vad.voice_detected(&voiced_frames);
+        assert!(voice_detected, "Too many non-voiced samples.");
+    }
+    #[test]
+    fn webrtc_vad_extraction_strict() {
+        // Start the builder with the "Offline" aggressiveness settings
+        let builder = WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R8kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
+            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD);
+
+        let mut vad = builder
+            .clone()
+            .build_webrtc()
+            .expect("WebRtc expected to build without issue.");
+
+        let voiced_frames = vad.extract_voiced_frames(&AUDIO_SAMPLE);
+
+        assert!(
+            !voiced_frames.is_empty(),
+            "Failed to extract any voiced frames"
+        );
+
+        assert!(
+            voiced_frames.len() < AUDIO_SAMPLE.len(),
+            "Failed to exclude silent frames. Voiced: {}, Sample: {}",
+            voiced_frames.len(),
+            AUDIO_SAMPLE.len()
+        );
+
+        // Run the voice-detection over the extracted frames with a much stricter threshold to ensure
+        // that most frames are speech
+        // VeryAggressive prunes out a significant portion of frames and might actually be missing on some overlaps
+        // Aggressive detects around .9, VeryAggressive detects just over .75
+        vad = builder
+            .clone()
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::VeryAggressive)
+            .build_webrtc()
+            .expect("WebRtc expected to build without issue");
+
+        let voice_detected = vad.voice_detected(&voiced_frames);
+        assert!(voice_detected, "Too many non-voiced samples.");
+    }
+
+    #[test]
+    fn earshot_vad_extraction_loose() {
+        let builder = WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R8kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
+            .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD);
+
+        let mut vad = builder
+            .clone()
+            .build_earshot()
+            .expect("Earshot expected to build without issue.");
+
+        let voiced_frames = vad.extract_voiced_frames(&AUDIO_SAMPLE);
+
+        assert!(
+            !voiced_frames.is_empty(),
+            "Failed to extract any voiced frames"
+        );
+
+        assert!(
+            voiced_frames.len() < AUDIO_SAMPLE.len(),
+            "Failed to exclude silent frames. Voiced: {}, Sample: {}",
+            voiced_frames.len(),
+            AUDIO_SAMPLE.len()
+        );
+
+        // Run the voice-detection over the extracted frames with the offline threshold to ensure
+        // that most frames are speech
+        vad = builder
+            .clone()
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
+            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
+            .build_earshot()
+            .expect("Earshot expected to build without issue");
+
+        let voice_detected = vad.voice_detected(&voiced_frames);
+        assert!(voice_detected, "Too many non-voiced samples.");
+    }
+    #[test]
+    fn earshot_vad_extraction_strict() {
+        // Start the builder with the "Offline" aggressiveness settings
+        let builder = WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R8kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
+            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD);
+
+        let mut vad = builder
+            .clone()
+            .build_earshot()
+            .expect("Earshot expected to build without issue.");
+
+        let voiced_frames = vad.extract_voiced_frames(&AUDIO_SAMPLE);
+
+        assert!(
+            !voiced_frames.is_empty(),
+            "Failed to extract any voiced frames"
+        );
+
+        assert!(
+            voiced_frames.len() < AUDIO_SAMPLE.len(),
+            "Failed to exclude silent frames. Voiced: {}, Sample: {}",
+            voiced_frames.len(),
+            AUDIO_SAMPLE.len()
+        );
+
+        // Run the voice-detection over the extracted frames with a much stricter threshold to ensure
+        // that most frames are speech.
+        // Earshot is much less accurate than WebRtc, and so even with VeryAggressive, this will
+        // detect .9 of frames containing speech
+        vad = builder
+            .clone()
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::VeryAggressive)
+            .with_detection_probability_threshold(0.8)
+            .build_earshot()
+            .expect("Earshot expected to build without issue");
+
+        let voice_detected = vad.voice_detected(&voiced_frames);
+        assert!(voice_detected, "Too many non-voiced samples.");
+    }
+
+    #[test]
+    fn silero_vad_extraction_silent() {
+        let mut vad = SileroBuilder::new()
+            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
+            .with_sample_rate(8000)
+            .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
+            .build()
+            .expect("Silero expected to build without issues");
+        let voiced_frames = vad.extract_voiced_frames(&SILENCE);
+
+        assert!(
+            voiced_frames.is_empty(),
+            "Erroneously extracted voice frames from silence."
+        );
+    }
+
+    #[test]
+    fn webrtc_vad_extraction_silent() {
+        let mut vad = WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R8kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
+            .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
+            .build_webrtc()
+            .expect("Webrtc expected to build without issues");
+        let voiced_frames = vad.extract_voiced_frames(&SILENCE);
+
+        assert!(
+            voiced_frames.is_empty(),
+            "Erroneously extracted voice frames from silence."
+        );
+    }
+
+    #[test]
+    fn earshot_vad_extraction_silent() {
+        let mut vad = WebRtcBuilder::new()
+            .with_sample_rate(WebRtcSampleRate::R8kHz)
+            .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
+            .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
+            .build_earshot()
+            .expect("Earshot expected to build without issues");
+        let voiced_frames = vad.extract_voiced_frames(&SILENCE);
+
+        assert!(
+            voiced_frames.is_empty(),
+            "Erroneously extracted voice frames from silence."
+        );
     }
 }
