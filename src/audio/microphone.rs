@@ -4,10 +4,9 @@ use std::sync::Arc;
 use sdl2::{AudioSubsystem, Sdl};
 use sdl2::audio::{AudioDevice, AudioSpecDesired};
 
-use crate::audio::recorder::{
-    AudioInputAdapter, AudioRecorder, RecorderSample, Sender, UseArc, UseVec,
-};
+use crate::audio::recorder::{AudioInputAdapter, AudioRecorder, RecorderSample, UseArc, UseVec};
 use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::sender::Sender;
 
 /// Basic Audio Backend that uses SDL to gain access to the microphone
 /// At this time, there is no support for other audio backends, but this may happen in the future.

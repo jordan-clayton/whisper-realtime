@@ -18,12 +18,17 @@ use whisper_realtime::audio::microphone::AudioBackend;
 use whisper_realtime::downloader::request;
 use whisper_realtime::downloader::traits::SyncDownload;
 use whisper_realtime::transcriber::{realtime_transcriber, static_transcriber};
-use whisper_realtime::transcriber::traits::Transcriber;
+use whisper_realtime::transcriber::transcriber::Transcriber;
 use whisper_realtime::utils::callback::ProgressCallback;
 use whisper_realtime::utils::constants;
 use whisper_realtime::whisper::{configs, model};
 use whisper_realtime::whisper::model::Model;
 
+// NOTE: this example will not compile. The transcriber API is mid-refactor.
+// Expect this to be fixed very soon.
+
+// TODO: Fix this implementation; cut down on the imports if at all possible,
+// remove the whisper boilerplate, use the new RealtimeTranscriber
 fn main() {
     // Download the model.
     let proj_dir = std::env::current_dir().unwrap().join("data").join("models");

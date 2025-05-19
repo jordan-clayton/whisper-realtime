@@ -53,7 +53,7 @@ mod ringbuffer_tests {
         // Get two seconds of audio data.
         let mut result: Vec<f32> = vec![];
         // This is expected to not panic
-        ring_buffer.get_audio(2000, &mut result);
+        ring_buffer.read_into(2000, &mut result);
         // Test length
         assert_eq!(result.len(), sample_len / 2);
 
@@ -113,7 +113,7 @@ mod ringbuffer_tests {
 
         // Read 5 seconds of audio
         let mut read_buffer = vec![];
-        ring_buffer.get_audio(constants::SAMPLE_DURATION / 2, &mut read_buffer);
+        ring_buffer.read_into(constants::SAMPLE_DURATION / 2, &mut read_buffer);
         // Bisect at the midpoint and compare the audio output
         let (first_half, second_half) = read_buffer.split_at(sample_len / 2);
         assert_eq!(first_half.len(), second_half.len());
@@ -152,7 +152,7 @@ mod ringbuffer_tests {
             // Insert 5s of samples.
             ring_buffer.push_audio(&mut samples);
             // Get 2s of samples.
-            ring_buffer.get_audio(2000, &mut results_vec[i]);
+            ring_buffer.read_into(2000, &mut results_vec[i]);
         }
 
         // Length check.

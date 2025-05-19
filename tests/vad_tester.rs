@@ -5,7 +5,7 @@ mod vad_tests {
     use hound::SampleFormat;
 
     use whisper_realtime::audio::pcm::IntoPcmS16;
-    use whisper_realtime::audio::resampler::{AudioSample, resample};
+    use whisper_realtime::audio::resampler::{resample, ResampleableAudio};
     use whisper_realtime::transcriber::static_transcriber::SupportedAudioSample;
     use whisper_realtime::transcriber::vad::{
         Earshot, Resettable, Silero, SileroBuilder, VAD, WebRtc,
@@ -126,7 +126,7 @@ mod vad_tests {
             .expect("WebRtc expected to build without issues.");
 
         // Resample the audio track to 16 kHz to match the VAD
-        let upsampled_audio = resample(&AudioSample::I16(&AUDIO_SAMPLE), 16000., 8000., 1)
+        let upsampled_audio = resample(&ResampleableAudio::I16(&AUDIO_SAMPLE), 16000., 8000., 1)
             .expect("Resampling audio should pass");
         let upsampled_audio = match upsampled_audio {
             SupportedAudioSample::I16(_) => unreachable!(),

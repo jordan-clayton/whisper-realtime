@@ -13,7 +13,7 @@ use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
 // This is to restrict the audio to formats supported by rubato.
-pub enum AudioSample<'a> {
+pub enum ResampleableAudio<'a> {
     I16(&'a [i16]),
     F32(&'a [f32]),
     F64(&'a [f64]),
@@ -22,7 +22,7 @@ pub enum AudioSample<'a> {
 /// Resamples decoded audio to the desired sample rate.
 /// Audio will be converted to f32 because it is the most convenient for the application
 pub fn resample(
-    samples: &AudioSample,
+    samples: &ResampleableAudio,
     out_sample_rate: f64,
     in_sample_rate: f64,
     num_channels: usize,
@@ -41,13 +41,13 @@ pub fn resample(
     };
 
     let samples_to_process = match samples {
-        AudioSample::I16(audio_in) => {
+        ResampleableAudio::I16(audio_in) => {
             let mut output = vec![0.0f32; audio_in.len()];
             whisper_rs::convert_integer_to_float_audio(*audio_in, &mut output)?;
             output
         }
-        AudioSample::F32(audio_in) => audio_in.to_vec(),
-        AudioSample::F64(audio_in) => audio_in.iter().map(|s| *s as f32).collect(),
+        ResampleableAudio::F32(audio_in) => audio_in.to_vec(),
+        ResampleableAudio::F64(audio_in) => audio_in.iter().map(|s| *s as f32).collect(),
     };
 
     let resampler = SincFixedIn::new(
@@ -104,7 +104,7 @@ fn resample_stereo(
 // Since this is for whisper, it will also convert the samples to mono
 #[inline]
 pub fn normalize_audio(
-    samples: &AudioSample,
+    samples: &ResampleableAudio,
     in_sample_rate: f64,
     num_channels: usize,
 ) -> Result<SupportedAudioSample, WhisperRealtimeError> {

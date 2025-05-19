@@ -1,312 +1,264 @@
-use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
-#[cfg(not(feature = "crossbeam"))]
-use std::sync::mpsc;
+use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering, Mutex};
 use std::thread::sleep;
-use std::time::Duration;
-
-use voice_activity_detector::VoiceActivityDetector;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
+use std::time::{Duration, Instant};
 
 use crate::audio::audio_ring_buffer::AudioRingBuffer;
-use crate::transcriber::{traits::Transcriber, vad, vad::VoiceActivityDetection};
+use crate::transcriber::transcriber::{Transcriber, WhisperOutput};
+use crate::transcriber::vad::VAD;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
-use crate::whisper::configs::WhisperConfigsV1;
+use crate::utils::sender::Sender;
+use crate::whisper::configs::WhisperRealtimeConfigs;
 
 // This implementation is a modified port of the whisper.cpp stream example, see:
 // https://github.com/ggerganov/whisper.cpp/tree/master/examples/stream
 // Realtime on CPU has not yet been tested and may or may not be feasible.
 // Building with GPU support is currently recommended.
 
-// TODO: clean up implementation, encapsulate whisper context and setup logic.
-#[cfg(not(feature = "crossbeam"))]
-pub struct RealtimeTranscriber {
-    configs: Arc<WhisperConfigsV1>,
-    audio: Arc<AudioRingBuffer<f32>>,
-    output_buffer: Vec<String>,
-    data_sender: mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>,
-    vad: Option<VoiceActivityDetector>,
+#[derive(Clone)]
+pub struct RealtimeTranscriberBuilder<V: VAD<f32>> {
+    configs: Option<Arc<WhisperRealtimeConfigs>>,
+    audio_feed: Option<Arc<AudioRingBuffer<f32>>>,
+    output_sender: Option<Sender<WhisperOutput>>,
+    voice_activity_detector: Option<Arc<Mutex<V>>>,
 }
 
-#[cfg(feature = "crossbeam")]
-pub struct RealtimeTranscriber {
-    configs: Arc<WhisperConfigsV1>,
-    audio: Arc<AudioRingBuffer<f32>>,
-    output_buffer: Vec<String>,
-    data_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
-    vad: Option<VoiceActivityDetector>,
-}
-
-impl RealtimeTranscriber {
-    #[cfg(not(feature = "crossbeam"))]
-    pub fn new(
-        audio: Arc<AudioRingBuffer<f32>>,
-        data_sender: mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>,
-        vad_strategy: Option<vad::VadStrategy>,
-    ) -> Self {
-        let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());
-        let output_buffer: Vec<String> = vec![];
-        let vad = Self::init_vad(strategy);
-
+impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
+    pub fn new() -> Self {
         Self {
-            configs: Arc::new(WhisperConfigsV1::default()),
-            audio,
-            output_buffer,
-            data_sender,
-            vad,
+            configs: None,
+            audio_feed: None,
+            output_sender: None,
+            voice_activity_detector: None,
+        }
+    }
+    pub fn with_configs(mut self, configs: WhisperRealtimeConfigs) -> Self {
+        self.configs = Some(Arc::new(configs));
+        self
+    }
+    pub fn with_audio_feed(mut self, audio_feed: AudioRingBuffer<f32>) -> Self {
+        self.audio_feed = Some(Arc::new(audio_feed));
+        self
+    }
+    pub fn with_output_sender(mut self, sender: Sender<WhisperOutput>) -> Self {
+        self.output_sender = Some(sender);
+        self
+    }
+    pub fn with_voice_activity_detector<U: VAD<f32>>(
+        self,
+        vad: U,
+    ) -> RealtimeTranscriberBuilder<U> {
+        let voice_activity_detector = Some(Arc::new(Mutex::new(vad)));
+        RealtimeTranscriberBuilder {
+            configs: self.configs,
+            audio_feed: self.audio_feed,
+            output_sender: self.output_sender,
+            voice_activity_detector,
         }
     }
 
-    #[cfg(feature = "crossbeam")]
-    pub fn new(
-        audio: Arc<AudioRingBuffer<f32>>,
-        data_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
-        vad_strategy: Option<vad::VadStrategy>,
-    ) -> Self {
-        let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());
-        let output_buffer: Vec<String> = vec![];
-        let vad = Self::init_vad(strategy);
-
-        Self {
-            configs: Arc::new(WhisperConfigsV1::default()),
-            audio,
-            output_buffer,
-            data_sender,
-            vad,
-        }
-    }
-
-    #[cfg(not(feature = "crossbeam"))]
-    pub fn new_with_configs(
-        audio: Arc<AudioRingBuffer<f32>>,
-        data_sender: mpsc::Sender<Result<(String, bool), WhisperRealtimeError>>,
-        configs: Arc<WhisperConfigsV1>,
-        vad_strategy: Option<vad::VadStrategy>,
-    ) -> Self {
-        let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());
-        let output_buffer: Vec<String> = vec![];
-        let vad = Self::init_vad(strategy);
-        Self {
+    pub fn build(self) -> Result<RealtimeTranscriber<V>, WhisperRealtimeError> {
+        let configs = self.configs.ok_or(WhisperRealtimeError::ParameterError(
+            "No configurations provided".to_string(),
+        ))?;
+        let audio_feed = self.audio_feed.ok_or(WhisperRealtimeError::ParameterError(
+            "No audio feed provided".to_string(),
+        ))?;
+        let output_sender = self
+            .output_sender
+            .ok_or(WhisperRealtimeError::ParameterError(
+                "No output sender provided".to_string(),
+            ))?;
+        let vad = self
+            .voice_activity_detector
+            .ok_or(WhisperRealtimeError::ParameterError(
+                "No VAD provided".to_string(),
+            ))?;
+        Ok(RealtimeTranscriber {
             configs,
-            audio,
-            output_buffer,
-            data_sender,
+            audio_feed,
+            output_sender,
             vad,
-        }
-    }
-
-    #[cfg(feature = "crossbeam")]
-    pub fn new_with_configs(
-        audio: Arc<AudioRingBuffer<f32>>,
-        data_sender: crossbeam::channel::Sender<Result<(String, bool), WhisperRealtimeError>>,
-        configs: Arc<WhisperConfigsV1>,
-        vad_strategy: Option<vad::VadStrategy>,
-    ) -> Self {
-        let strategy = vad_strategy.unwrap_or(vad::VadStrategy::default());
-        let output_buffer: Vec<String> = vec![];
-        let vad = Self::init_vad(strategy);
-        Self {
-            configs,
-            audio,
-            output_buffer,
-            data_sender,
-            vad,
-        }
-    }
-
-    fn init_vad(strategy: vad::VadStrategy) -> Option<VoiceActivityDetector> {
-        match strategy {
-            vad::VadStrategy::Naive => None,
-            vad::VadStrategy::Silero => Some(
-                VoiceActivityDetector::builder()
-                    .sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
-                    .chunk_size(1024usize)
-                    .build()
-                    .expect("failed to build voice activity detector"),
-            ),
-        }
+        })
     }
 }
 
-impl<
-        T: voice_activity_detector::Sample
-            + num_traits::cast::FromPrimitive
-            + num_traits::cast::ToPrimitive
-            + num_traits::cast::NumCast
-            + num_traits::Zero,
-    > VoiceActivityDetection<T> for RealtimeTranscriber
-{
+#[derive(Clone)]
+pub struct RealtimeTranscriber<V: VAD<f32>> {
+    configs: Arc<WhisperRealtimeConfigs>,
+    audio_feed: Arc<AudioRingBuffer<f32>>,
+    output_sender: Sender<WhisperOutput>,
+    vad: Arc<Mutex<V>>,
 }
 
-impl Transcriber for RealtimeTranscriber {
+// RealtimeTranscriber is internally protected and is therefore thread safe
+// It is also trivially cloneable.
+unsafe impl<V: VAD<f32>> Sync for RealtimeTranscriber<V> {}
+unsafe impl<V: VAD<f32>> Send for RealtimeTranscriber<V> {}
+
+impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
+    // TODO: document why run_transcription flag.
     fn process_audio(
         &mut self,
-        whisper_state: &mut WhisperState,
         run_transcription: Arc<AtomicBool>,
-        _: Option<impl FnMut(i32) + Send + Sync + 'static>,
-    ) -> String {
-        let mut t_last = std::time::Instant::now();
+    ) -> Result<String, WhisperRealtimeError> {
+        let mut t_last = Instant::now();
 
+        // To collect audio from the ring buffer.
         let mut audio_samples: Vec<f32> = vec![0f32; constants::N_SAMPLES_30S];
-        let mut audio_samples_vad: Vec<f32> = vec![0f32; constants::N_SAMPLES_30S];
 
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        Self::set_full_params(&mut params, &self.configs, None);
+        // For timing the transcription (and timeout)
+        let mut total_time = 0u128;
+        // For collecting the transcribed segments to return a full transcription at the end
+        let mut output_buffer: Vec<String> = vec![];
 
+        // To handle words/phrases somewhat gracefully.
+        // When phrases are detected/assumed to be finished, this will send a WhisperOutput::FinishedPhrase,
+        // to let the UI know to bake the output, until then, updates to the transcription will overwrite
+        // what has been previously collected in attempt accurate to the collected speech
+        let mut phrase_finished = true;
+        // To stem the flow of newlines if/when a pause is detected. If a pause has been detected
+        // and not cleared, just sleep until there's voice again.
         let mut pause_detected = true;
-        let mut phrase_finished = false;
 
-        let mut total_time: u128 = 0;
+        // Set up whisper
+        let WhisperRealtimeConfigs {
+            whisper: whisper_configs,
+            realtime: realtime_configs,
+        } = &*self.configs;
 
-        self.data_sender
-            .send(Ok((String::from("[START SPEAKING]\n"), true)))
-            .expect("Failed to send transcription");
+        let full_params = whisper_configs.to_whisper_full_params();
+        let whisper_context_params = whisper_configs.to_whisper_context_params();
 
-        loop {
-            if !run_transcription.load(Ordering::Acquire) {
-                self.data_sender
-                    .send(Ok((String::from("\n[END TRANSCRIPTION]\n"), true)))
-                    .expect("Failed to send transcription");
-                break;
-            }
+        let ctx = whisper_rs::WhisperContext::new_with_params(
+            whisper_configs
+                .model()
+                .file_path()
+                .to_str()
+                .expect("File should be valid utf-8 str"),
+            whisper_context_params,
+        )?;
 
-            let t_now = std::time::Instant::now();
+        let mut whisper_state = ctx.create_state()?;
 
+        self.output_sender
+            .send(WhisperOutput::FinishedPhrase(
+                "[START SPEAKING]\n".to_string(),
+            ))
+            .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
+
+        while run_transcription.load(Ordering::Acquire) {
+            let t_now = Instant::now();
             let diff = t_now - t_last;
             let millis = diff.as_millis();
             total_time += millis;
 
-            if millis < self.configs.vad_sample_ms as u128 {
+            // If less than t=vad_sample_len() has passed, sleep for s = 100ms = constants::PAUSE_DURATION
+            if millis < realtime_configs.vad_sample_len() as u128 {
                 sleep(Duration::from_millis(constants::PAUSE_DURATION));
                 continue;
             }
-
-            if millis >= self.configs.phrase_timeout as u128 {
+            if millis > realtime_configs.phrase_timeout() as u128 {
                 phrase_finished = true;
             }
 
-            self.audio
-                .get_audio(self.configs.vad_sample_ms, &mut audio_samples_vad);
+            self.audio_feed
+                .read_into(realtime_configs.vad_sample_len(), &mut audio_samples);
 
-            // TODO: refactor this once VAD has been refactored
-            let check_voice_detected = match &mut self.vad {
-                None => Self::is_voice_detected_naive(
-                    constants::WHISPER_SAMPLE_RATE,
-                    &mut audio_samples_vad,
-                    // &mut new_samples,
-                    self.configs.naive_vad_energy_threshold,
-                    self.configs.naive_window_len,
-                    self.configs.naive_window_step,
-                    self.configs.naive_vad_freq_threshold,
-                    self.configs.voice_probability_threshold,
-                ),
-                Some(ref mut vad) => Ok(Self::is_voice_detected_silero(
-                    vad,
-                    &mut audio_samples_vad,
-                    // &mut new_samples,
-                    self.configs.voice_probability_threshold,
-                )),
+            // Check for voice activity
+            let mut vad = match self.vad.lock() {
+                Ok(v) => v,
+                Err(e) => {
+                    self.vad.clear_poison();
+                    e.into_inner()
+                }
             };
 
-            match check_voice_detected {
-                Ok(detected) => {
-                    if detected {
-                        self.audio
-                            .get_audio(self.configs.audio_sample_ms, &mut audio_samples);
-
-                        pause_detected = false;
-                    } else {
-                        if !pause_detected {
-                            pause_detected = true;
-                            phrase_finished = true;
-                            self.output_buffer.push(String::from("\n"));
-                            self.data_sender
-                                .send(Ok((String::from("\n"), true)))
-                                .expect("Failed to send transcription");
-
-                            self.audio.clear();
-                        }
-
-                        sleep(Duration::from_millis(constants::PAUSE_DURATION));
-                        continue;
-                    }
-                }
-                Err(e) => {
-                    self.data_sender
-                        .send(Err(e))
-                        .expect("Data channel should be open");
+            let voice_detected = vad.voice_detected(&audio_samples);
+            if !voice_detected {
+                // If the pause has already been detected, don't send a newline
+                // Sleep for a little bit to give the buffer time to fill up
+                if pause_detected {
+                    sleep(Duration::from_millis(constants::PAUSE_DURATION));
                     continue;
                 }
-            }
 
-            t_last = t_now;
-            // TODO: correct this. This doesn't make a lot of sense; the configurations do not change during runtime, as far as I remember.
-            // And if they do, they shouldn't
-            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-            Self::set_full_params(&mut params, &self.configs, None);
+                // Otherwise, detect the pause, then send a newline.
+                pause_detected = true;
+                self.output_sender
+                    .send(WhisperOutput::FinishedPhrase("\n".to_string()))
+                    .map_err(|e| {
+                        WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner())
+                    })?;
 
-            let new_audio_samples = whisper_rs::convert_stereo_to_mono_audio(&audio_samples)
-                .expect("failed to convert to mono");
+                // Clear the audio buffer to prevent data incoherence messing up the transcription.
+                self.audio_feed.clear();
 
-            let result = whisper_state.full(params, &new_audio_samples);
-
-            if let Err(e) = result {
-                self.data_sender
-                    // It makes more sense as a function that returns Whisper FullParams
-                    .send(Err(WhisperRealtimeError::TranscriptionError(format!(
-                        "WhisperError: {}",
-                        e
-                    ))))
-                    .expect("Data channel should be open");
+                // Sleep for a little bit to give the buffer time to fill up
+                sleep(Duration::from_millis(constants::PAUSE_DURATION));
+                // Jump to the next iteration.
                 continue;
             }
+            // Voice has been detected, finish reading and transcribing
 
-            let num_segments = whisper_state
-                .full_n_segments()
-                .expect("failed to get segments");
+            // First, update the time (for timeout/phrase output)
+            t_last = t_now;
+
+            let _ = whisper_state.full(full_params.clone(), &audio_samples)?;
+            let num_segments = whisper_state.full_n_segments()?;
             if num_segments == 0 {
                 continue;
             }
-            let mut text: Vec<String> = vec![];
 
-            for i in 0..num_segments {
-                let segment = whisper_state
-                    .full_get_segment_text(i)
-                    .expect("failed to get segment");
+            // It's not a big deal if there are invalid utf-8 characters
+            // Use lossy to just swap it with the replacement character
+            let segments = (0..num_segments)
+                .into_iter()
+                .map(|i| whisper_state.full_get_segment_text_lossy(i))
+                .collect::<Result<Vec<String>, _>>()?;
 
-                text.push(segment);
-            }
+            // Join it into a full string
+            let text = segments.join("");
 
-            let text = text.join("");
-            let text = text.trim();
-            let text_string = String::from(text);
-
-            let push_new_audio = phrase_finished || self.output_buffer.is_empty();
-
-            if push_new_audio {
-                self.output_buffer.push(text_string.clone());
+            // Make a copy of the new text in the output buffer and send through the message channel
+            if phrase_finished {
+                output_buffer.push(text.clone());
                 phrase_finished = false;
+                self.output_sender.send(WhisperOutput::FinishedPhrase(text))
             } else {
-                let last_index = self.output_buffer.len() - 1;
-                self.output_buffer[last_index] = text_string.clone();
+                let last_index = output_buffer.len().saturating_sub(1);
+                match output_buffer.get_mut(last_index) {
+                    None => output_buffer.push(text.clone()),
+                    Some(old_text) => *old_text = text.clone(),
+                }
+                self.output_sender
+                    .send(WhisperOutput::ContinuedPhrase(text))
+            }
+            .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
+
+            // If the timeout is set to 0, this loop runs infinitely.
+            if realtime_configs.realtime_timeout() == 0 {
+                continue;
             }
 
-            // Send the new text to the G/UI.
-            self.data_sender
-                .send(Ok((text_string, push_new_audio)))
-                .expect("Failed to send transcription");
-
-            // Set the flag if over timeout.
-            if self.configs.realtime_timeout > 0 {
-                if total_time > self.configs.realtime_timeout {
-                    self.data_sender
-                        .send(Ok((String::from("\n[TRANSCRIPTION TIMEOUT\n"), true)))
-                        .expect("Failed to send transcription data");
-                    run_transcription.store(false, Ordering::Release);
-                }
+            // Otherwise check for timeout.
+            if total_time > realtime_configs.realtime_timeout() {
+                self.output_sender
+                    .send(WhisperOutput::FinishedPhrase(
+                        "\n[TRANSCRIPTION TIMEOUT]\n".to_string(),
+                    ))
+                    .map_err(|e| {
+                        WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner())
+                    })?;
+                run_transcription.store(false, Ordering::Release);
             }
         }
+        self.output_sender
+            .send(WhisperOutput::FinishedPhrase(
+                "\n[END TRANSCRIPTION]\n".to_string(),
+            ))
+            .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
 
-        self.output_buffer.join("").clone()
+        Ok(output_buffer.join(""))
     }
 }

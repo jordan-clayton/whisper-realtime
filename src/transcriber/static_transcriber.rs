@@ -9,9 +9,16 @@ use std::sync::Mutex;
 
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
 
-use crate::transcriber::traits::Transcriber;
+use crate::transcriber::transcriber::{Transcriber, WhisperCallback, WhisperOutput};
+use crate::utils::callback::Callback;
 use crate::utils::errors::WhisperRealtimeError;
-use crate::whisper::configs::WhisperConfigsV1;
+use crate::utils::sender::Sender;
+use crate::whisper::configs::{WhisperConfigsV1, WhisperConfigsV2};
+
+// TODO: rename this to offline_transcriber.rs OfflineTranscriber
+
+/// NOTE: This will no longer compile. The transcriber trait has changed and this struct requires
+/// re-implementation. Refactoring is still in progress, but expect this to be fixed very soon.
 
 // Workaround for whisper-rs issue #134 -- moving memory in rust causes a segmentation fault
 // in the progress callback.
@@ -20,17 +27,41 @@ use crate::whisper::configs::WhisperConfigsV1;
 static PROGRESS_CALLBACK: LazyLock<Mutex<Option<Box<dyn FnMut(i32) + Send + Sync>>>> =
     LazyLock::new(|| Mutex::new(None));
 
-// TODO: these probably shouldn't be vectors; use [T] if possible/sensible.
+// TODO: Migrate this to the audio module; it doesn't belong here
+// TODO: look into using slices
 pub enum SupportedAudioSample {
     I16(Vec<i16>),
     F32(Vec<f32>),
 }
 
-// TODO: this is probably not necessary; just convert to mono before transcription
+// TODO: Migrate this to the audio module; it doesn't belong here
+// TODO: rename this to something clearer.
 #[derive(Copy, Clone, PartialEq)]
 pub enum SupportedChannels {
     MONO,
     STEREO,
+}
+#[derive(Clone)]
+pub struct OfflineTranscriberBuilder<CB: Callback<Argument = i32> + Send + Sync> {
+    configs: Option<Arc<WhisperConfigsV2>>,
+    sender: Option<Sender<WhisperOutput>>,
+    audio: Option<Arc<SupportedAudioSample>>,
+    channels: Option<SupportedChannels>,
+    progress_callback: Option<Arc<Mutex<WhisperCallback<CB>>>>,
+}
+
+// TODO: Builder impl, consume the callback to prevent nefarious cloning.
+
+pub struct OfflineTranscriber<CB: Callback<Argument = i32> + Send + Sync> {
+    configs: Arc<WhisperConfigsV2>,
+    sender: Sender<WhisperOutput>,
+    audio: Arc<SupportedAudioSample>,
+    channels: Arc<SupportedChannels>,
+    // When a user calls transcribe, the callback will get ripped out of this field and the state
+    // will be set to Loaded. A Loaded callback indicates this OfflineTranscriber has been run before,
+    // and so the callback will be in the global LazyLock
+    progress_callback: Arc<Mutex<WhisperCallback<CB>>>,
+    // TODO: In the transcription implementation, when transcription is finished, try and return the callback.
 }
 
 #[cfg(not(feature = "crossbeam"))]
@@ -42,7 +73,6 @@ pub struct StaticTranscriber {
 }
 
 // TODO: get rid of the mutex
-// TODO: rename to OfflineTranscriber
 // TODO: move the callback to the Static(Offline) transcriber struct
 // SupportedAudioSample doesn't need to be mutex-guarded; take ownership of the audio.
 #[cfg(feature = "crossbeam")]
@@ -225,6 +255,10 @@ impl Transcriber for StaticTranscriber {
         text_string.clone()
     }
 }
+
+/// This small function runs each time the encoder fires up to check the running state of the
+/// transcriber. Allows a user to deliberately early terminate transcription instead of waiting
+/// for the full audio to be transcribed.
 
 extern "C" fn check_running_state(
     _: *mut whisper_rs_sys::whisper_context,

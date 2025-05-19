@@ -16,7 +16,7 @@ mod resampler_test {
     use whisper_realtime::transcriber::static_transcriber::{
         StaticTranscriber, SupportedAudioSample, SupportedChannels,
     };
-    use whisper_realtime::transcriber::traits::Transcriber;
+    use whisper_realtime::transcriber::transcriber::Transcriber;
     use whisper_realtime::utils::constants;
     use whisper_realtime::whisper::configs::Configs;
     use whisper_realtime::whisper::model::{DefaultModelType, Model};

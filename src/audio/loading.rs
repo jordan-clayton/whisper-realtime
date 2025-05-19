@@ -9,7 +9,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::{Hint, ProbeResult};
 
 #[cfg(feature = "resampler")]
-use crate::audio::resampler::{AudioSample, needs_normalizing, normalize_audio};
+use crate::audio::resampler::{needs_normalizing, normalize_audio, ResampleableAudio};
 use crate::transcriber::static_transcriber::SupportedAudioSample;
 use crate::utils::callback::{Callback, Nop, ProgressCallback};
 use crate::utils::errors::WhisperRealtimeError;
@@ -90,7 +90,7 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
 
     // Normalize
     if needs_normalizing? {
-        let audio = AudioSample::F32(&samples);
+        let audio = ResampleableAudio::F32(&samples);
         normalize_audio(&audio, sample_rate, num_channels)
     } else {
         Ok(SupportedAudioSample::F32(samples))

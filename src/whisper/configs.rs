@@ -227,7 +227,7 @@ impl Default for WhisperConfigsV2 {
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum WhisperSamplingStrategy {
     Greedy { best_of: usize },
     BeamSearch { beam_size: usize, patience: f32 },
@@ -237,7 +237,7 @@ pub enum WhisperSamplingStrategy {
 /// All timeouts/audio lengths are measured in milliseconds
 /// VAD configurations should be handled at the application level.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct RealtimeConfigs {
     // in Milliseconds.
     realtime_timeout: u128,
@@ -357,7 +357,7 @@ impl WhisperRealtimeConfigs {
     }
 
     // Convenience delegates
-    pub fn to_full_params(&self) -> whisper_rs::FullParams {
+    pub fn to_whisper_full_params(&self) -> whisper_rs::FullParams {
         self.whisper.to_whisper_full_params()
     }
     pub fn to_whisper_context_params(&self) -> whisper_rs::WhisperContextParameters {

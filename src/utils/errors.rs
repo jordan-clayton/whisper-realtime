@@ -2,8 +2,13 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum WhisperRealtimeError {
+    // TODO; if TranscriptionError goes unused, remove this.
     #[error("Transcription Error {0}")]
     TranscriptionError(String),
+    // Called on a data-channel failure
+    // Contains the message so it can be recovered.
+    #[error("{0}")]
+    TranscriptionSenderError(String),
     #[error("Write Error {0}")]
     WriteError(String),
     #[error("Parameter Error {0}")]
