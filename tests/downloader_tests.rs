@@ -6,8 +6,8 @@ mod downloader_tests {
     use tokio::runtime::Runtime;
 
     use whisper_realtime::downloader;
-    use whisper_realtime::downloader::traits::AsyncDownload;
-    use whisper_realtime::downloader::traits::SyncDownload;
+    use whisper_realtime::downloader::AsyncDownload;
+    use whisper_realtime::downloader::SyncDownload;
     use whisper_realtime::utils::callback::ProgressCallback;
     use whisper_realtime::utils::errors::WhisperRealtimeError;
     use whisper_realtime::whisper::model::DefaultModelType;
@@ -47,7 +47,8 @@ mod downloader_tests {
         let handle = rt.handle();
 
         // NOTE: callback url is public and can be set after creating the struct by using the builder.
-        let stream_downloader = downloader::request::async_download_request(&client, url.as_str());
+        let stream_downloader =
+            downloader::downloaders::async_download_request(&client, url.as_str());
 
         // Run the future -> At this time, tokio is not being used for async and this cannot be awaited in testing.
         let stream_downloader = handle.block_on(stream_downloader);
@@ -119,7 +120,7 @@ mod downloader_tests {
         let client = reqwest::blocking::Client::new();
 
         // NOTE: callback url is public and can be set after creating the struct by using the builder.
-        let sync_downloader = downloader::request::sync_download_request(&client, url.as_str());
+        let sync_downloader = downloader::downloaders::sync_download_request(&client, url.as_str());
 
         // Ensure proper struct creation + download.
         assert!(

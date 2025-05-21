@@ -57,7 +57,7 @@ impl Configs {
         match self {
             Configs::V1(v1) => Self::V2(v1.into_v2()),
             Configs::V2(_) => self,
-            Configs::RealtimeV1(r_v1) => Self::V2(r_v1.into_whisper_v2()),
+            Configs::RealtimeV1(r_v1) => Self::V2(r_v1.into_whisper_v2_configs()),
         }
     }
 }
@@ -86,9 +86,9 @@ pub struct WhisperConfigsV2 {
 impl WhisperConfigsV2 {
     pub fn new() -> Self {
         Self {
-            n_threads: 0,
+            n_threads: 1,
             max_past_prompt_tokens: 0,
-            sampling_strategy: WhisperSamplingStrategy::Greedy { best_of: 0 },
+            sampling_strategy: WhisperSamplingStrategy::Greedy { best_of: 1 },
             translate: false,
             language: None,
             use_gpu: false,
@@ -216,11 +216,9 @@ impl Default for WhisperConfigsV2 {
                 .get(),
         );
 
-        let max_prompt_tokens = 16384;
-
         Self::new()
             .with_n_threads(n_threads)
-            .with_max_past_prompt_tokens(max_prompt_tokens)
+            .with_max_past_prompt_tokens(constants::MAX_PROMPT_TOKENS)
             .with_sampling_strategy(WhisperSamplingStrategy::Greedy { best_of: 1 })
             .set_gpu(cfg!(feature = "_gpu"))
     }
@@ -334,6 +332,8 @@ impl WhisperRealtimeConfigs {
             realtime: RealtimeConfigs::new(),
         }
     }
+
+    // Convenience builder delegates
     pub fn with_whisper_configs(mut self, w_configs: WhisperConfigsV2) -> Self {
         self.whisper = w_configs;
         self
@@ -342,29 +342,122 @@ impl WhisperRealtimeConfigs {
         self.realtime = r_configs;
         self
     }
-    pub fn whisper_configs(&self) -> &WhisperConfigsV2 {
+
+    pub fn with_n_threads(mut self, num_threads: usize) -> Self {
+        self.whisper.n_threads = num_threads as std::ffi::c_int;
+        self
+    }
+    pub fn with_max_past_prompt_tokens(mut self, num_prompt_tokens: usize) -> Self {
+        self.whisper.max_past_prompt_tokens = num_prompt_tokens as std::ffi::c_int;
+        self
+    }
+    pub fn set_translate(mut self, set_translate: bool) -> Self {
+        self.whisper.translate = set_translate;
+        self
+    }
+    pub fn with_language(mut self, language: Option<Language>) -> Self {
+        self.whisper.language = language;
+        self
+    }
+    pub fn set_gpu(mut self, use_gpu: bool) -> Self {
+        self.whisper.use_gpu = use_gpu;
+        self
+    }
+    pub fn set_use_no_context(mut self, use_no_context: bool) -> Self {
+        self.whisper.use_no_context = use_no_context;
+        self
+    }
+    pub fn set_flash_attention(mut self, flash_attention: bool) -> Self {
+        self.whisper.flash_attention = flash_attention;
+        self
+    }
+
+    pub fn with_sampling_strategy(mut self, sampling_strategy: WhisperSamplingStrategy) -> Self {
+        self.whisper.sampling_strategy = sampling_strategy;
+        self
+    }
+    pub fn with_model(mut self, model: Model) -> Self {
+        self.whisper.model = model;
+        self
+    }
+
+    pub fn with_realtime_timeout(mut self, realtime_timeout: u128) -> Self {
+        self.realtime.realtime_timeout = realtime_timeout;
+        self
+    }
+    pub fn with_audio_sample_len(mut self, len_ms: usize) -> Self {
+        self.realtime.audio_sample_len = len_ms;
+        self
+    }
+    pub fn with_vad_sample_len(mut self, len_ms: usize) -> Self {
+        self.realtime.vad_sample_len = len_ms;
+        self
+    }
+    pub fn with_phrase_timeout(mut self, len_ms: usize) -> Self {
+        self.realtime.phrase_timeout = len_ms;
+        self
+    }
+
+    // Whisper accessors
+    pub fn n_threads(&self) -> usize {
+        self.whisper.n_threads as usize
+    }
+
+    pub fn max_past_prompt_tokens(&self) -> usize {
+        self.whisper.max_past_prompt_tokens as usize
+    }
+    pub fn translate(&self) -> bool {
+        self.whisper.translate
+    }
+    pub fn language(&self) -> &Option<Language> {
+        &self.whisper.language
+    }
+    pub fn using_gpu(&self) -> bool {
+        self.whisper.use_gpu
+    }
+    pub fn using_no_context(&self) -> bool {
+        self.whisper.use_no_context
+    }
+    pub fn using_flash_attention(&self) -> bool {
+        self.whisper.flash_attention
+    }
+    pub fn model(&self) -> &Model {
+        &self.whisper.model
+    }
+
+    // Realtime Accessors
+    pub fn realtime_timeout(&self) -> u128 {
+        self.realtime.realtime_timeout
+    }
+    pub fn audio_sample_len(&self) -> usize {
+        self.realtime.audio_sample_len
+    }
+    pub fn vad_sample_len(&self) -> usize {
+        self.realtime.vad_sample_len
+    }
+    pub fn phrase_timeout(&self) -> usize {
+        self.realtime.phrase_timeout
+    }
+
+    pub fn to_whisper_v2_configs(&self) -> &WhisperConfigsV2 {
         &self.whisper
     }
-    pub fn realtime_configs(&self) -> &RealtimeConfigs {
+    pub fn to_realtime_configs(&self) -> &RealtimeConfigs {
         &self.realtime
     }
-    pub fn into_whisper_v2(self) -> WhisperConfigsV2 {
+    pub fn into_whisper_v2_configs(self) -> WhisperConfigsV2 {
         self.whisper
     }
 
-    pub fn into_realtime(self) -> RealtimeConfigs {
+    pub fn into_realtime_configs(self) -> RealtimeConfigs {
         self.realtime
     }
 
-    // Convenience delegates
     pub fn to_whisper_full_params(&self) -> whisper_rs::FullParams {
         self.whisper.to_whisper_full_params()
     }
     pub fn to_whisper_context_params(&self) -> whisper_rs::WhisperContextParameters {
         self.whisper.to_whisper_context_params()
-    }
-    pub fn to_decomposed(&self) -> (&WhisperConfigsV2, &RealtimeConfigs) {
-        (&self.whisper, &self.realtime)
     }
 }
 
@@ -381,6 +474,7 @@ impl Default for WhisperRealtimeConfigs {
 /// These should be handled at the application level.
 /// To retain a serialized voice_probability_threshold value, access the public field to cache the
 /// value before converting to V2/Realtime V1
+/// This will be deprecated at a later date.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
 pub struct WhisperConfigsV1 {
@@ -468,39 +562,5 @@ impl WhisperConfigsV1 {
             .with_vad_sample_len(self.vad_sample_ms)
             .with_realtime_timeout(self.realtime_timeout)
             .with_phrase_timeout(self.phrase_timeout)
-    }
-}
-
-impl Default for WhisperConfigsV1 {
-    fn default() -> Self {
-        let n_threads = match std::thread::available_parallelism() {
-            Ok(n) => {
-                let min = n.get();
-                std::cmp::min(min, 4) as std::ffi::c_int
-            }
-            Err(_) => 2,
-        };
-
-        Self {
-            n_threads,
-            set_translate: false,
-            language: Some(String::from("en")),
-            use_gpu: cfg!(feature = "_gpu"),
-            model: DefaultModelType::default(),
-            // Currently set to 1 hr
-            realtime_timeout: constants::REALTIME_AUDIO_TIMEOUT,
-            audio_sample_ms: constants::AUDIO_SAMPLE_MS,
-            vad_sample_ms: constants::VAD_SAMPLE_MS,
-            phrase_timeout: constants::PHRASE_TIMEOUT,
-            naive_vad_energy_threshold: constants::VOICE_ENERGY_THRESHOLD,
-            naive_window_len: constants::VAD_WIN_LEN,
-            naive_window_step: constants::VAD_WIN_HOP,
-            voice_probability_threshold: constants::REALTIME_VOICE_PROBABILITY_THRESHOLD,
-            naive_vad_freq_threshold: constants::VAD_FREQ_THRESHOLD,
-            print_special: false,
-            print_progress: false,
-            print_realtime: false,
-            print_timestamps: false,
-        }
     }
 }

@@ -30,20 +30,20 @@ pub fn vad_benchmark(c: &mut Criterion) {
     let mut silero = SileroBuilder::new()
         .with_sample_rate(8000)
         .with_chunk_size(constants::SILERO_CHUNK_SIZE)
-        .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
+        .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD)
         .build()
         .expect("Silero VAD should build without problems");
 
     let mut webrtc = WebRtcBuilder::new()
         .with_sample_rate(R8kHz)
         .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-        .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
+        .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD)
         .build_webrtc()
         .expect("Silero VAD should build without problems");
     let mut earshot = WebRtcBuilder::new()
         .with_sample_rate(R8kHz)
         .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-        .with_detection_probability_threshold(constants::REALTIME_VOICE_PROBABILITY_THRESHOLD)
+        .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD)
         .build_earshot()
         .expect("Silero VAD should build without problems");
 

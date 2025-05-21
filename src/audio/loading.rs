@@ -10,7 +10,7 @@ use symphonia::core::probe::{Hint, ProbeResult};
 
 #[cfg(feature = "resampler")]
 use crate::audio::resampler::{needs_normalizing, normalize_audio, ResampleableAudio};
-use crate::transcriber::offline_transcriber::SupportedAudioSample;
+use crate::audio::WhisperAudioSample;
 use crate::utils::callback::{Callback, Nop, ProgressCallback};
 use crate::utils::errors::WhisperRealtimeError;
 
@@ -28,7 +28,7 @@ fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, Whisp
 pub fn load_audio_file<P: AsRef<Path>>(
     path: P,
     progress_callback: Option<impl FnMut(usize)>,
-) -> Result<SupportedAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, WhisperRealtimeError> {
     let decoder_opts = Default::default();
     let probed = get_audio_probe(path)?;
 
@@ -45,7 +45,7 @@ pub fn load_audio_file<P: AsRef<Path>>(
         Some(p) => decode_loop(track.id, decoder, format, ProgressCallback::new(p)),
         None => decode_loop(track.id, decoder, format, Nop::new()),
     };
-    Ok(SupportedAudioSample::F32(samples))
+    Ok(WhisperAudioSample::F32(samples.into_boxed_slice()))
 }
 
 // This will return f32 audio normalized for whisper
@@ -54,7 +54,7 @@ pub fn load_audio_file<P: AsRef<Path>>(
 pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     path: P,
     progress_callback: Option<impl FnMut(usize)>,
-) -> Result<SupportedAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, WhisperRealtimeError> {
     let decoder_opts = Default::default();
     let probed = get_audio_probe(path)?;
     let format = probed.format;
@@ -93,7 +93,7 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
         let audio = ResampleableAudio::F32(&samples);
         normalize_audio(&audio, sample_rate, num_channels)
     } else {
-        Ok(SupportedAudioSample::F32(samples))
+        Ok(WhisperAudioSample::F32(samples.into_boxed_slice()))
     }
 }
 

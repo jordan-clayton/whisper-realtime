@@ -3,18 +3,19 @@ use std::sync::Arc;
 
 use sdl2::audio::{AudioCallback, AudioFormatNum};
 
-use crate::utils::sender::Sender;
+use crate::utils::Sender;
 
 /// This is a workaround for trait aliasing until nightly moves to stable.
 pub trait RecorderSample: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static {}
 impl<T: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static> RecorderSample for T {}
 
 pub trait AudioInputAdapter<T: RecorderSample> {
-    type SenderOutput: Send + 'static;
+    type SenderOutput: Send + Clone + 'static;
     fn convert(input: &[T]) -> Self::SenderOutput;
 }
-
+#[derive(Copy, Clone)]
 pub struct UseVec;
+#[derive(Copy, Clone)]
 pub struct UseArc;
 
 impl<T: RecorderSample> AudioInputAdapter<T> for UseVec {

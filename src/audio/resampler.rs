@@ -8,7 +8,7 @@ use symphonia::core::formats::Track;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::Hint;
 
-use crate::transcriber::offline_transcriber::SupportedAudioSample;
+use crate::audio::WhisperAudioSample;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
@@ -26,7 +26,7 @@ pub fn resample(
     out_sample_rate: f64,
     in_sample_rate: f64,
     num_channels: usize,
-) -> Result<SupportedAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, WhisperRealtimeError> {
     if num_channels == 0 {
         return Err(WhisperRealtimeError::ParameterError(
             "Zero channels.".to_owned(),
@@ -71,17 +71,19 @@ pub fn resample(
 fn resample_mono(
     samples: Vec<f32>,
     mut resampler: SincFixedIn<f32>,
-) -> Result<SupportedAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, WhisperRealtimeError> {
     let waves_in = vec![samples];
     let waves_out = resampler.process(&waves_in, None)?;
-    Ok(SupportedAudioSample::F32(waves_out[0].to_vec()))
+    Ok(WhisperAudioSample::F32(
+        waves_out[0].to_vec().into_boxed_slice(),
+    ))
 }
 
 #[inline]
 fn resample_stereo(
     samples: Vec<f32>,
     mut resampler: SincFixedIn<f32>,
-) -> Result<SupportedAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, WhisperRealtimeError> {
     let waves_in: Vec<Vec<f32>> = vec![
         samples.iter().step_by(2).copied().collect(),
         samples[1..].iter().step_by(2).copied().collect(),
@@ -98,7 +100,7 @@ fn resample_stereo(
         .flatten()
         .collect();
 
-    Ok(SupportedAudioSample::F32(interleaved))
+    Ok(WhisperAudioSample::F32(interleaved.into_boxed_slice()))
 }
 
 // Since this is for whisper, it will also convert the samples to mono
@@ -107,11 +109,11 @@ pub fn normalize_audio(
     samples: &ResampleableAudio,
     in_sample_rate: f64,
     num_channels: usize,
-) -> Result<SupportedAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, WhisperRealtimeError> {
     let resampled = resample(samples, 16000., in_sample_rate, num_channels)?;
-    if let SupportedAudioSample::F32(stereo) = resampled {
+    if let WhisperAudioSample::F32(stereo) = resampled {
         let mono = whisper_rs::convert_stereo_to_mono_audio(&stereo)?;
-        Ok(SupportedAudioSample::F32(mono))
+        Ok(WhisperAudioSample::F32(mono.into_boxed_slice()))
     } else {
         // This should never, ever happen
         Err(WhisperRealtimeError::ParameterError(

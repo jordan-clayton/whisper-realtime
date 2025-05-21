@@ -202,17 +202,17 @@ pub enum DefaultModelType {
 impl DefaultModelType {
     pub fn to_file_name(&self) -> &'static str {
         match self {
-            DefaultModelType::TinyEn => "tiny.en.bin",
-            DefaultModelType::Tiny => "tiny.bin",
-            DefaultModelType::BaseEn => "base.en.bin",
-            DefaultModelType::Base => "base.bin",
-            DefaultModelType::SmallEn => "small.en.bin",
-            DefaultModelType::Small => "small.bin",
-            DefaultModelType::MediumEn => "medium.en.bin",
-            DefaultModelType::Medium => "medium.bin",
-            DefaultModelType::LargeV1 => "large-v1.bin",
-            DefaultModelType::LargeV2 => "large-v2.bin",
-            DefaultModelType::LargeV3 => "large-v3.bin",
+            DefaultModelType::TinyEn => "ggml-tiny.en.bin",
+            DefaultModelType::Tiny => "ggml-tiny.bin",
+            DefaultModelType::BaseEn => "ggml-base.en.bin",
+            DefaultModelType::Base => "ggml-base.bin",
+            DefaultModelType::SmallEn => "ggml-small.en.bin",
+            DefaultModelType::Small => "ggml-small.bin",
+            DefaultModelType::MediumEn => "ggml-medium.en.bin",
+            DefaultModelType::Medium => "ggml-medium.bin",
+            DefaultModelType::LargeV1 => "ggml-large-v1.bin",
+            DefaultModelType::LargeV2 => "ggml-large-v2.bin",
+            DefaultModelType::LargeV3 => "ggml-large-v3.bin",
         }
     }
     #[cfg(feature = "integrity")]
@@ -233,10 +233,9 @@ impl DefaultModelType {
     }
 
     pub fn to_model(&self) -> Model {
-        let file_name = self.to_file_name();
         Model::new()
             .with_name(self.as_ref())
-            .with_file_name(file_name)
+            .with_file_name(self.to_file_name())
     }
 
     pub fn to_model_with_path_prefix(&self, prefix: &Path) -> Model {
@@ -248,7 +247,7 @@ impl DefaultModelType {
     pub fn url(&self) -> String {
         let file_name = self.to_file_name();
         const URL_PREFIX: &'static str =
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-";
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
 
         [URL_PREFIX, file_name].concat()
     }

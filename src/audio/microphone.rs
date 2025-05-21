@@ -5,8 +5,8 @@ use sdl2::{AudioSubsystem, Sdl};
 use sdl2::audio::{AudioDevice, AudioSpecDesired};
 
 use crate::audio::recorder::{AudioInputAdapter, AudioRecorder, RecorderSample, UseArc, UseVec};
+use crate::utils::{constants, Sender};
 use crate::utils::errors::WhisperRealtimeError;
-use crate::utils::sender::Sender;
 
 /// Basic Audio Backend that uses SDL to gain access to the microphone
 /// At this time, there is no support for other audio backends, but this may happen in the future.
@@ -53,6 +53,18 @@ impl AudioBackend {
         self.audio_subsystem.clone()
     }
 
+    // A convenience method on the audio subsystem to gain access to a microphone handle.
+    pub fn build_whisper_default<T: RecorderSample>(
+        &self,
+        audio_sender: Sender<Arc<[T]>>,
+    ) -> Result<AudioDevice<AudioRecorder<T, UseArc>>, WhisperRealtimeError> {
+        self.build_microphone(audio_sender)
+            .with_num_channels(Some(1))
+            .with_sample_rate(Some(constants::WHISPER_SAMPLE_RATE as i32))
+            .with_sample_size(Some(constants::AUDIO_BUFFER_SIZE))
+            .build()
+    }
+
     pub fn build_microphone<T: RecorderSample>(
         &self,
         audio_sender: Sender<Arc<[T]>>,
@@ -75,14 +87,23 @@ impl AudioBackend {
     }
 }
 
-pub struct MicrophoneBuilder<'a, T: RecorderSample, AC: AudioInputAdapter<T>> {
+#[derive(Clone)]
+pub struct MicrophoneBuilder<'a, T, AC>
+where
+    T: RecorderSample,
+    AC: AudioInputAdapter<T> + Send + Clone,
+{
     audio_subsystem: &'a AudioSubsystem,
     audio_spec_desired: AudioSpecDesired,
     audio_sender: Sender<AC::SenderOutput>,
     _marker: PhantomData<AC>,
 }
 
-impl<'a, T: RecorderSample, AC: AudioInputAdapter<T> + Send> MicrophoneBuilder<'a, T, AC> {
+impl<'a, T, AC> MicrophoneBuilder<'a, T, AC>
+where
+    T: RecorderSample,
+    AC: AudioInputAdapter<T> + Clone + Send,
+{
     pub fn new(
         audio_subsystem: &'a AudioSubsystem,
         audio_sender: Sender<AC::SenderOutput>,
@@ -168,6 +189,30 @@ impl<'a, T: RecorderSample> MicrophoneBuilder<'a, T, UseVec> {
 impl<'a, T: RecorderSample> MicrophoneBuilder<'a, T, UseArc> {
     pub fn new_arc(audio_subsystem: &'a AudioSubsystem, audio_sender: Sender<Arc<[T]>>) -> Self {
         Self::new(audio_subsystem, audio_sender)
+    }
+}
+
+// SDL2 Wrapper. This may become a trait + implementation in the future.
+// NOTE: this does not implement Sync or Send; construct this on the thread that will be opening
+// and closing the audio capture.
+pub struct Microphone<T, AC>
+where
+    T: RecorderSample,
+    AC: AudioInputAdapter<T> + Clone + Send,
+{
+    device: AudioDevice<AudioRecorder<T, AC>>,
+}
+
+impl<T, AC> Microphone<T, AC>
+where
+    T: RecorderSample,
+    AC: AudioInputAdapter<T> + Clone + Send,
+{
+    pub fn play(&self) {
+        self.device.resume()
+    }
+    pub fn pause(&self) {
+        self.device.pause()
     }
 }
 

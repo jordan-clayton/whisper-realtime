@@ -88,8 +88,7 @@ mod model_tests {
             .to_model()
             .with_path_prefix(model_directory.as_path());
 
-        model_directory.push("models");
-        model_directory.push("tiny.en.bin");
+        model_directory.push("ggml-tiny.en.bin");
         let test_file_path = model.file_path();
         let test_file_str = test_file_path.as_os_str();
         let expected_file_str = model_directory.as_os_str();

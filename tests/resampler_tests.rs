@@ -1,25 +1,22 @@
-// TODO: refactor this once the transcriber API is cleaned up
 #[cfg(test)]
 #[cfg(feature = "resampler")]
 mod resampler_test {
-    // Note: You will need to supply your own audio file and modify the tests accordingly.
-    // These tests are primarily to be used internally to ensure the resampling API is correct,
-    // as such, audio files have not been supplied for use.
+    // NOTE: You will need to supply your own audio file and modify the tests accordingly.
 
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
 
     use hound::{SampleFormat, WavSpec, WavWriter};
 
+    use whisper_realtime::audio::{AudioChannelConfiguration, WhisperAudioSample};
     use whisper_realtime::audio::loading::load_normalized_audio_file;
     use whisper_realtime::audio::resampler::file_needs_normalizing;
-    use whisper_realtime::transcriber::offline_transcriber::{
-        StaticTranscriber, SupportedAudioSample, SupportedChannels,
-    };
-    use whisper_realtime::transcriber::transcriber::Transcriber;
+    use whisper_realtime::transcriber::offline_transcriber::OfflineTranscriberBuilder;
+    use whisper_realtime::transcriber::Transcriber;
+    use whisper_realtime::transcriber::vad::Silero;
     use whisper_realtime::utils::constants;
-    use whisper_realtime::whisper::configs::Configs;
-    use whisper_realtime::whisper::model::{DefaultModelType, Model};
+    use whisper_realtime::whisper::configs::WhisperConfigsV2;
+    use whisper_realtime::whisper::model::DefaultModelType;
 
     // Tests the resampling from a file path, which will also implicitly using the track handle
     #[test]
@@ -55,7 +52,7 @@ mod resampler_test {
         };
 
         let mut writer = WavWriter::create("tests/audio_files/resampled.wav", wav_spec).unwrap();
-        let SupportedAudioSample::F32(samples) = audio else {
+        let WhisperAudioSample::F32(samples) = audio else {
             unreachable!()
         };
         for sample in samples.iter() {
@@ -77,86 +74,75 @@ mod resampler_test {
             None::<fn(usize)>,
         )
         .unwrap();
-        let t_audio = Arc::new(Mutex::new(audio));
 
-        let mut configs = Configs::default();
         // This presumes a model is already downloaded. Handle accordingly.
-        configs.model = DefaultModelType::MediumEn;
-        let c_configs = Arc::new(configs);
-
-        let mut static_transcriber = StaticTranscriber::new_with_configs(
-            t_audio.clone(),
-            None,
-            c_configs.clone(),
-            SupportedChannels::Mono,
-        );
-        // Set up whisper
-        let proj_dir = std::env::current_dir().unwrap().join("data");
+        let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
         let model_type = DefaultModelType::MediumEn;
-        let model = Model::new_with_parameters(
-            model_type.as_ref(),
-            model_type.to_file_name(),
-            proj_dir.as_path(),
-        );
+        let model = model_type.to_model_with_path_prefix(proj_dir.as_path());
 
-        let whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
-        let ctx = whisper_rs::WhisperContext::new_with_params(
-            model.file_path().to_str().unwrap(),
-            whisper_ctx_params,
-        )
-        .expect("Failed to load model.");
+        let configs = WhisperConfigsV2::default()
+            .with_model(model)
+            .with_n_threads(8)
+            .set_flash_attention(true);
 
-        let mut state = ctx.create_state().expect("Failed to create state");
+        // NOTE: this could throw off the test (lol); remove if silero is too aggressive.
+        let vad = Silero::try_new_whisper_offline_default()
+            .expect("Silero expected to build with whisper-defaults.");
+
+        let mut offline_transcriber = OfflineTranscriberBuilder::<Silero>::new()
+            .with_configs(configs)
+            .with_audio(audio)
+            .with_channel_configurations(AudioChannelConfiguration::Mono)
+            .with_voice_activity_detector(vad)
+            .build()
+            .expect("Offline transcriber expected to build without issue.");
+
         let run_transcription = Arc::new(AtomicBool::new(true));
+
         // Transcribe the audio
-        let transcription =
-            static_transcriber.process_audio(&mut state, run_transcription, None::<fn(i32)>);
+        let transcription = offline_transcriber
+            .process_audio(run_transcription)
+            .expect("Transcription expected to run without issue.");
 
         assert_eq!(transcription, expected_transcription);
     }
 
     #[test]
     fn test_resample_whisper_from_mp3() {
+        // Note: if using greedy search, the comma sometimes doesn't get picked up.
         let expected_transcription =
             "Mary has many dreams but can't touch Tennessee by way of flight.";
 
         let audio = load_normalized_audio_file("tests/audio_files/test_mp3.mp3", None::<fn(usize)>)
             .unwrap();
-        let t_audio = Arc::new(Mutex::new(audio));
-
-        let mut configs = Configs::default();
         // This presumes a model is already downloaded. Handle accordingly.
-        configs.model = DefaultModelType::MediumEn;
-        let c_configs = Arc::new(configs);
-
-        let mut static_transcriber = StaticTranscriber::new_with_configs(
-            t_audio.clone(),
-            None,
-            c_configs.clone(),
-            SupportedChannels::Mono,
-        );
-
-        // Set up whisper
-        let proj_dir = std::env::current_dir().unwrap().join("data");
+        let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
         let model_type = DefaultModelType::MediumEn;
-        let model = Model::new_with_parameters(
-            model_type.as_ref(),
-            model_type.to_file_name(),
-            proj_dir.as_path(),
-        );
+        let model = model_type.to_model_with_path_prefix(proj_dir.as_path());
 
-        let whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
-        let ctx = whisper_rs::WhisperContext::new_with_params(
-            model.file_path().to_str().unwrap(),
-            whisper_ctx_params,
-        )
-        .expect("Failed to load model.");
+        let configs = WhisperConfigsV2::default()
+            .with_model(model)
+            .with_n_threads(8)
+            .set_flash_attention(true);
 
-        let mut state = ctx.create_state().expect("Failed to create state");
+        // NOTE: this could throw off the test (lol); remove if silero is too aggressive.
+        let vad = Silero::try_new_whisper_offline_default()
+            .expect("Silero expected to build with whisper-defaults");
+
+        let mut offline_transcriber = OfflineTranscriberBuilder::<Silero>::new()
+            .with_configs(configs)
+            .with_audio(audio)
+            .with_channel_configurations(AudioChannelConfiguration::Mono)
+            .with_voice_activity_detector(vad)
+            .build()
+            .expect("Offline transcriber expected to build without issue.");
+
         let run_transcription = Arc::new(AtomicBool::new(true));
+
         // Transcribe the audio
-        let transcription =
-            static_transcriber.process_audio(&mut state, run_transcription, None::<fn(i32)>);
+        let transcription = offline_transcriber
+            .process_audio(run_transcription)
+            .expect("Transcription expected to complete without issue.");
 
         assert_eq!(transcription, expected_transcription);
     }

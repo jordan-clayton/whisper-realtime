@@ -1,9 +1,12 @@
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::marker::PhantomData;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use parking_lot::Mutex;
 use sdl2::audio::AudioFormatNum;
 
 use crate::utils::constants;
+use crate::utils::errors::WhisperRealtimeError;
 
 /// This is a workaround for trait aliasing until nightly moves to stable.
 pub trait AudioSampleFormat: Default + Clone + Copy + AudioFormatNum + 'static {}
@@ -24,24 +27,53 @@ pub struct AudioRingBuffer<T: AudioSampleFormat> {
     inner: Arc<InnerAudioRingBuffer<T>>,
 }
 
-// The ring buffer is internally protected with thread-safe guards, and is therefore thread-safe
-unsafe impl<T: AudioSampleFormat> Sync for AudioRingBuffer<T> {}
+#[derive(Clone)]
+pub struct AudioRingBufferBuilder<T: AudioSampleFormat> {
+    // Size of the buffer in milliseconds
+    capacity_ms: Option<usize>,
+    sample_rate: Option<usize>,
+    _marker: PhantomData<T>,
+}
 
-unsafe impl<T: AudioSampleFormat> Send for AudioRingBuffer<T> {}
-
-/// A zero-length / zero-sample-rate buffer is considered invalid; a 0-length RingBuffer is useless
-/// Sending invalid parameters will return None
-impl<T: AudioSampleFormat> AudioRingBuffer<T> {
-    // A 1 second @ WHISPER_SAMPLE_RATE buffer
+impl<T: AudioSampleFormat> AudioRingBufferBuilder<T> {
     pub fn new() -> Self {
-        let buffer_size = constants::WHISPER_SAMPLE_RATE as usize;
-        let sample_rate = AtomicUsize::new(buffer_size);
-        let head = AtomicUsize::new(0);
-        let audio_len = AtomicUsize::new(0);
-        let capacity_ms = AtomicUsize::new(1000);
-        let buffer_len = AtomicUsize::new(buffer_size);
-        let buffer = Mutex::new(vec![T::default(); buffer_size]);
+        Self {
+            capacity_ms: None,
+            sample_rate: None,
+            _marker: PhantomData,
+        }
+    }
+    pub fn with_capacity_ms(mut self, capacity_ms: usize) -> Self {
+        self.capacity_ms = Some(capacity_ms);
+        self
+    }
+    pub fn with_sample_rate(mut self, sample_rate: usize) -> Self {
+        self.sample_rate = Some(sample_rate);
+        self
+    }
 
+    // This will fail to build if the length/sample rate are missing or zero.
+    pub fn build(self) -> Result<AudioRingBuffer<T>, WhisperRealtimeError> {
+        let c_ms =
+            self.capacity_ms
+                .filter(|&ms| ms > 0)
+                .ok_or(WhisperRealtimeError::ParameterError(
+                    "AudioRingBufferBuilder has zero-length buffer.".to_string(),
+                ))?;
+        let s_rate =
+            self.sample_rate
+                .filter(|&sr| sr > 0)
+                .ok_or(WhisperRealtimeError::ParameterError(
+                    " AudioRingBufferBuilder has zero-size sample rate.".to_string(),
+                ))?;
+
+        let capacity_ms = AtomicUsize::new(c_ms);
+        let buffer_size = ((c_ms as f64 / 1000.) * (s_rate as f64)) as usize;
+        let buffer_len = AtomicUsize::new(buffer_size);
+        let audio_len = AtomicUsize::new(0);
+        let head = AtomicUsize::new(0);
+        let sample_rate = AtomicUsize::new(s_rate);
+        let buffer = Mutex::new(vec![T::default(); buffer_size]);
         let inner = Arc::new(InnerAudioRingBuffer {
             head,
             audio_len,
@@ -51,69 +83,11 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
             buffer,
         });
 
-        Self { inner }
+        Ok(AudioRingBuffer { inner })
     }
-    // Buffer size is in frames. A frame is 1 second @ sample rate in size.
-    pub fn new_with_size(capacity_ms: usize, sample_rate: Option<f64>) -> Option<Self> {
-        if capacity_ms < 1 {
-            return None;
-        }
-        let s_rate = sample_rate.unwrap_or(constants::WHISPER_SAMPLE_RATE);
-        let buffer_size = capacity_ms as f64 / 1000. * s_rate;
-        let buffer_size = buffer_size as usize;
-        let buffer_len = AtomicUsize::new(buffer_size);
-        let head = AtomicUsize::new(0);
-        let audio_len = AtomicUsize::new(0);
-        let capacity_ms = AtomicUsize::new(capacity_ms);
-        let sample_rate = AtomicUsize::new(s_rate as usize);
-        let buffer = Mutex::new(vec![T::default(); buffer_size]);
-        let inner = Arc::new(InnerAudioRingBuffer {
-            head,
-            audio_len,
-            capacity_ms,
-            buffer_len,
-            sample_rate,
-            buffer,
-        });
+}
 
-        Some(Self { inner })
-    }
-
-    pub fn with_capacity_ms(self, capacity_ms: usize) -> Option<Self> {
-        if capacity_ms < 1 {
-            return None;
-        }
-
-        let mut buf = self.get_buffer();
-        self.inner.capacity_ms.store(capacity_ms, Ordering::Release);
-        // Resize the buffer
-        let sample_rate = self.inner.sample_rate.load(Ordering::Acquire);
-        let buffer_size = (capacity_ms as f64 / 1000. * sample_rate as f64) as usize;
-        self.inner.buffer_len.store(buffer_size, Ordering::Release);
-        buf.resize(buffer_size, T::default());
-        drop(buf);
-        Some(self)
-    }
-    pub fn with_sample_rate(self, sample_rate: f64) -> Option<Self> {
-        if sample_rate <= 0.0 {
-            return None;
-        }
-        // Get the buffer.
-        let mut buf = self.get_buffer();
-
-        self.inner
-            .sample_rate
-            .store(sample_rate as usize, Ordering::Release);
-
-        // Resize the buffer
-        let capacity_ms = self.inner.capacity_ms.load(Ordering::Acquire);
-        let buffer_size = (capacity_ms as f64 / 1000. * sample_rate) as usize;
-        self.inner.buffer_len.store(buffer_size, Ordering::Release);
-        buf.resize(buffer_size, T::default());
-        drop(buf);
-        Some(self)
-    }
-
+impl<T: AudioSampleFormat> AudioRingBuffer<T> {
     pub fn audio_len(&self) -> usize {
         self.inner.audio_len.load(Ordering::Acquire)
     }
@@ -129,7 +103,7 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
 
     pub fn push_audio(&self, input: &[T]) {
         let len = input.len();
-        let mut n_samples = len.clone();
+        let mut n_samples = len;
         let mut stream = input.to_vec();
 
         let buffer_len = self.inner.buffer_len.load(Ordering::Acquire);
@@ -140,14 +114,7 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
         }
 
         // Grab the buffer to hold the state before grabbing the head position
-        let buffer = self.inner.buffer.lock();
-        let mut buffer = if let Err(e) = buffer {
-            eprintln!("Buffer mutex poisoned: {}", e);
-            self.inner.buffer.clear_poison();
-            e.into_inner()
-        } else {
-            buffer.unwrap()
-        };
+        let mut buffer = self.inner.buffer.lock();
         let head_pos = self.inner.head.load(Ordering::Acquire);
         if head_pos + n_samples > buffer_len {
             let offset = buffer_len - head_pos;
@@ -199,18 +166,11 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
         }
 
         result.clear();
-
-        let mut n_samples = (ms as f64 * constants::WHISPER_SAMPLE_RATE / 1000f64) as usize;
+        let sample_rate = self.inner.sample_rate.load(Ordering::Acquire);
+        let mut n_samples = (ms as f64 * sample_rate as f64 / 1000f64) as usize;
 
         // Grab the buffer to hold the state before checking the audio length.
         let buffer = self.inner.buffer.lock();
-        let buffer = if let Err(e) = buffer {
-            eprintln!("Buffer is poisoned: {}", e);
-            self.inner.buffer.clear_poison();
-            e.into_inner()
-        } else {
-            buffer.unwrap()
-        };
 
         let audio_len = self.inner.audio_len.load(Ordering::Acquire);
         if n_samples > audio_len {
@@ -273,7 +233,9 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
             ms = this_ms;
         }
 
-        let mut n_samples = (ms as f64 * constants::WHISPER_SAMPLE_RATE / 1000f64) as usize;
+        let sample_rate = self.inner.sample_rate.load(Ordering::Acquire);
+        let mut n_samples = (ms as f64 * sample_rate as f64 / 1000f64) as usize;
+
         let audio_len = self.inner.audio_len.load(Ordering::Acquire);
         if n_samples > audio_len {
             n_samples = audio_len;
@@ -296,18 +258,14 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
         self.inner.audio_len.store(new_len, Ordering::Release);
         self.inner.head.store(start_pos, Ordering::Release);
     }
+}
 
-    fn get_buffer(&self) -> MutexGuard<'_, Vec<T>> {
-        // Get the buffer.
-        let try_guard = self.inner.buffer.lock();
-
-        let buf = if let Err(e) = try_guard {
-            eprintln!("Audio ringbuffer mutex poisoned, {}", e);
-            self.inner.buffer.clear_poison();
-            e.into_inner()
-        } else {
-            try_guard.unwrap()
-        };
-        buf
+impl<T: AudioSampleFormat> Default for AudioRingBuffer<T> {
+    fn default() -> Self {
+        AudioRingBufferBuilder::new()
+            .with_capacity_ms(constants::INPUT_BUFFER_CAPACITY)
+            .with_sample_rate(constants::WHISPER_SAMPLE_RATE as usize)
+            .build()
+            .expect("Default AudioRingbuffer should build without problems.")
     }
 }

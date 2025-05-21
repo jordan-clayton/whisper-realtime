@@ -1,35 +1,248 @@
 use std::io::{stdout, Write};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(not(feature = "crossbeam"))]
-use std::sync::mpsc::{channel, sync_channel};
 use std::thread::scope;
 use std::time::Duration;
 
-#[cfg(feature = "crossbeam")]
-use crossbeam::channel;
 use indicatif::{ProgressBar, ProgressStyle};
+use parking_lot::Mutex;
 use whisper_rs::install_logging_hooks;
 
+use whisper_realtime::audio::{AudioChannelConfiguration, WhisperAudioSample};
 use whisper_realtime::audio::audio_ring_buffer::AudioRingBuffer;
 use whisper_realtime::audio::microphone::AudioBackend;
+use whisper_realtime::downloader::downloaders::sync_download_request;
 #[cfg(feature = "downloader")]
-use whisper_realtime::downloader::request;
-use whisper_realtime::downloader::traits::SyncDownload;
-use whisper_realtime::transcriber::{offline_transcriber, realtime_transcriber};
-use whisper_realtime::transcriber::transcriber::Transcriber;
-use whisper_realtime::utils::callback::ProgressCallback;
+use whisper_realtime::downloader::SyncDownload;
+use whisper_realtime::transcriber::{CallbackTranscriber, WhisperCallbacks, WhisperOutput};
+use whisper_realtime::transcriber::offline_transcriber::OfflineTranscriberBuilder;
+use whisper_realtime::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
+use whisper_realtime::transcriber::Transcriber;
+use whisper_realtime::transcriber::vad::{Earshot, Silero, WebRtc};
+use whisper_realtime::utils;
+use whisper_realtime::utils::callback::{ProgressCallback, StaticProgressCallback};
 use whisper_realtime::utils::constants;
-use whisper_realtime::whisper::{configs, model};
+use whisper_realtime::whisper::configs::WhisperRealtimeConfigs;
+use whisper_realtime::whisper::model;
 use whisper_realtime::whisper::model::Model;
 
-// NOTE: this example will not compile. The transcriber API is mid-refactor.
-// Expect this to be fixed very soon.
-
-// TODO: Fix this implementation; cut down on the imports if at all possible,
-// remove the whisper boilerplate, use the new RealtimeTranscriber
 fn main() {
+    // Get a model; if not already downloaded, this will also download the model.
+    let model = prepare_model();
+    // Set the number of threads according to your hardware;
+    // If you can allocate around 7-8, do so as this tends to be more performant.
+    let configs = WhisperRealtimeConfigs::default()
+        .with_n_threads(8)
+        .with_model(model)
+        // Also, optionally set flash attention.
+        // Generally keep this on for a performance gain.
+        .set_flash_attention(true);
+
+    let audio_ring_buffer = Arc::new(AudioRingBuffer::<f32>::default());
+    let (audio_sender, audio_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
+    let (text_sender, text_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
+
+    // Note: Any VAD<T> + Send can be used. Silero is most accurate but expensive; WebRtc is a good compromise, but can trigger false positives.
+    // It's not an exact science, so YMMV
+    let vad = WebRtc::try_new_whisper_realtime_default()
+        .expect("Earshot realtime VAD expected to build without issue");
+
+    // Transcriber
+    let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<WebRtc>::new()
+        .with_configs(configs.clone())
+        .with_audio_buffer(Arc::clone(&audio_ring_buffer))
+        .with_output_sender(text_sender)
+        .with_voice_activity_detector(vad)
+        .build()
+        .expect("RealtimeTranscriber expected to build without issues.");
+
+    // Optional store + re-transcription.
+    // Get input for stdin.
+    print!("Would you like to store audio and re-transcribe once realtime has finished? y/n: ");
+    stdout().flush().unwrap();
+
+    let mut confirm_re_transcribe = String::new();
+
+    let offline_audio_buffer: Arc<Mutex<Option<Vec<f32>>>> = Arc::new(Mutex::new(None));
+    if let Ok(_) = std::io::stdin().read_line(&mut confirm_re_transcribe) {
+        let confirm = confirm_re_transcribe.trim().to_lowercase();
+        if "y" == confirm {
+            println!("Confirmed. Recording audio.\n");
+            let mut guard = offline_audio_buffer.lock();
+            *guard = Some(vec![])
+        }
+    }
+
+    let t_offline_audio_buffer = Arc::clone(&offline_audio_buffer);
+
+    let run_transcription = Arc::new(AtomicBool::new(true));
+    let c_handler_run_transcription = Arc::clone(&run_transcription);
+
+    // Use CTRL-C to stop the transcription.
+    ctrlc::set_handler(move || {
+        println!("Interrupt received");
+        c_handler_run_transcription.store(false, Ordering::SeqCst);
+    })
+    .expect("failed to set SIGINT handler");
+
+    // Set up the Audio Backend.
+    let audio_backend = AudioBackend::new().expect("Audio backend should build without issue");
+    let mic = audio_backend
+        .build_whisper_default(audio_sender)
+        .expect("Mic handle expected to build without issue.");
+
+    // For displaying in the print thread.
+    let mut text_output_buffer: Vec<String> = vec![];
+
+    let transcriber_thread = scope(|s| {
+        let a_thread_run_transcription = Arc::clone(&run_transcription);
+        let t_thread_run_transcription = Arc::clone(&run_transcription);
+        let p_thread_run_transcription = Arc::clone(&run_transcription);
+
+        // Hide the logging away from stdout
+        install_logging_hooks();
+        mic.resume();
+        // Read data from the AudioBackend and write to the ringbuffer + (optional) static audio
+        let _audio_thread = s.spawn(move || {
+            // Just hog the mutex because there's only one writer.
+            let mut offline_buffer = t_offline_audio_buffer.lock();
+            while a_thread_run_transcription.load(Ordering::Acquire) {
+                match audio_receiver.recv() {
+                    Ok(audio_data) => {
+                        // If the transcriber is not yet loaded, just consume the audio
+                        if !transcriber_handle.ready() {
+                            continue;
+                        }
+                        // Otherwise, fan out to the ring-buffer (for transcrption) and the optional
+                        // offline buffer
+                        audio_ring_buffer.push_audio(&audio_data);
+                        if let Some(buffer) = offline_buffer.as_mut() {
+                            buffer.extend_from_slice(&audio_data);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("RecvError: {}", e);
+                        a_thread_run_transcription.store(false, Ordering::Release);
+                    }
+                }
+            }
+
+            // Drop the guard to release the mutex.
+            drop(offline_buffer)
+        });
+
+        // Move the transcriber off to a thread to handle processing audio
+        let transcription_thread =
+            s.spawn(move || transcriber.process_audio(t_thread_run_transcription));
+
+        // Update the UI with the newly transcribed data
+        let print_thread = s.spawn(move || {
+            while p_thread_run_transcription.load(Ordering::Acquire) {
+                match text_receiver.recv() {
+                    Ok(text) => match text {
+                        // If it's a Continued phrase, check to see if the text_output_buffer is empty
+                        // This clamps to 0, so geting a reference for an empty buffer will return None
+                        WhisperOutput::ContinuedPhrase(text) => {
+                            let last_index = text_output_buffer.len().saturating_sub(1);
+                            match text_output_buffer.get_mut(last_index) {
+                                None => text_output_buffer.push(text),
+                                Some(old_text) => *old_text = text,
+                            }
+                        }
+                        WhisperOutput::FinishedPhrase(text) => {
+                            text_output_buffer.push(text);
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("RecvError: {}", e);
+                        p_thread_run_transcription.store(false, Ordering::Release)
+                    }
+                }
+
+                clear_stdout();
+                println!("Transcription:");
+                for segment in &text_output_buffer {
+                    print!("{}", segment);
+                }
+
+                stdout().flush().expect("Stdout should clear normally.");
+            }
+            text_output_buffer.join("")
+        });
+
+        // Send both outputs for comparison in stdout.
+        (transcription_thread.join(), print_thread.join())
+    });
+
+    mic.pause();
+
+    let transcription = transcriber_thread
+        .0
+        .expect("Transcription thread should not panic.")
+        .expect("Transcription should run properly.");
+    let rt_transcription = transcriber_thread
+        .1
+        .expect("Print thread should not panic.");
+
+    // Comparison
+    clear_stdout();
+    println!("Final Transcription (print thread):");
+    println!("{}", &rt_transcription);
+
+    println!();
+
+    println!("Final Transcription (returned):");
+    println!("{}", &transcription);
+
+    // Offline audio (re) transcription:
+    if let Some(buffer) = offline_audio_buffer.lock().take() {
+        // Use silero to prune out the silence
+        let vad = Silero::try_new_whisper_offline_default()
+            .expect("Silero expected to build with whisper defaults");
+        // Consume the configs into whisper v2 (or reuse)
+        let s_configs = configs.into_whisper_v2_configs();
+        let mut offline_transcriber = OfflineTranscriberBuilder::<Silero>::new()
+            .with_configs(s_configs)
+            .with_audio(WhisperAudioSample::F32(buffer.into_boxed_slice()))
+            .with_channel_configurations(AudioChannelConfiguration::Mono)
+            .with_voice_activity_detector(vad)
+            .build()
+            .expect("OfflineTranscriber expected to build with no issues.");
+
+        // Initiate a progress bar
+        let pb = ProgressBar::new(100);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {percent} ({eta})").unwrap()
+            .progress_chars("#>-")
+        );
+
+        pb.set_message("Transcription Progress: ");
+        let pb_c = pb.clone();
+        pb.enable_steady_tick(Duration::from_millis(10));
+        let run_offline_transcription = Arc::new(AtomicBool::new(true));
+        let progress_closure = move |p| pb_c.set_position(p as u64);
+        let static_progress_callback = StaticProgressCallback::new(progress_closure);
+
+        let callbacks = WhisperCallbacks {
+            progress: Some(static_progress_callback),
+        };
+
+        // TODO: fix callback API: use C API
+        let transcription =
+            offline_transcriber.process_with_callbacks(run_offline_transcription, callbacks);
+        // let transcription = offline_transcriber.process_audio(run_offline_transcription);
+        pb.finish_and_clear();
+        println!("\nOffline re-transcription:");
+        if let Err(e) = &transcription {
+            eprintln!("{}", e);
+            return;
+        }
+        println!("{}", &transcription.unwrap());
+    };
+}
+
+fn prepare_model() -> Model {
     // Download the model.
     let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
 
@@ -40,11 +253,7 @@ fn main() {
         model::DefaultModelType::Small
     };
 
-    let model = Model::new_with_parameters(
-        model_type.as_ref(),
-        model_type.to_file_name(),
-        proj_dir.as_path(),
-    );
+    let model = model_type.to_model_with_path_prefix(proj_dir.as_path());
 
     if !model.exists_in_directory() {
         println!("Downloading model:");
@@ -54,7 +263,7 @@ fn main() {
         let url = model_type.url();
         let client = reqwest::blocking::Client::new();
 
-        let sync_downloader = request::sync_download_request(&client, url.as_str());
+        let sync_downloader = sync_download_request(&client, url.as_str());
         if let Err(e) = sync_downloader.as_ref() {
             eprintln!("{}", e);
         }
@@ -75,276 +284,15 @@ fn main() {
         let progress_callback_closure = move |n: usize| {
             pb_c.set_position(n as u64);
         };
+
         let progress_callback = ProgressCallback::new(progress_callback_closure);
         let mut sync_downloader = sync_downloader.with_progress_callback(progress_callback);
 
-        // File Path:
-        let file_directory = model.model_directory();
-        let file_directory = file_directory.as_path();
-        let file_name = model.model_file_name();
-
-        let download = sync_downloader.download(file_directory, file_name);
+        let download = sync_downloader.download(model.file_path().as_path(), model.file_name());
         assert!(download.is_ok());
-        assert!(model.is_downloaded());
+        assert!(model.exists_in_directory());
     }
-
-    let model = Arc::new(model);
-    let c_model = model.clone();
-
-    // Configs ptr -> This should just be the default.
-    let configs: Arc<configs::WhisperConfigsV1> = Arc::new(configs::WhisperConfigsV1::default());
-    let c_configs = configs.clone();
-
-    // Audio buffer
-    let audio: AudioRingBuffer<f32> =
-        AudioRingBuffer::new_with_size(constants::INPUT_BUFFER_CAPACITY, None)
-            .expect("Audio length needs to be non-zero");
-    let audio_p = Arc::new(audio);
-    let audio_p_mic = audio_p.clone();
-
-    // Input sender
-    #[cfg(not(feature = "crossbeam"))]
-    let (a_sender, a_receiver) = sync_channel(constants::INPUT_BUFFER_CAPACITY);
-    #[cfg(feature = "crossbeam")]
-    let (a_sender, a_receiver) = channel::bounded(constants::INPUT_BUFFER_CAPACITY);
-
-    // Output sender
-    #[cfg(not(feature = "crossbeam"))]
-    let (o_sender, o_receiver) = channel();
-    #[cfg(feature = "crossbeam")]
-    let (o_sender, o_receiver) = channel::unbounded();
-
-    let o_sender_p = o_sender.clone();
-
-    // State flags.
-    let is_running = Arc::new(AtomicBool::new(true));
-    let c_is_running = is_running.clone();
-    let c_is_running_audio_receiver = is_running.clone();
-    let c_is_running_data_receiver = is_running.clone();
-    let c_interrupt_is_running = is_running.clone();
-
-    // Use CTRL-C to stop the transcription.
-    ctrlc::set_handler(move || {
-        println!("Interrupt received");
-        c_interrupt_is_running.store(false, Ordering::SeqCst);
-    })
-    .expect("failed to set SIGINT handler");
-
-    let audio_backend = AudioBackend::new();
-    if let Err(e) = audio_backend.as_ref() {
-        eprintln!("{}", e);
-    }
-
-    let audio_backend = audio_backend.unwrap();
-    let microphone = audio_backend
-        .build_microphone(a_sender)
-        .with_sample_rate(Some(constants::WHISPER_SAMPLE_RATE as i32))
-        .with_num_channels(Some(1))
-        .with_sample_size(Some(1024));
-
-    let mic_stream = microphone.build();
-    if let Err(e) = mic_stream.as_ref() {
-        eprintln!("{}", e);
-    }
-
-    let mic_stream = mic_stream.unwrap();
-
-    // Model params
-    let mut whisper_ctx_params = whisper_rs::WhisperContextParameters::default();
-    whisper_ctx_params.use_gpu = c_configs.use_gpu;
-
-    let model_path = c_model.file_path();
-    let model_path = model_path.as_path();
-    let ctx = whisper_rs::WhisperContext::new_with_params(
-        model_path.to_str().expect("failed to unwrap path"),
-        whisper_ctx_params,
-    )
-    .expect("Failed to load model");
-
-    let mut state = ctx.create_state().expect("failed to create state");
-
-    let mut text_output_buffer: Vec<String> = vec![];
-
-    // Get the VAD strategy.
-    let mut confirm_buffer = String::new();
-
-    // Optional store + re-transcription.
-    // Get input for stdin.
-    print!("Would you like to store audio and re-transcribe once realtime has finished? y/n: ");
-    stdout().flush().unwrap();
-
-    let read_success = std::io::stdin().read_line(&mut confirm_buffer);
-
-    let static_audio_buffer: Option<Vec<f32>> = match read_success {
-        Ok(_) => {
-            confirm_buffer = confirm_buffer.trim().to_lowercase();
-            if confirm_buffer == "y" {
-                println!("Confirmed. Recording audio.\n");
-                Some(vec![])
-            } else {
-                None
-            }
-        }
-        Err(_) => None,
-    };
-
-    let static_audio_buffer_p = Arc::new(Mutex::new(static_audio_buffer));
-    let static_audio_buffer_c = static_audio_buffer_p.clone();
-
-    let transcriber_thread = scope(|s| {
-        // Hide the logging away from stdout
-        install_logging_hooks();
-        mic_stream.resume();
-        let _audio_thread = s.spawn(move || {
-            let mut t_static_audio_buffer = static_audio_buffer_c
-                .lock()
-                .expect("Failed to get audio storage mutex");
-
-            loop {
-                if !c_is_running_audio_receiver.load(Ordering::Acquire) {
-                    break;
-                }
-                let output = a_receiver.recv();
-
-                // Check for RecvError -> No senders
-                match output {
-                    Ok(audio_data) => {
-                        audio_p_mic.push_audio(&audio_data);
-
-                        if let Some(a_vec) = t_static_audio_buffer.as_mut() {
-                            // This might be a borrow problem.
-                            a_vec.extend_from_slice(&audio_data);
-                        }
-                    }
-                    // When there are no more senders, this loop will break.
-                    Err(_e) => {
-                        c_is_running_audio_receiver.store(false, Ordering::SeqCst);
-                        break;
-                    }
-                }
-            }
-        });
-
-        let transcription_thread = s.spawn(move || {
-            let mut transcriber = realtime_transcriber::RealtimeTranscriber::new_with_configs(
-                audio_p, o_sender_p, c_configs, None,
-            );
-            let output = transcriber.process_audio(&mut state, c_is_running, None::<fn(i32)>);
-            output
-        });
-
-        let print_thread = s.spawn(move || {
-            loop {
-                if !c_is_running_data_receiver.load(Ordering::Acquire) {
-                    break;
-                }
-
-                let output = o_receiver.recv();
-
-                // Check for RecvError -> No senders
-                match output {
-                    Ok(op) => match op {
-                        Ok(text_pkg) => {
-                            if text_pkg.1 {
-                                text_output_buffer.push(text_pkg.0);
-                            } else {
-                                let last_index = text_output_buffer.len() - 1;
-                                text_output_buffer[last_index] = text_pkg.0;
-                            }
-                        }
-                        Err(err) => {
-                            eprintln!("{}", err);
-                            c_is_running_data_receiver.store(false, Ordering::SeqCst);
-                        }
-                    },
-                    // When there are no more senders, this loop will break.
-                    Err(e) => {
-                        eprintln!("RecvError: {}", e);
-                        c_is_running_data_receiver.store(false, Ordering::SeqCst);
-                        break;
-                    }
-                }
-                clear_stdout();
-
-                println!("Transcription:");
-                for text_chunk in &text_output_buffer {
-                    print!("{}", text_chunk);
-                }
-                stdout().flush().unwrap();
-            }
-            text_output_buffer.join("").clone()
-        });
-        let tt = transcription_thread.join();
-        let pt = print_thread.join();
-        (tt, pt)
-    });
-
-    mic_stream.pause();
-
-    let transcription = transcriber_thread.0.expect("transcription thread panicked");
-    let rt_transcription = transcriber_thread.1.expect("print thread panicked");
-
-    // Comparison
-
-    clear_stdout();
-    println!("Final Transcription (print thread):");
-    println!("{}", &rt_transcription);
-
-    println!();
-
-    println!("Final Transcription (returned):");
-    println!("{}", &transcription);
-
-    // Static audio transcription:
-
-    let static_audio_buffer = static_audio_buffer_p
-        .lock()
-        .expect("Failed to get static audio mutex");
-
-    if let Some(audio_recording) = static_audio_buffer.to_owned() {
-        let audio_recording = Arc::new(Mutex::new(offline_transcriber::SupportedAudioSample::F32(
-            audio_recording,
-        )));
-        let configs = configs.clone();
-
-        let mut static_transcriber = offline_transcriber::StaticTranscriber::new_with_configs(
-            audio_recording,
-            None,
-            configs,
-            offline_transcriber::SupportedChannels::Mono,
-        );
-
-        // new state for static re-transcription.
-        let mut state = ctx
-            .create_state()
-            .expect("failed to create state for static re-transcription");
-
-        println!("Offline Transcribing...");
-
-        // Initiate a progress bar.
-        let pb = ProgressBar::new(100);
-        pb.set_style(ProgressStyle::default_bar()
-            .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {percent} ({eta})").unwrap()
-            .progress_chars("#>-")
-        );
-
-        pb.set_message("Transcription Progress: ");
-        pb.enable_steady_tick(Duration::from_millis(10));
-
-        let pb_c = pb.clone();
-        let run_transcription = Arc::new(AtomicBool::new(true));
-
-        let output = static_transcriber.process_audio(
-            &mut state,
-            run_transcription,
-            Some(move |p| {
-                pb_c.set_position(p as u64);
-            }),
-        );
-        pb.finish_and_clear();
-        println!("\nOffline re-transcription:");
-        println!("{}", &output);
-    }
+    model
 }
 
 fn clear_stdout() {

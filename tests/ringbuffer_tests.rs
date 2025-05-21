@@ -6,9 +6,7 @@ mod ringbuffer_tests {
     #[test]
     fn test_copy_buffer_lengths() {
         // Full length
-        let ring_buffer: AudioRingBuffer<f32> =
-            AudioRingBuffer::new_with_size(constants::SAMPLE_DURATION, None)
-                .expect("Audio length needs to be non-zero");
+        let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
         let sample_len =
             (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE;
         let sample_len = sample_len as usize;
@@ -19,9 +17,7 @@ mod ringbuffer_tests {
         assert_eq!(ring_buffer.audio_len(), sample_len);
 
         // Half-length
-        let ring_buffer: AudioRingBuffer<f32> =
-            AudioRingBuffer::new_with_size(constants::SAMPLE_DURATION, None)
-                .expect("Audio length needs to be non-zero");
+        let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
         let sample_len =
             (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
         let sample_len = sample_len as usize;
@@ -35,9 +31,7 @@ mod ringbuffer_tests {
 
     #[test]
     fn test_insert_and_get() {
-        let ring_buffer: AudioRingBuffer<f32> =
-            AudioRingBuffer::new_with_size(constants::SAMPLE_DURATION, None)
-                .expect("Audio length should be non-zero");
+        let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
 
         // Insert four seconds of audio data.
         let sample_len = 4f64 * constants::WHISPER_SAMPLE_RATE;
@@ -65,9 +59,7 @@ mod ringbuffer_tests {
     #[test]
     fn test_insert_and_overflow() {
         // Half-length
-        let ring_buffer: AudioRingBuffer<f32> =
-            AudioRingBuffer::new_with_size(constants::SAMPLE_DURATION, None)
-                .expect("Audio length needs to be non-zero");
+        let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
         let sample_len =
             (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
         let sample_len = sample_len as usize;
@@ -87,9 +79,7 @@ mod ringbuffer_tests {
     #[test]
     fn test_wraparound_audio() {
         // Half-length
-        let ring_buffer: AudioRingBuffer<f32> =
-            AudioRingBuffer::new_with_size(constants::SAMPLE_DURATION, None)
-                .expect("Audio length should be non-zero");
+        let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
         // These are 5-second samples
         let sample_len =
             ((constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE) / 2f64;
@@ -136,9 +126,7 @@ mod ringbuffer_tests {
     #[test]
     fn test_get_with_overflow() {
         // Half-length
-        let ring_buffer: AudioRingBuffer<f32> =
-            AudioRingBuffer::new_with_size(constants::SAMPLE_DURATION, None)
-                .expect("Audio length should be non-zero");
+        let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
         let sample_len =
             ((constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE) / 2f64;
         let sample_len = sample_len as usize;
