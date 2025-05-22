@@ -3,7 +3,6 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::scope;
-use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use parking_lot::Mutex;
@@ -19,7 +18,7 @@ use whisper_realtime::transcriber::{CallbackTranscriber, WhisperCallbacks, Whisp
 use whisper_realtime::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use whisper_realtime::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use whisper_realtime::transcriber::Transcriber;
-use whisper_realtime::transcriber::vad::{Earshot, Silero, WebRtc};
+use whisper_realtime::transcriber::vad::{Silero, WebRtc};
 use whisper_realtime::utils;
 use whisper_realtime::utils::callback::{ProgressCallback, StaticProgressCallback};
 use whisper_realtime::utils::constants;
@@ -121,8 +120,7 @@ fn main() {
                             buffer.extend_from_slice(&audio_data);
                         }
                     }
-                    Err(e) => {
-                        eprintln!("RecvError: {}", e);
+                    Err(_) => {
                         a_thread_run_transcription.store(false, Ordering::Release);
                     }
                 }
@@ -154,10 +152,7 @@ fn main() {
                             text_output_buffer.push(text);
                         }
                     },
-                    Err(e) => {
-                        eprintln!("RecvError: {}", e);
-                        p_thread_run_transcription.store(false, Ordering::Release)
-                    }
+                    Err(_) => p_thread_run_transcription.store(false, Ordering::Release),
                 }
 
                 clear_stdout();
@@ -219,19 +214,21 @@ fn main() {
 
         pb.set_message("Transcription Progress: ");
         let pb_c = pb.clone();
-        pb.enable_steady_tick(Duration::from_millis(10));
-        let run_offline_transcription = Arc::new(AtomicBool::new(true));
-        let progress_closure = move |p| pb_c.set_position(p as u64);
+
+        // Reset run_transcription
+        let run_offline_transcription = Arc::clone(&run_transcription);
+        run_offline_transcription.store(true, Ordering::Release);
+        let progress_closure = move |p| {
+            pb_c.set_position(p as u64);
+        };
         let static_progress_callback = StaticProgressCallback::new(progress_closure);
 
         let callbacks = WhisperCallbacks {
             progress: Some(static_progress_callback),
         };
 
-        // TODO: fix callback API: use C API
         let transcription =
             offline_transcriber.process_with_callbacks(run_offline_transcription, callbacks);
-        // let transcription = offline_transcriber.process_audio(run_offline_transcription);
         pb.finish_and_clear();
         println!("\nOffline re-transcription:");
         if let Err(e) = &transcription {

@@ -1,3 +1,4 @@
+// Basic tests to ensure the ring_buffer runs properly and wraparound logic is correct
 #[cfg(test)]
 mod ringbuffer_tests {
     use whisper_realtime::audio::audio_ring_buffer::AudioRingBuffer;

@@ -67,7 +67,7 @@ impl SileroBuilder {
     }
 
     // It's not entirely clear as to what might cause VoiceActivityDetectorBuilder::build() to fail
-    // but this function returns None if the Silero Vad struct fails to build.
+    // but this function returns Err if the Silero Vad struct fails to build.
     pub fn build(self) -> Result<Silero, WhisperRealtimeError> {
         voice_activity_detector::VoiceActivityDetector::builder()
             .sample_rate(self.sample_rate)
@@ -78,7 +78,6 @@ impl SileroBuilder {
                 detection_probability_threshold: self.detection_probability_threshold,
             })
             .map_err(|e| {
-                // TODO: this is not the right type of error; write a proper error to encapsulate the kind of error this is.
                 WhisperRealtimeError::ParameterError(format!(
                     "Failed to build Silero VAD. Error: {}",
                     e
@@ -330,9 +329,7 @@ impl WebRtcBuilder {
             sample_rate: self.sample_rate,
             aggressiveness: self.aggressiveness,
             frame_length_in_ms: self.frame_length.to_ms(),
-            detection_probability_threshold: self.detection_probability_threshold,
-            // TODO: As above with the Silero impl, this requires a proper error member,
-            // ParameterError is inappropriate and should be replaced
+            realtime_detection_probability_threshold: self.detection_probability_threshold,
         })
         .map_err(|_| {
             WhisperRealtimeError::ParameterError(
@@ -352,7 +349,7 @@ impl WebRtcBuilder {
             vad,
             sample_rate: self.sample_rate.to_sample_rate_hz(),
             frame_length_in_ms: self.frame_length.to_ms(),
-            detection_probability_threshold: self.detection_probability_threshold,
+            realtime_detection_probability_threshold: self.detection_probability_threshold,
             prediction_predicate: predicate,
         })
     }
@@ -368,14 +365,12 @@ pub struct WebRtc {
     // This value will always be restricted to either 10ms, 20ms, 30ms as per the Enumeration
     // used in the accompanying builder
     frame_length_in_ms: usize,
-    // TODO: this should probably be renamed to realtime_detection_probability_threshold
-    // This is not used in the offline frame extraction because WebRtc uses aggressiveness
-    detection_probability_threshold: f32,
+    realtime_detection_probability_threshold: f32,
 }
 
 impl WebRtc {
-    pub fn with_detection_probability_threshold(mut self, probability: f32) -> Self {
-        self.detection_probability_threshold = probability;
+    pub fn with_realtime_detection_probability_threshold(mut self, probability: f32) -> Self {
+        self.realtime_detection_probability_threshold = probability;
         self
     }
     /// A "Default" whisper-ready WebRtc configuration
@@ -441,7 +436,7 @@ impl<T: PcmS16Convertible + Copy> VAD<T> for WebRtc {
         // Since WebRtc doesn't allow users to set the "threshold" directly, treat the threshold
         // like a minimum proportion of frames that have to be detected to be considered speech
         let voiced_proportion = (speech_frames.count() as f32) / (total_num_frames as f32);
-        voiced_proportion > self.detection_probability_threshold
+        voiced_proportion > self.realtime_detection_probability_threshold
     }
     fn extract_voiced_frames(&mut self, samples: &[T]) -> Box<[T]> {
         if samples.len() == 0 {
@@ -472,15 +467,13 @@ pub struct Earshot {
     // For dispatching the appropriate method
     sample_rate: usize,
     frame_length_in_ms: usize,
-    // TODO: this should probably be renamed to realtime_detection_probability_threshold
-    // This is not used in the offline frame extraction because WebRtc uses aggressiveness
-    detection_probability_threshold: f32,
+    realtime_detection_probability_threshold: f32,
     prediction_predicate: EarshotPredictionFilterPredicate,
 }
 
 impl Earshot {
-    pub fn with_detection_probability_threshold(mut self, probability: f32) -> Self {
-        self.detection_probability_threshold = probability;
+    pub fn with_realtime_detection_probability_threshold(mut self, probability: f32) -> Self {
+        self.realtime_detection_probability_threshold = probability;
         self
     }
 
@@ -533,7 +526,7 @@ impl<T: PcmS16Convertible + Copy> VAD<T> for Earshot {
         // like a minimum proportion of frames that have to be detected to be considered speech
 
         let voiced_proportion = (speech_frames.count() as f32) / (total_num_frames as f32);
-        voiced_proportion > self.detection_probability_threshold
+        voiced_proportion > self.realtime_detection_probability_threshold
     }
 
     fn extract_voiced_frames(&mut self, samples: &[T]) -> Box<[T]> {

@@ -1,29 +1,19 @@
-use std::ffi::c_void;
-use std::sync::{Arc, LazyLock};
+use std::ffi::{c_int, c_void};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
+use whisper_rs::WhisperProgressCallback;
+
 use crate::audio::{AudioChannelConfiguration, WhisperAudioSample};
 use crate::transcriber::{
-    CallbackTranscriber, Transcriber, WhisperCallbacks, WhisperOutput, WhisperProgressCallback,
+    CallbackTranscriber, OfflineWhisperProgressCallback, Transcriber, WhisperCallbacks,
+    WhisperOutput,
 };
 use crate::transcriber::vad::VAD;
 use crate::utils::errors::WhisperRealtimeError;
 use crate::utils::Sender;
 use crate::whisper::configs::WhisperConfigsV2;
-
-/// NOTE: This will no longer compile. The transcriber trait has changed and this struct requires
-/// re-implementation. Refactoring is still in progress, but expect this to be fixed very soon.
-
-// Workaround for whisper-rs issue #134 -- moving memory in rust causes a segmentation fault
-// in the progress callback.
-// Solution from: https://github.com/thewh1teagle/vibe/blob/main/core/src/transcribe.rs
-// Until this bug is fixed, there is only one single callback point for a progress callback.
-// Thus it is not advised to run multiple OfflineTranscribers across threads with callbacks.
-// TODO: Remove this workaround if the safe functions are calling properly.
-static PROGRESS_CALLBACK: LazyLock<
-    Mutex<Option<Box<dyn WhisperProgressCallback<Argument = i32>>>>,
-> = LazyLock::new(|| Mutex::new(None));
 
 // TODO: proper documentation
 // Note: since audio is implicitly converted to a format understandable by whisper,
@@ -118,6 +108,7 @@ impl<V: VAD<f32>> OfflineTranscriber<V> {
     fn run_transcription(
         &mut self,
         full_params: whisper_rs::FullParams,
+        run_transcription: Arc<AtomicBool>,
     ) -> Result<String, WhisperRealtimeError> {
         let whisper_context_params = self.configs.to_whisper_context_params();
         // Set up a whisper context
@@ -162,8 +153,17 @@ impl<V: VAD<f32>> OfflineTranscriber<V> {
             }
         };
 
-        let _ = whisper_state.full(full_params, &mono_audio)?;
-        // I'm not quite sure what the error conditions are for this to fail
+        if let Err(e) = whisper_state.full(full_params, &mono_audio) {
+            // Only escape early if the transcription is still supposed to be running;
+            // Otherwise, the abort callback fired true, and run_transcription is false - indicating
+            // the user has stopped the transcription.
+            if run_transcription.load(Ordering::Acquire) {
+                return Err(WhisperRealtimeError::WhisperError(e));
+            }
+        }
+
+        // Otherwise, expect the transcription to have been successful; subsequent errors
+        // will bubble up.
         let num_segments = whisper_state.full_n_segments()?;
         let mut text: Vec<String> = vec![];
         text.reserve(num_segments as usize);
@@ -180,7 +180,6 @@ impl<V: VAD<f32>> OfflineTranscriber<V> {
             }
         }
 
-        println!("Finishing transcription.");
         // Clean up the whisper context
         drop(whisper_state);
         drop(ctx);
@@ -196,22 +195,32 @@ impl<V: VAD<f32>> Transcriber for OfflineTranscriber<V> {
         run_transcription: Arc<AtomicBool>,
     ) -> Result<String, WhisperRealtimeError> {
         let confs = Arc::clone(&self.configs);
-
         let mut full_params = confs.to_whisper_full_params();
-        // Set the abort callback -> check and make sure this no longer needs to touch the
-        // legacy extern C callback.
-        let rt = Arc::clone(&run_transcription);
+        // Abort callback
+        let r_transcription = Arc::clone(&run_transcription);
 
-        // Note: the callback to set_abort_callback_safe: true = abort, false = continue running inference
-        full_params.set_abort_callback_safe(move || !rt.load(Ordering::Acquire));
-        self.run_transcription(full_params)
+        // Coerce to a void pointer
+        let a_ptr = Arc::into_raw(r_transcription) as *mut c_void;
+        unsafe {
+            full_params.set_abort_callback_user_data(a_ptr);
+            full_params.set_abort_callback(Some(abort_callback))
+        }
+
+        let res = self.run_transcription(full_params, Arc::clone(&run_transcription));
+
+        // Since the Arc is peeked in the C callback, a_ptr needs to be consumed one last time
+        // to prevent memory leaks.
+        unsafe {
+            let _ = Arc::from_raw(a_ptr);
+        }
+        res
     }
 }
 
 impl<V, P> CallbackTranscriber<P> for OfflineTranscriber<V>
 where
     V: VAD<f32>,
-    P: WhisperProgressCallback,
+    P: OfflineWhisperProgressCallback,
 {
     fn process_with_callbacks(
         &mut self,
@@ -225,45 +234,72 @@ where
 
         let confs = Arc::clone(&self.configs);
         let mut full_params = confs.to_whisper_full_params();
-        // This might segfault, for the same reasons mentioned above in the Transcriber impl
-        // If so, migrate to the unsafe C API
-        // TODO: Migrate to the unsafe C API; the bug is in the closure trampoline.
-        // The closure isn't heap-allocated before being stored in user_data, so it dies when the
-        // stack is deallocated after this function call.
-        // The callback is then heap-allocated and stored (yay, except no), so the addresses aren't
-        // coherent. ie. Use-after-move.
 
-        // As far as I know, it should be possible to use stack-addresses for the callbacks here;
-        // They will outlive the call to WhisperState::full(), so they'll be valid for the duration
-        // that full_params will be.
-        if let Some(mut callback) = maybe_progress_callback {
-            // Set the progress callback
-            full_params.set_progress_callback_safe(move |p| {
-                println!("Calling progress callback");
-                callback.call(p);
-            });
+        // Named stack binding for the progress callback
+        let mut p_callback;
+
+        // Abort callback
+        let r_transcription = Arc::clone(&run_transcription);
+        // Coerce to a void pointer
+        let a_ptr = Arc::into_raw(r_transcription) as *mut c_void;
+
+        let (progress_callback, user_data): (WhisperProgressCallback, *mut c_void) =
+            match maybe_progress_callback {
+                None => (None, std::ptr::null_mut::<c_void>()),
+                Some(cb) => {
+                    p_callback = cb;
+                    (
+                        Some(progress_callback::<P>),
+                        &mut p_callback as *mut P as *mut c_void,
+                    )
+                }
+            };
+        unsafe {
+            full_params.set_progress_callback_user_data(user_data);
+            full_params.set_progress_callback(progress_callback);
+            full_params.set_abort_callback_user_data(a_ptr);
+            full_params.set_abort_callback(Some(abort_callback))
         }
-        let rt = Arc::clone(&run_transcription);
+        let res = self.run_transcription(full_params, Arc::clone(&run_transcription));
+        // Since the Arc is peeked in the C callback, a_ptr needs to be consumed one last time
+        // to prevent memory leaks.
+        unsafe {
+            let _ = Arc::from_raw(a_ptr);
+        }
 
-        full_params.set_abort_callback_safe(move || rt.load(Ordering::Acquire));
-        self.run_transcription(full_params)
+        res
     }
 }
 
-/// This small function runs each time the encoder fires up to check the running state of the
-/// transcriber. Allows a user to deliberately early terminate transcription instead of waiting
-/// for the full audio to be transcribed.
+// C-Callbacks (until "safe" handles are working in whisper-rs)
+// More callbacks will be implemented and exposed as necessary.
 
-// TODO: refactor this to the abort callback, return true when "should abort"
-extern "C" fn check_running_state(
+/// This function gets called at the beginning of each run of the decoder to determine whether to
+/// abort transcription. The function aborts on true.
+/// Since transcription is being controlled by a run_transcription boolean, the transcription
+/// is expected to stop when run_transcription is false.
+/// Internally, this peeks the Arc so that the refcount remains where it is.
+/// Thus, the calling scope must manually consume the arc after this callback is no longer called.
+unsafe extern "C" fn abort_callback(user_data: *mut c_void) -> bool {
+    // Consume the pointer
+    let ptr = Arc::from_raw(user_data as *const AtomicBool);
+    // let arc = Arc::clone(&ptr);
+    let run_transcription = ptr.load(Ordering::Acquire);
+    // Prevent the refcount from decrementing
+    let _ = Arc::into_raw(ptr);
+    !run_transcription
+}
+
+/// This callback gets called in order to forward progress updates from Whisper to a UI.
+/// To guarantee the safety of the C library, whisper_context and whisper_states should
+/// not be mutated.
+/// This function may or may not be called from a multi-threaded context.
+unsafe extern "C" fn progress_callback<PC: OfflineWhisperProgressCallback>(
     _: *mut whisper_rs_sys::whisper_context,
     _: *mut whisper_rs_sys::whisper_state,
+    progress: c_int,
     user_data: *mut c_void,
-) -> bool {
-    unsafe {
-        let run_transcription = AtomicBool::from_ptr(user_data as *mut bool);
-        run_transcription.load(Ordering::Acquire)
-    }
+) {
+    let callback = &mut *(user_data as *mut PC);
+    callback.call(progress);
 }
-
-// TODO: write a C function for set_progress_callback.

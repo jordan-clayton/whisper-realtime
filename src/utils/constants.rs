@@ -20,6 +20,7 @@ pub const AUDIO_BUFFER_SIZE: u16 = 1024;
 // in ms
 pub const AUDIO_SAMPLE_MS: usize = 10000;
 pub const VAD_SAMPLE_MS: usize = 300;
+// TODO: test out whether or not this is/should be here after window logic corrected.
 pub const PHRASE_TIMEOUT: usize = 3000;
 pub const PAUSE_DURATION: u64 = 100;
 pub const MAX_PROMPT_TOKENS: usize = 16384;
@@ -28,7 +29,7 @@ pub const MAX_PROMPT_TOKENS: usize = 16384;
 // This works best when within the range of 0.65-0.80
 // Higher thresholds are prone to false negatives.
 pub const SILERO_VOICE_PROBABILITY_THRESHOLD: f32 = 0.65;
-pub const WEBRTC_VOICE_PROBABILITY_THRESHOLD: f32 = 0.65;
+pub const WEBRTC_VOICE_PROBABILITY_THRESHOLD: f32 = 0.70;
 pub const OFFLINE_VOICE_PROBABILITY_THRESHOLD: f32 = 0.85;
 
 // This is currently only used for testing purposes.

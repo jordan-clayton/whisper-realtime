@@ -66,8 +66,12 @@ mod resampler_test {
     // A successful transcription means the resampling is correct.
     #[test]
     fn test_resample_whisper() {
+        // Punctuation (commas, periods) can sometimes be detected/not-detected based on settings
+        // and the output of the model is nondeterministic.
+        // It does do a good enough job of getting the words, so the transcription is stripped of
+        // punctuation to ensure the outputs match exactly most of the time.
         let expected_transcription =
-            "Mary has many dreams but can't touch Tennessee by way of flight.";
+            "Mary has many dreams but can't touch Tennessee by way of flight";
 
         let audio = load_normalized_audio_file(
             "tests/audio_files/128896__joshenanigans__sentence-recitation.wav",
@@ -102,16 +106,21 @@ mod resampler_test {
         // Transcribe the audio
         let transcription = offline_transcriber
             .process_audio(run_transcription)
-            .expect("Transcription expected to run without issue.");
+            .expect("Transcription expected to run without issue.")
+            .replace(",", "")
+            .replace(".", "");
 
         assert_eq!(transcription, expected_transcription);
     }
 
     #[test]
     fn test_resample_whisper_from_mp3() {
-        // Note: if using greedy search, the comma sometimes doesn't get picked up.
+        // Punctuation (commas, periods) can sometimes be detected/not-detected based on settings
+        // and the output of the model is nondeterministic.
+        // It does do a good enough job of getting the words, so the transcription is stripped of
+        // punctuation to ensure the outputs match exactly most of the time.
         let expected_transcription =
-            "Mary has many dreams but can't touch Tennessee by way of flight.";
+            "Mary has many dreams but can't touch Tennessee by way of flight";
 
         let audio = load_normalized_audio_file("tests/audio_files/test_mp3.mp3", None::<fn(usize)>)
             .unwrap();
@@ -142,7 +151,9 @@ mod resampler_test {
         // Transcribe the audio
         let transcription = offline_transcriber
             .process_audio(run_transcription)
-            .expect("Transcription expected to complete without issue.");
+            .expect("Transcription expected to complete without issue.")
+            .replace(",", "")
+            .replace(".", "");
 
         assert_eq!(transcription, expected_transcription);
     }

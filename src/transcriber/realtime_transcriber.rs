@@ -178,6 +178,7 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
 
             // TODO: fix this; it's not logically correct.
             // The phrase timeout needs to be a separate accumulator mod self.configs.phrase_timeout()
+            // It might suffice to let the phrase_timeout() = audio_sample_len().
             if millis > self.configs.phrase_timeout() as u128 {
                 phrase_finished = true;
             }

@@ -9,8 +9,8 @@ pub mod realtime_transcriber;
 pub mod vad;
 
 // TODO: convenience functions for just one-and-done running offline/realtime transcription
-pub trait WhisperProgressCallback: Callback<Argument = i32> + Send + Sync + 'static {}
-impl<T: Callback<Argument = i32> + Send + Sync + 'static> WhisperProgressCallback for T {}
+pub trait OfflineWhisperProgressCallback: Callback<Argument = i32> + Send + Sync + 'static {}
+impl<T: Callback<Argument = i32> + Send + Sync + 'static> OfflineWhisperProgressCallback for T {}
 
 pub trait Transcriber {
     fn process_audio(
@@ -21,7 +21,7 @@ pub trait Transcriber {
 
 pub trait CallbackTranscriber<P>: Transcriber
 where
-    P: WhisperProgressCallback,
+    P: OfflineWhisperProgressCallback,
 {
     fn process_with_callbacks(
         &mut self,
@@ -35,12 +35,12 @@ where
 /// At the moment, all fields are public; encapsulation is not needed at this time.
 pub struct WhisperCallbacks<P>
 where
-    P: WhisperProgressCallback,
+    P: OfflineWhisperProgressCallback,
 {
     pub progress: Option<P>,
 }
 
-impl<P> WhisperCallbacks<P> where P: WhisperProgressCallback {}
+impl<P> WhisperCallbacks<P> where P: OfflineWhisperProgressCallback {}
 
 pub enum WhisperOutput {
     ContinuedPhrase(String),
