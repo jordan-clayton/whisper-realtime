@@ -13,8 +13,11 @@ use crate::whisper::model::{DefaultModelType, Model};
 /// V2: Current whisper-only configurations.
 /// RealtimeV1: A complete realtime-configuration. Composed of V2 and RealtimeConfigs
 ///
-/// Note: RealtimeConfigs is not included directly; it cannot be used alone for transcription
-///
+/// NOTE: RealtimeConfigs is not included directly; it cannot be used alone for transcription
+/// NOTE: Until WhisperConfigsV2 is stabilized, it is not reccomended to serialize either:
+/// WhisperConfigsV2, WhisperRealtimeConfigs.
+/// Instead, serialize WhisperConfigsV1, clone and consume it to pass into a Transcriber object
+/// as necessary.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
 pub enum Configs {
