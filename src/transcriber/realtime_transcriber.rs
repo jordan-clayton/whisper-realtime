@@ -1,23 +1,17 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use strsim::jaro_winkler;
+
 use crate::audio::audio_ring_buffer::AudioRingBuffer;
-use crate::transcriber::{Transcriber, WhisperOutput};
+use crate::transcriber::{Transcriber, WhisperControlPhrase, WhisperOutput, WhisperSegment};
 use crate::transcriber::vad::VAD;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 use crate::utils::Sender;
 use crate::whisper::configs::WhisperRealtimeConfigs;
-
-// This implementation is a modified port of the whisper.cpp stream example, see:
-// https://github.com/ggerganov/whisper.cpp/tree/master/examples/stream
-// Realtime on CPU has not yet been tested and may or may not be feasible.
-// Building with GPU support is currently recommended.
-
-// NOTE: Consider this to be a prototype application that demonstrates the viability of running
-// whisper transcription Realtime. Expect a reasonable level of competence for the meantime;
-// a better implementation is currently being designed.
 
 pub struct RealtimeTranscriberBuilder<V: VAD<f32> + Send + Sync> {
     configs: Option<WhisperRealtimeConfigs>,
@@ -118,10 +112,18 @@ pub struct RealtimeTranscriber<V: VAD<f32> + Send + Sync> {
 }
 
 impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
-    // TODO: document why run_transcription flag.
-    // Also note: this can be, but probably shouldn't be called synchronously.
-    // It can be called from a main thread, but the data will need to be retrieved on a
-    // separate thread/asynchronously
+    /// This streaming implementation uses a sliding window + VAD + diffing approach to approximate
+    /// a continuous audio file. This will only start transcribing segments when voice is detected.
+    /// Its accuracy isn't bulletproof (and highly depends on the model), but it's reasonably fast
+    /// on average hardware.
+    /// GPU processing is more or less a necessity for running realtime; this will not work well using CPU inference.
+    ///
+    /// This implementation is synchronous and can be run on a single thread--however, due to the
+    /// bounded channel, it is recommended to process in parallel/spawn a worker to drain the data channel
+    ///
+    /// Argument:
+    /// - run_transcription: an atomic state flag so that the transcriber can be terminated from another location
+    /// eg. UI
     fn process_audio(
         &mut self,
         run_transcription: Arc<AtomicBool>,
@@ -133,42 +135,25 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
 
         // For timing the transcription (and timeout)
         let mut total_time = 0u128;
-        // For timing the phrase timeout (to start a new phrase window)
-        let mut phrase_timeout = 0u128;
-        // For collecting the transcribed segments to return a full transcription at the end
-        let mut output_buffer: Vec<String> = vec![];
 
-        // To handle words/phrases somewhat gracefully.
-        // When phrases are detected/assumed to be finished, this will send a WhisperOutput::FinishedPhrase,
-        // to let the UI know to bake the output, until then, updates to the transcription will overwrite
-        // what has been previously collected in attempt accurate to the collected speech.
-        // Since there is no speech before the transcription begins, this has to be true.
-        // TODO: migrate to transcribing at the segment level & dedup instead of using timeouts.
-        let mut previous_phrase_finished = true;
-        let mut start_lowercase = false;
-        // To stem the flow of newlines if/when a pause is detected. If a pause has been detected
-        // and not cleared, just sleep until there's voice again.
-        let mut pause_detected = true;
+        // For collecting the transcribed segments to return a full transcription at the end
+        let mut output_string = String::default();
+        let mut working_set: VecDeque<WhisperSegment> =
+            VecDeque::with_capacity(constants::WORKING_SET_SIZE);
 
         // Set up whisper
         let full_params = self.configs.to_whisper_full_params();
         let whisper_context_params = self.configs.to_whisper_context_params();
+        let file_path_string = self.configs.model().file_path_string()?;
 
-        let ctx = whisper_rs::WhisperContext::new_with_params(
-            self.configs.model().file_path().to_str().ok_or_else(|| {
-                WhisperRealtimeError::ParameterError(format!(
-                    "File, {:?} should be valid utf-8 str",
-                    self.configs.model().file_path()
-                ))
-            })?,
-            whisper_context_params,
-        )?;
+        let ctx =
+            whisper_rs::WhisperContext::new_with_params(&file_path_string, whisper_context_params)?;
 
         let mut whisper_state = ctx.create_state()?;
         self.ready.store(true, Ordering::Release);
         self.output_sender
             .send(WhisperOutput::ControlPhrase(
-                "[START SPEAKING]\n".to_string(),
+                WhisperControlPhrase::StartSpeaking,
             ))
             .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
 
@@ -200,39 +185,12 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
             // Check for voice activity
             let voice_detected = self.vad.voice_detected(&audio_samples);
             if !voice_detected {
-                // Always ensure that the next segment isn't accidentally coerced to lower-case
-                start_lowercase = false;
-
-                // Ensure the next output gets collected and sent to start a new phrase.
-                previous_phrase_finished = true;
-                // Keep the phrase_timeout at 0
-                phrase_timeout = 0;
+                // Drain the dequeue and push to the confirmed output_string
+                let next_output = working_set.drain(..).map(|output| output.text);
+                output_string.extend(next_output);
 
                 // Clear the audio buffer to prevent data incoherence messing up the transcription.
                 self.audio_feed.clear();
-
-                // If the pause has already been detected, don't send a newline
-                // Sleep for a little bit to give the buffer time to fill up
-                if pause_detected {
-                    sleep(Duration::from_millis(constants::PAUSE_DURATION));
-                    continue;
-                }
-
-                // Otherwise, detect the pause, then send a newline.
-                pause_detected = true;
-
-                // Only send a newline if the transcription is mid-transcription
-                // And the previous entry is not a newline character.
-                if !output_buffer.is_empty()
-                    && output_buffer.last().is_some_and(|text| text != "\n")
-                {
-                    output_buffer.push("\n".to_string());
-                    self.output_sender
-                        .send(WhisperOutput::AppendNewPhrase("\n".to_string()))
-                        .map_err(|e| {
-                            WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner())
-                        })?;
-                }
 
                 // Sleep for a little bit to give the buffer time to fill up
                 sleep(Duration::from_millis(constants::PAUSE_DURATION));
@@ -243,8 +201,6 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
             // Update the time (for timeout)
             t_last = t_now;
 
-            // Voice has been detected, finish reading and transcribing
-            pause_detected = false;
             // Read the audio buffer in chunks of audio_sample_len
             self.audio_feed
                 .read_into(self.configs.audio_sample_len_ms(), &mut audio_samples);
@@ -255,78 +211,150 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
                 continue;
             }
 
-            // TODO: modify this to run at the segment level instead of strings.
-            // Things work reasonably well, but this struggles with word boundaries.
-
             // It's not a big deal if there are invalid utf-8 characters
             // Use lossy to just swap it with the replacement character
-            let segments = (0..num_segments)
-                .map(|i| whisper_state.full_get_segment_text_lossy(i))
-                .collect::<Result<Vec<String>, _>>()?;
+            let mut segments = (0..num_segments)
+                .map(|i| {
+                    let text = whisper_state.full_get_segment_text_lossy(i)?;
+                    let start_time = whisper_state.full_get_segment_t0(i)? * 10;
+                    let end_time = whisper_state.full_get_segment_t1(i)? * 10;
+                    Ok(WhisperSegment {
+                        text,
+                        start_time,
+                        end_time,
+                    })
+                })
+                .collect::<Result<Vec<WhisperSegment>, whisper_rs::WhisperError>>()?;
 
-            // Collect the last time diff into the phrase_timeout accumulator
-            phrase_timeout += millis;
-            let push_next_phrase = phrase_timeout > self.configs.audio_sample_len_ms() as u128;
+            // If the working set is empty, push the segments into the working set.
+            // ie. This should only happen on first run.
+            if working_set.is_empty() {
+                working_set.extend(segments.drain(..));
+            }
+            // Otherwise, run the diffing algorithm
+            // This is admittedly a little haphazard, but it seems good enough and can tolerate
+            // long sentences reasonably well. It is likely that a phrase will finish and get detected
+            // by the VAD well before issues are encountered.
+            // There are chances of false negatives (duplicated output), and false positives (clobbering)
 
-            // Join it into a full string and remove "[BLANK_AUDIO], ..."
-            let mut text = segments
-                .join("")
-                .trim()
-                .to_string()
-                .replace(constants::BLANK_AUDIO, "")
-                .replace(constants::ELLIPSIS, "");
+            // In the worst cases, the entire working set can decay, but it is rare and difficult to trigger
+            // because of how whisper works.
+            else {
+                // Run a diff over the last N_SEGMENTS of the working set and the new segments and try
+                // to resolve overlap.
+                let old_segments = working_set.make_contiguous();
+                // Get the tail N_SEGMENTS
+                let old_len = old_segments.len();
+                let tail =
+                    old_segments[old_len.saturating_sub(constants::N_SEGMENTS_DIFF)..].iter_mut();
 
-            if push_next_phrase {
-                start_lowercase = true;
-                let trim_period = text.rfind(".").is_some_and(|index| index == text.len() - 1);
-                // Replace with a space instead of a period.
-                if trim_period {
-                    text.pop();
-                    text.push(' ');
+                let head = segments
+                    .drain(..constants::N_SEGMENTS_DIFF.min(segments.len()))
+                    .collect::<Vec<_>>();
+
+                // Naive approach here, lol.
+                let mut num_swaps = 0;
+
+                for old_segment in tail {
+                    // This might be a little conservative, but it's better to be safe.
+                    // It is expected that if there is a good match, it's 1:1 on each of the timestamps
+                    let mut best_score = 0.0;
+                    let mut best_match = None::<&WhisperSegment>;
+                    // Get the head N_SEGMENTS
+                    for new_segment in &head {
+                        // With the way that segments are being output, it seems to work a little better
+                        // If when comparing timestamps, to match on starting alignment.
+                        // The size of the working set is small enough such that the
+                        let time_gap = (old_segment.start_time - new_segment.start_time).abs();
+                        let old_lower = old_segment.text.to_lowercase();
+                        let new_lower = new_segment.text.to_lowercase();
+                        let similar = jaro_winkler(&old_lower, &new_lower);
+                        // If it's within the same alignment, it's likely for the segments to be
+                        // a match (ie. the audio buffer has recently been cleared, and this is a new window)
+                        // Compare based on similarity to confirm.
+
+                        // If the timestamp is close enough such that it's lower than the epsilon: (10 ms)
+                        // Consider it to be a 1:1 match.
+                        let timestamp_close = time_gap < constants::TIMESTAMP_EPSILON
+                            && similar > constants::DIFF_THRESHOLD_MIN;
+                        let compare_score = if time_gap <= constants::TIMESTAMP_GAP {
+                            timestamp_close || {
+                                if similar >= constants::DIFF_THRESHOLD_MED {
+                                    true
+                                } else if similar >= constants::DIFF_THRESHOLD_LOW {
+                                    best_score < constants::DIFF_THRESHOLD_MED
+                                        || best_match.is_none()
+                                } else if similar > constants::DIFF_THRESHOLD_MIN {
+                                    best_score < constants::DIFF_THRESHOLD_LOW
+                                        || best_match.is_none()
+                                } else {
+                                    false
+                                }
+                            }
+                        } else {
+                            // Otherwise, if it's outside the timestamp gap, only match on likely probability
+                            // High matches indicate close segments (ie. a word/phrase boundary)
+                            if similar >= constants::DIFF_THRESHOLD_HIGH {
+                                true
+                            } else if similar >= constants::DIFF_THRESHOLD_MED {
+                                best_score < constants::DIFF_THRESHOLD_HIGH || best_match.is_none()
+                            } else if similar >= constants::DIFF_THRESHOLD_LOW {
+                                best_score < constants::DIFF_THRESHOLD_MED || best_match.is_none()
+                            } else {
+                                false
+                            }
+                        };
+
+                        if compare_score && similar > best_score {
+                            best_score = similar;
+                            best_match = Some(new_segment);
+                        }
+                    }
+                    if let Some(new_seg) = best_match {
+                        *old_segment = new_seg.clone();
+                        num_swaps += 1;
+                    }
+                }
+
+                // If there are fewer swaps than the number of elements in the head,
+                // Push the remaining elements into the working_set.
+                if num_swaps < head.len() {
+                    working_set.extend(head.into_iter().skip(num_swaps))
                 }
             }
+            // If there are any remaining segments, drain them into the working set.
+            working_set.extend(segments.drain(..));
 
-            // If using less accurate VAD, there's a chance the output transcription is empty
-            // If that's true, don't bother sending anything.
-            if !text.is_empty() {
-                // Make a copy of the new text in the output buffer and send through the message channel
-                if previous_phrase_finished {
-                    // If the phrase timeout gets hit while speaking, the speaker is most likely still mid-sentence
-                    // When a period gets stripped from the end of a segment, that means the next letter should not
-                    // be uppercase
-                    if start_lowercase {
-                        start_lowercase = false;
-                        text = format!(
-                            "{}{}",
-                            text.get(0..1).unwrap_or("").to_lowercase(),
-                            text.get(1..).unwrap_or("")
-                        );
-                    }
-                    output_buffer.push(text.clone());
-                    previous_phrase_finished = false;
-                    self.output_sender
-                        .send(WhisperOutput::AppendNewPhrase(text))
-                } else {
-                    match output_buffer.last_mut() {
-                        None => output_buffer.push(text.clone()),
-                        Some(old_text) => *old_text = text.clone(),
-                    }
-                    self.output_sender
-                        .send(WhisperOutput::ReplaceLastPhrase(text))
-                }
-                .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
+            // Drain the working set when it exceeds its bounded size. It is most likely that the
+            // n segments drained are actually part of the transcription.
+            if working_set.len() > constants::WORKING_SET_SIZE {
+                let next_text = working_set
+                    .drain(
+                        0..working_set
+                            .len()
+                            .saturating_sub(constants::WORKING_SET_SIZE),
+                    )
+                    .map(|segment| segment.text);
+                // Push to the output string.
+                output_string.extend(next_text);
             }
 
-            // If the phrase timeout has been exceeded, reset the accumulator,
-            // mark the phrase as "finished" for the next phrase to start.
-            if push_next_phrase {
-                // Clear the audio buffer, but keep the last KEEP_MS amount of audio to try and
-                // resolve word boundaries.
-                self.audio_feed
-                    .clear_n_samples(self.configs.audio_sample_len_ms());
+            // Send the current transcription as it exists, so that the UI can update
+            if !output_string.is_empty() {
+                self.output_sender
+                    .send(WhisperOutput::ConfirmedTranscription(output_string.clone()))
+                    .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?
+            }
 
-                previous_phrase_finished = true;
-                phrase_timeout = 0;
+            // If there are segments, push them to the UI to update the display.
+            let send_out = working_set
+                .iter()
+                .map(|segment| segment.text.clone())
+                .collect();
+            if !working_set.is_empty() {
+                self.output_sender
+                    .send(WhisperOutput::CurrentSegments(send_out))
+                    .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?
             }
 
             // If the timeout is set to 0, this loop runs infinitely.
@@ -338,7 +366,7 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
             if total_time > self.configs.realtime_timeout() {
                 self.output_sender
                     .send(WhisperOutput::ControlPhrase(
-                        "\n[TRANSCRIPTION TIMEOUT]\n".to_string(),
+                        WhisperControlPhrase::TranscriptionTimeout,
                     ))
                     .map_err(|e| {
                         WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner())
@@ -348,7 +376,7 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
         }
         self.output_sender
             .send(WhisperOutput::ControlPhrase(
-                "\n[END TRANSCRIPTION]\n".to_string(),
+                WhisperControlPhrase::EndTranscription,
             ))
             .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
 
@@ -356,8 +384,12 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
         drop(whisper_state);
         drop(ctx);
 
-        // Strip remaining whitespace
-        Ok(output_buffer.join("").trim().to_string())
+        // Drain the last of the working set.
+        let next_text = working_set.drain(..).map(|segment| segment.text);
+        output_string.extend(next_text);
+
+        // Strip remaining whitespace and return
+        Ok(output_string.trim().to_string())
     }
 }
 

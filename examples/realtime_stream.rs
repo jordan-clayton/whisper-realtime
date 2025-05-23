@@ -14,7 +14,9 @@ use whisper_realtime::audio::microphone::AudioBackend;
 use whisper_realtime::downloader::downloaders::sync_download_request;
 #[cfg(feature = "downloader")]
 use whisper_realtime::downloader::SyncDownload;
-use whisper_realtime::transcriber::{CallbackTranscriber, WhisperCallbacks, WhisperOutput};
+use whisper_realtime::transcriber::{
+    CallbackTranscriber, WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
+};
 use whisper_realtime::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use whisper_realtime::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use whisper_realtime::transcriber::Transcriber;
@@ -93,9 +95,6 @@ fn main() {
         .build_whisper_default(audio_sender)
         .expect("Mic handle expected to build without issue.");
 
-    // For displaying in the print thread.
-    let mut text_output_buffer: Vec<String> = vec![];
-
     let transcriber_thread = scope(|s| {
         let a_thread_run_transcription = Arc::clone(&run_transcription);
         let t_thread_run_transcription = Arc::clone(&run_transcription);
@@ -138,29 +137,21 @@ fn main() {
 
         // Update the UI with the newly transcribed data
         let print_thread = s.spawn(move || {
-            let mut latest_control_message = String::default();
+            let mut latest_control_message = WhisperControlPhrase::GettingReady;
+            let mut latest_confirmed = String::default();
+            let mut latest_segments: Vec<String> = vec![];
             while p_thread_run_transcription.load(Ordering::Acquire) {
                 match text_receiver.recv() {
                     Ok(output) => match output {
-                        // If it's a Continued phrase, check to see if the text_output_buffer is empty
-                        // This clamps to 0, so getting a reference for an empty buffer will return None
-                        WhisperOutput::ReplaceLastPhrase(text) => {
-                            match text_output_buffer.last_mut() {
-                                None => {
-                                    text_output_buffer.push(text);
-                                }
-                                Some(old_text) => {
-                                    *old_text = text;
-                                }
-                            }
+                        // This is the most up-to-date full string transcription
+                        WhisperOutput::ConfirmedTranscription(text) => {
+                            latest_confirmed = text;
                         }
-                        WhisperOutput::AppendNewPhrase(text) => {
-                            text_output_buffer.push(text);
-                        }
+                        WhisperOutput::CurrentSegments(segments) => latest_segments = segments,
 
                         // This will need to be tweaked once ControlPhrases are thought out.
-                        WhisperOutput::ControlPhrase(text) => {
-                            latest_control_message = text;
+                        WhisperOutput::ControlPhrase(message) => {
+                            latest_control_message = message;
                         }
                     },
                     Err(_) => p_thread_run_transcription.store(false, Ordering::Release),
@@ -169,13 +160,20 @@ fn main() {
                 clear_stdout();
                 println!("Latest Control Message: {}\n", latest_control_message);
                 println!("Transcription:\n");
-                for segment in &text_output_buffer {
+                // Print the up-to-date transcription thus far
+                print!("{}", latest_confirmed);
+                // Print the working set of current segments.
+                for segment in latest_segments.iter() {
                     print!("{}", segment);
                 }
 
                 stdout().flush().expect("Stdout should clear normally.");
             }
-            text_output_buffer.join("")
+
+            // Drain the last of the segments into the final string
+            let last_text = latest_segments.drain(..);
+            latest_confirmed.extend(last_text);
+            latest_confirmed
         });
 
         // Send both outputs for comparison in stdout.
@@ -194,7 +192,7 @@ fn main() {
 
     // Comparison
     // clear_stdout();
-    println!("Final Transcription (print thread):");
+    println!("\nFinal Transcription (print thread):");
     println!("{}", &rt_transcription);
 
     println!();

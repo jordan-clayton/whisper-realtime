@@ -111,15 +111,10 @@ impl<V: VAD<f32>> OfflineTranscriber<V> {
         run_transcription: Arc<AtomicBool>,
     ) -> Result<String, WhisperRealtimeError> {
         let whisper_context_params = self.configs.to_whisper_context_params();
+        let file_path_string = self.configs.model().file_path_string()?;
         // Set up a whisper context
-        let ctx = whisper_rs::WhisperContext::new_with_params(
-            self.configs
-                .model()
-                .file_path()
-                .to_str()
-                .expect("File should be a valid utf-8 str"),
-            whisper_context_params,
-        )?;
+        let ctx =
+            whisper_rs::WhisperContext::new_with_params(&file_path_string, whisper_context_params)?;
 
         let mut whisper_state = ctx.create_state()?;
 
@@ -173,10 +168,15 @@ impl<V: VAD<f32>> OfflineTranscriber<V> {
             if let Ok(segment) = whisper_state.full_get_segment_text(i) {
                 text.push(segment.clone());
                 // This function doesn't need to stop if the channel is closed, so just ignore.
-                let _ = self
-                    .sender
-                    .as_ref()
-                    .and_then(|sender| Some(sender.send(WhisperOutput::AppendNewPhrase(segment))));
+                let _ = self.sender.as_ref().and_then(|sender| {
+                    // Since all segments are guaranteed not to overlap (eg. as in realtime), these
+                    // can be sent as single segment strings to the receiver to handle.
+
+                    // NOTE: this is optional because by this time, the full inference has been run
+                    // Sending data out is a little redundant, but can be used in the UI to alert
+                    // the user that the transcription is nearly finished.
+                    Some(sender.send(WhisperOutput::ConfirmedTranscription(segment)))
+                });
             }
         }
 

@@ -8,6 +8,20 @@ pub const N_SAMPLES_KEEP: usize = ((1e-3 * KEEP_MS) * WHISPER_SAMPLE_RATE) as us
 pub const N_SAMPLES_30S: usize = ((1e-3 * 30000.0) * WHISPER_SAMPLE_RATE) as usize;
 
 pub const N_SAMPLES_2S: usize = ((1e-3 * 2000.0) * WHISPER_SAMPLE_RATE) as usize;
+pub const N_SEGMENTS_DIFF: usize = 3;
+pub const WORKING_SET_SIZE: usize = N_SEGMENTS_DIFF * 5;
+
+// Conservatively at 90% match; might need to be shorter/exposed as a parameter
+// Let's test this at a very low threshold to see as to what's going on
+pub const DIFF_THRESHOLD_HIGH: f64 = 0.9;
+pub const DIFF_THRESHOLD_MED: f64 = 0.7;
+pub const DIFF_THRESHOLD_LOW: f64 = 0.50;
+pub const DIFF_THRESHOLD_MIN: f64 = 0.40;
+
+// Conservatively put this at 2 seconds might need to be shorter/exposed as a parameter.
+// It might work better if things are extremely strict
+pub const TIMESTAMP_GAP: i64 = 3000;
+pub const TIMESTAMP_EPSILON: i64 = 10;
 
 // Total length is 10s
 pub const INPUT_BUFFER_CAPACITY: usize = 10000;

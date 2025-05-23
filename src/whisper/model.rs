@@ -13,7 +13,6 @@ use strum::{
     VariantArray, VariantNames,
 };
 
-#[cfg(feature = "integrity")]
 use crate::utils::errors::WhisperRealtimeError;
 #[cfg(feature = "integrity")]
 use crate::whisper::integrity_utils::{
@@ -84,6 +83,17 @@ impl Model {
 
     pub fn file_path(&self) -> PathBuf {
         self.path_prefix.join(&self.file_name)
+    }
+
+    pub fn file_path_string(&self) -> Result<String, WhisperRealtimeError> {
+        let file_path = self.file_path();
+        Ok(file_path
+            .to_str()
+            .ok_or(WhisperRealtimeError::ParameterError(format!(
+                "File Path: {:?} is not a valid utf-8 str",
+                file_path
+            )))?
+            .to_string())
     }
 
     #[cfg(feature = "integrity")]
