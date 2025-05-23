@@ -15,6 +15,10 @@ use crate::whisper::configs::WhisperRealtimeConfigs;
 // Realtime on CPU has not yet been tested and may or may not be feasible.
 // Building with GPU support is currently recommended.
 
+// NOTE: Consider this to be a prototype application that demonstrates the viability of running
+// whisper transcription Realtime. Expect a reasonable level of competence for the meantime;
+// a better implementation is currently being designed.
+
 pub struct RealtimeTranscriberBuilder<V: VAD<f32> + Send + Sync> {
     configs: Option<WhisperRealtimeConfigs>,
     audio_buffer: Option<Arc<AudioRingBuffer<f32>>>,
@@ -139,6 +143,7 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
         // to let the UI know to bake the output, until then, updates to the transcription will overwrite
         // what has been previously collected in attempt accurate to the collected speech.
         // Since there is no speech before the transcription begins, this has to be true.
+        // TODO: migrate to transcribing at the segment level & dedup instead of using timeouts.
         let mut previous_phrase_finished = true;
         let mut start_lowercase = false;
         // To stem the flow of newlines if/when a pause is detected. If a pause has been detected
@@ -249,6 +254,9 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
             if num_segments == 0 {
                 continue;
             }
+
+            // TODO: modify this to run at the segment level instead of strings.
+            // Things work reasonably well, but this struggles with word boundaries.
 
             // It's not a big deal if there are invalid utf-8 characters
             // Use lossy to just swap it with the replacement character
