@@ -122,7 +122,6 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
         &mut self,
         run_transcription: Arc<AtomicBool>,
     ) -> Result<String, WhisperRealtimeError> {
-        // Spawn the thread to run the transcription.
         let mut t_last = Instant::now();
 
         // To collect audio from the ring buffer.
@@ -130,14 +129,18 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
 
         // For timing the transcription (and timeout)
         let mut total_time = 0u128;
+        // For timing the phrase timeout (to start a new phrase window)
+        let mut phrase_timeout = 0u128;
         // For collecting the transcribed segments to return a full transcription at the end
         let mut output_buffer: Vec<String> = vec![];
 
         // To handle words/phrases somewhat gracefully.
         // When phrases are detected/assumed to be finished, this will send a WhisperOutput::FinishedPhrase,
         // to let the UI know to bake the output, until then, updates to the transcription will overwrite
-        // what has been previously collected in attempt accurate to the collected speech
-        let mut phrase_finished = true;
+        // what has been previously collected in attempt accurate to the collected speech.
+        // Since there is no speech before the transcription begins, this has to be true.
+        let mut previous_phrase_finished = true;
+        let mut start_lowercase = false;
         // To stem the flow of newlines if/when a pause is detected. If a pause has been detected
         // and not cleared, just sleep until there's voice again.
         let mut pause_detected = true;
@@ -159,7 +162,7 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
         let mut whisper_state = ctx.create_state()?;
         self.ready.store(true, Ordering::Release);
         self.output_sender
-            .send(WhisperOutput::FinishedPhrase(
+            .send(WhisperOutput::ControlPhrase(
                 "[START SPEAKING]\n".to_string(),
             ))
             .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
@@ -176,19 +179,33 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
                 continue;
             }
 
-            // TODO: fix this; it's not logically correct.
-            // The phrase timeout needs to be a separate accumulator mod self.configs.phrase_timeout()
-            // It might suffice to let the phrase_timeout() = audio_sample_len().
-            if millis > self.configs.phrase_timeout() as u128 {
-                phrase_finished = true;
-            }
-
             self.audio_feed
                 .read_into(self.configs.vad_sample_len(), &mut audio_samples);
+
+            let vad_size = (self.configs.vad_sample_len() as f64 * constants::WHISPER_SAMPLE_RATE
+                / 1000f64) as usize;
+
+            // If the buffer has recently been cleared/there's not enough data to send to the voice detector,
+            // sleep for a little bit longer.
+            if audio_samples.len() < vad_size {
+                sleep(Duration::from_millis(constants::PAUSE_DURATION));
+                continue;
+            }
 
             // Check for voice activity
             let voice_detected = self.vad.voice_detected(&audio_samples);
             if !voice_detected {
+                // Always ensure that the next segment isn't accidentally coerced to lower-case
+                start_lowercase = false;
+
+                // Ensure the next output gets collected and sent to start a new phrase.
+                previous_phrase_finished = true;
+                // Keep the phrase_timeout at 0
+                phrase_timeout = 0;
+
+                // Clear the audio buffer to prevent data incoherence messing up the transcription.
+                self.audio_feed.clear();
+
                 // If the pause has already been detected, don't send a newline
                 // Sleep for a little bit to give the buffer time to fill up
                 if pause_detected {
@@ -198,34 +215,34 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
 
                 // Otherwise, detect the pause, then send a newline.
                 pause_detected = true;
-                //Ensure the next output gets collected and sent.
-                phrase_finished = true;
 
                 // Only send a newline if the transcription is mid-transcription
-                if !output_buffer.is_empty() {
+                // And the previous entry is not a newline character.
+                if !output_buffer.is_empty()
+                    && output_buffer.last().is_some_and(|text| text != "\n")
+                {
                     output_buffer.push("\n".to_string());
                     self.output_sender
-                        .send(WhisperOutput::FinishedPhrase("\n".to_string()))
+                        .send(WhisperOutput::AppendNewPhrase("\n".to_string()))
                         .map_err(|e| {
                             WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner())
                         })?;
                 }
-
-                // Clear the audio buffer to prevent data incoherence messing up the transcription.
-                self.audio_feed.clear();
 
                 // Sleep for a little bit to give the buffer time to fill up
                 sleep(Duration::from_millis(constants::PAUSE_DURATION));
                 // Jump to the next iteration.
                 continue;
             }
+
+            // Update the time (for timeout)
+            t_last = t_now;
+
             // Voice has been detected, finish reading and transcribing
             pause_detected = false;
-            // First, update the time (for timeout/phrase output)
-            t_last = t_now;
-            // Read the buffer again
+            // Read the audio buffer in chunks of audio_sample_len
             self.audio_feed
-                .read_into(self.configs.audio_sample_len(), &mut audio_samples);
+                .read_into(self.configs.audio_sample_len_ms(), &mut audio_samples);
 
             let _ = whisper_state.full(full_params.clone(), &audio_samples)?;
             let num_segments = whisper_state.full_n_segments()?;
@@ -239,24 +256,70 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
                 .map(|i| whisper_state.full_get_segment_text_lossy(i))
                 .collect::<Result<Vec<String>, _>>()?;
 
-            // Join it into a full string
-            let text = segments.join("").trim().to_string();
+            // Collect the last time diff into the phrase_timeout accumulator
+            phrase_timeout += millis;
+            let push_next_phrase = phrase_timeout > self.configs.audio_sample_len_ms() as u128;
 
-            // Make a copy of the new text in the output buffer and send through the message channel
-            if phrase_finished {
-                output_buffer.push(text.clone());
-                phrase_finished = false;
-                self.output_sender.send(WhisperOutput::FinishedPhrase(text))
-            } else {
-                let last_index = output_buffer.len().saturating_sub(1);
-                match output_buffer.get_mut(last_index) {
-                    None => output_buffer.push(text.clone()),
-                    Some(old_text) => *old_text = text.clone(),
+            // Join it into a full string and remove "[BLANK_AUDIO], ..."
+            let mut text = segments
+                .join("")
+                .trim()
+                .to_string()
+                .replace(constants::BLANK_AUDIO, "")
+                .replace(constants::ELLIPSIS, "");
+
+            if push_next_phrase {
+                start_lowercase = true;
+                let trim_period = text.rfind(".").is_some_and(|index| index == text.len() - 1);
+                // Replace with a space instead of a period.
+                if trim_period {
+                    text.pop();
+                    text.push(' ');
                 }
-                self.output_sender
-                    .send(WhisperOutput::ContinuedPhrase(text))
             }
-            .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
+
+            // If using less accurate VAD, there's a chance the output transcription is empty
+            // If that's true, don't bother sending anything.
+            if !text.is_empty() {
+                // Make a copy of the new text in the output buffer and send through the message channel
+                if previous_phrase_finished {
+                    // If the phrase timeout gets hit while speaking, the speaker is most likely still mid-sentence
+                    // When a period gets stripped from the end of a segment, that means the next letter should not
+                    // be uppercase
+                    if start_lowercase {
+                        start_lowercase = false;
+                        text = format!(
+                            "{}{}",
+                            text.get(0..1).unwrap_or("").to_lowercase(),
+                            text.get(1..).unwrap_or("")
+                        );
+                    }
+                    output_buffer.push(text.clone());
+                    previous_phrase_finished = false;
+                    self.output_sender
+                        .send(WhisperOutput::AppendNewPhrase(text))
+                } else {
+                    match output_buffer.last_mut() {
+                        None => output_buffer.push(text.clone()),
+                        Some(old_text) => *old_text = text.clone(),
+                    }
+                    self.output_sender
+                        .send(WhisperOutput::ReplaceLastPhrase(text))
+                }
+                .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
+            }
+
+            // If the phrase timeout has been exceeded, reset the accumulator,
+            // mark the phrase as "finished" for the next phrase to start.
+            if push_next_phrase {
+                // Clear the audio buffer, but keep the last KEEP_MS amount of audio to try and
+                // resolve word boundaries.
+                self.audio_feed
+                    .clear_n_samples(self.configs.audio_sample_len_ms());
+
+                previous_phrase_finished = true;
+                phrase_timeout = 0;
+            }
 
             // If the timeout is set to 0, this loop runs infinitely.
             if self.configs.realtime_timeout() == 0 {
@@ -266,7 +329,7 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
             // Otherwise check for timeout.
             if total_time > self.configs.realtime_timeout() {
                 self.output_sender
-                    .send(WhisperOutput::FinishedPhrase(
+                    .send(WhisperOutput::ControlPhrase(
                         "\n[TRANSCRIPTION TIMEOUT]\n".to_string(),
                     ))
                     .map_err(|e| {
@@ -276,7 +339,7 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
             }
         }
         self.output_sender
-            .send(WhisperOutput::FinishedPhrase(
+            .send(WhisperOutput::ControlPhrase(
                 "\n[END TRANSCRIPTION]\n".to_string(),
             ))
             .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;

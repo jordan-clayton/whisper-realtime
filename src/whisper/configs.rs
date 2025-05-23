@@ -244,7 +244,6 @@ pub struct RealtimeConfigs {
     realtime_timeout: u128,
     audio_sample_len: usize,
     vad_sample_len: usize,
-    phrase_timeout: usize,
 }
 
 impl RealtimeConfigs {
@@ -253,7 +252,6 @@ impl RealtimeConfigs {
             realtime_timeout: 0,
             audio_sample_len: 0,
             vad_sample_len: 0,
-            phrase_timeout: 0,
         }
     }
     pub fn with_realtime_timeout(mut self, realtime_timeout: u128) -> Self {
@@ -268,10 +266,6 @@ impl RealtimeConfigs {
         self.vad_sample_len = len_ms;
         self
     }
-    pub fn with_phrase_timeout(mut self, len_ms: usize) -> Self {
-        self.phrase_timeout = len_ms;
-        self
-    }
     pub fn realtime_timeout(&self) -> u128 {
         self.realtime_timeout
     }
@@ -280,9 +274,6 @@ impl RealtimeConfigs {
     }
     pub fn vad_sample_len(&self) -> usize {
         self.vad_sample_len
-    }
-    pub fn phrase_timeout(&self) -> usize {
-        self.phrase_timeout
     }
 }
 
@@ -295,8 +286,6 @@ impl Default for RealtimeConfigs {
             .with_audio_sample_len(constants::AUDIO_SAMPLE_MS)
             // .3 seconds / 300 ms
             .with_vad_sample_len(constants::VAD_SAMPLE_MS)
-            // 3 seconds / 3000 ms
-            .with_phrase_timeout(constants::PHRASE_TIMEOUT)
     }
 }
 
@@ -396,10 +385,6 @@ impl WhisperRealtimeConfigs {
         self.realtime.vad_sample_len = len_ms;
         self
     }
-    pub fn with_phrase_timeout(mut self, len_ms: usize) -> Self {
-        self.realtime.phrase_timeout = len_ms;
-        self
-    }
 
     // Whisper accessors
     pub fn n_threads(&self) -> usize {
@@ -432,14 +417,11 @@ impl WhisperRealtimeConfigs {
     pub fn realtime_timeout(&self) -> u128 {
         self.realtime.realtime_timeout
     }
-    pub fn audio_sample_len(&self) -> usize {
+    pub fn audio_sample_len_ms(&self) -> usize {
         self.realtime.audio_sample_len
     }
     pub fn vad_sample_len(&self) -> usize {
         self.realtime.vad_sample_len
-    }
-    pub fn phrase_timeout(&self) -> usize {
-        self.realtime.phrase_timeout
     }
 
     pub fn to_whisper_v2_configs(&self) -> &WhisperConfigsV2 {
@@ -467,7 +449,15 @@ impl WhisperRealtimeConfigs {
 impl Default for WhisperRealtimeConfigs {
     fn default() -> Self {
         Self::new()
-            .with_whisper_configs(WhisperConfigsV2::default())
+            .with_whisper_configs(
+                WhisperConfigsV2::default()
+                    // Whisper has trouble if context is maintained for subsequent transcription when
+                    // streaming in realtime (usually resulting in duplicated output hallucinations)
+                    // so context remembering is removed by default
+                    .set_use_no_context(true)
+                    .set_gpu(true)
+                    .set_flash_attention(true),
+            )
             .with_realtime_configs(RealtimeConfigs::default())
     }
 }
@@ -564,6 +554,5 @@ impl WhisperConfigsV1 {
             .with_audio_sample_len(self.audio_sample_ms)
             .with_vad_sample_len(self.vad_sample_ms)
             .with_realtime_timeout(self.realtime_timeout)
-            .with_phrase_timeout(self.phrase_timeout)
     }
 }

@@ -83,6 +83,9 @@ harness = false
 [[bench]]
 name = "vad_benchmark"
 harness = false
+[[bench]]
+name = "realtme_benchmar"
+harness = false
 
 [[example]]
 name = "realtime_stream"

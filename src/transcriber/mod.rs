@@ -43,19 +43,25 @@ where
 impl<P> WhisperCallbacks<P> where P: OfflineWhisperProgressCallback {}
 
 pub enum WhisperOutput {
-    ContinuedPhrase(String),
-    FinishedPhrase(String),
+    ReplaceLastPhrase(String),
+    AppendNewPhrase(String),
+    // TODO: swap this to another Enumeration so that it can be matched for control flow
+    ControlPhrase(String),
 }
 
 impl WhisperOutput {
     pub fn inner(&self) -> &String {
         match self {
-            WhisperOutput::ContinuedPhrase(msg) | WhisperOutput::FinishedPhrase(msg) => msg,
+            WhisperOutput::ReplaceLastPhrase(msg)
+            | WhisperOutput::AppendNewPhrase(msg)
+            | WhisperOutput::ControlPhrase(msg) => msg,
         }
     }
     pub fn into_inner(self) -> String {
         match self {
-            WhisperOutput::ContinuedPhrase(msg) | WhisperOutput::FinishedPhrase(msg) => msg,
+            WhisperOutput::ReplaceLastPhrase(msg)
+            | WhisperOutput::AppendNewPhrase(msg)
+            | WhisperOutput::ControlPhrase(msg) => msg,
         }
     }
 }

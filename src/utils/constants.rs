@@ -1,8 +1,8 @@
-const KEEP_MS: f64 = 200f64;
+const KEEP_MS: f64 = 300f64;
 pub const WHISPER_SAMPLE_RATE: f64 = 16000f64;
 pub const SILERO_CHUNK_SIZE: usize = 512;
 
-// For resolving word-boundaries when not using VAD, and when clearing samples
+// To help with resolving word boundaries.
 pub const N_SAMPLES_KEEP: usize = ((1e-3 * KEEP_MS) * WHISPER_SAMPLE_RATE) as usize;
 
 pub const N_SAMPLES_30S: usize = ((1e-3 * 30000.0) * WHISPER_SAMPLE_RATE) as usize;
@@ -17,11 +17,12 @@ pub const REALTIME_AUDIO_TIMEOUT: u128 = std::time::Duration::new(3600, 0).as_mi
 
 pub const AUDIO_BUFFER_SIZE: u16 = 1024;
 
+pub const BLANK_AUDIO: &str = "[BLANK_AUDIO]";
+pub const ELLIPSIS: &str = "...";
+
 // in ms
 pub const AUDIO_SAMPLE_MS: usize = 10000;
 pub const VAD_SAMPLE_MS: usize = 300;
-// TODO: test out whether or not this is/should be here after window logic corrected.
-pub const PHRASE_TIMEOUT: usize = 3000;
 pub const PAUSE_DURATION: u64 = 100;
 pub const MAX_PROMPT_TOKENS: usize = 16384;
 

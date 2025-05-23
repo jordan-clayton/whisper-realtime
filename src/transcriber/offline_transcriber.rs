@@ -176,16 +176,15 @@ impl<V: VAD<f32>> OfflineTranscriber<V> {
                 let _ = self
                     .sender
                     .as_ref()
-                    .and_then(|sender| Some(sender.send(WhisperOutput::FinishedPhrase(segment))));
+                    .and_then(|sender| Some(sender.send(WhisperOutput::AppendNewPhrase(segment))));
             }
         }
 
         // Clean up the whisper context
         drop(whisper_state);
         drop(ctx);
-        // Return the final transcription
-        // Offline segments are generally longer phrases and should be separated by a newline.
-        Ok(text.join("\n").trim().to_string())
+        // Return the final transcription.
+        Ok(text.join("").trim().to_string())
     }
 }
 

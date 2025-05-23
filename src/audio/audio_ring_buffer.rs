@@ -88,13 +88,20 @@ impl<T: AudioSampleFormat> AudioRingBufferBuilder<T> {
 }
 
 impl<T: AudioSampleFormat> AudioRingBuffer<T> {
-    pub fn audio_len(&self) -> usize {
+    /// The audio length is measured in sizeof(T)
+    pub fn get_audio_length(&self) -> usize {
         self.inner.audio_len.load(Ordering::Acquire)
     }
-    pub fn len_ms(&self) -> usize {
+
+    pub fn get_audio_length_ms(&self) -> usize {
+        let audio_len = self.inner.audio_len.load(Ordering::Acquire) as f64;
+        let sample_rate = self.inner.sample_rate.load(Ordering::Acquire) as f64;
+        ((audio_len * 1000f64) / sample_rate) as usize
+    }
+    pub fn get_capacity_in_ms(&self) -> usize {
         self.inner.capacity_ms.load(Ordering::Acquire)
     }
-    pub fn buffer_len(&self) -> usize {
+    pub fn get_buffer_length(&self) -> usize {
         self.inner.buffer_len.load(Ordering::Acquire)
     }
     pub fn get_head_position(&self) -> usize {
@@ -158,11 +165,10 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
     }
 
     pub fn read_into(&self, len_ms: usize, result: &mut Vec<T>) {
-        let mut ms = len_ms.clone();
+        let mut ms = len_ms;
 
         if ms == 0 {
-            let this_ms = self.inner.capacity_ms.load(Ordering::Acquire);
-            ms = this_ms;
+            ms = self.inner.capacity_ms.load(Ordering::Acquire);
         }
 
         result.clear();
@@ -177,6 +183,10 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
             n_samples = audio_len;
         }
         result.resize(n_samples, T::default());
+        // If n_samples == 0 (ie. the audio buffer has just been cleared).
+        if result.len() == 0 {
+            return;
+        }
 
         let head_pos = self.inner.head.load(Ordering::Acquire);
         let buffer_len = self.inner.buffer_len.load(Ordering::Acquire);
@@ -221,8 +231,8 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
         self.inner.audio_len.store(0, Ordering::SeqCst);
     }
 
-    // Clear the requested amount of audio data, minus a small amount of audio to try and resolve
-    // word boundaries.
+    // Clear the requested amount of audio data from the back of the buffer,
+    // minus a small amount of audio to try and resolve word boundaries.
     // Data is not zeroed out, but it will be overwritten when new samples are added to the buffer.
     pub fn clear_n_samples(&self, len_ms: usize) {
         // Guard the state by hogging the mutex until atomic operations are done
@@ -241,22 +251,8 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
             n_samples = audio_len;
         }
 
-        let head_pos = self.inner.head.load(Ordering::Acquire);
-        let buffer_len = self.inner.buffer_len.load(Ordering::Acquire);
-
-        let mut start_pos: i64 =
-            head_pos as i64 - n_samples as i64 + constants::N_SAMPLES_KEEP as i64;
-
-        if start_pos < 0 {
-            start_pos += buffer_len as i64;
-        }
-
-        let start_pos = start_pos as usize;
-
-        // Move the head back to the start pos and update the length of the audio buffer
         let new_len = audio_len - n_samples + constants::N_SAMPLES_KEEP;
         self.inner.audio_len.store(new_len, Ordering::Release);
-        self.inner.head.store(start_pos, Ordering::Release);
     }
 }
 

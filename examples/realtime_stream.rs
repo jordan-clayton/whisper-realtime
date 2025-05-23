@@ -46,6 +46,8 @@ fn main() {
     // It's not an exact science, so YMMV
     let vad = WebRtc::try_new_whisper_realtime_default()
         .expect("Earshot realtime VAD expected to build without issue");
+    // let vad = Silero::try_new_whisper_realtime_default()
+    //     .expect("Silero Vad expected to build without issue.");
 
     // Transcriber
     let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<WebRtc>::new()
@@ -136,27 +138,37 @@ fn main() {
 
         // Update the UI with the newly transcribed data
         let print_thread = s.spawn(move || {
+            let mut latest_control_message = String::default();
             while p_thread_run_transcription.load(Ordering::Acquire) {
                 match text_receiver.recv() {
-                    Ok(text) => match text {
+                    Ok(output) => match output {
                         // If it's a Continued phrase, check to see if the text_output_buffer is empty
-                        // This clamps to 0, so geting a reference for an empty buffer will return None
-                        WhisperOutput::ContinuedPhrase(text) => {
-                            let last_index = text_output_buffer.len().saturating_sub(1);
-                            match text_output_buffer.get_mut(last_index) {
-                                None => text_output_buffer.push(text),
-                                Some(old_text) => *old_text = text,
+                        // This clamps to 0, so getting a reference for an empty buffer will return None
+                        WhisperOutput::ReplaceLastPhrase(text) => {
+                            match text_output_buffer.last_mut() {
+                                None => {
+                                    text_output_buffer.push(text);
+                                }
+                                Some(old_text) => {
+                                    *old_text = text;
+                                }
                             }
                         }
-                        WhisperOutput::FinishedPhrase(text) => {
+                        WhisperOutput::AppendNewPhrase(text) => {
                             text_output_buffer.push(text);
+                        }
+
+                        // This will need to be tweaked once ControlPhrases are thought out.
+                        WhisperOutput::ControlPhrase(text) => {
+                            latest_control_message = text;
                         }
                     },
                     Err(_) => p_thread_run_transcription.store(false, Ordering::Release),
                 }
 
                 clear_stdout();
-                println!("Transcription:");
+                println!("Latest Control Message: {}\n", latest_control_message);
+                println!("Transcription:\n");
                 for segment in &text_output_buffer {
                     print!("{}", segment);
                 }
@@ -181,7 +193,7 @@ fn main() {
         .expect("Print thread should not panic.");
 
     // Comparison
-    clear_stdout();
+    // clear_stdout();
     println!("Final Transcription (print thread):");
     println!("{}", &rt_transcription);
 
