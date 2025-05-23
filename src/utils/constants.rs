@@ -45,7 +45,7 @@ pub const MAX_PROMPT_TOKENS: usize = 16384;
 // Higher thresholds are prone to false negatives.
 pub const SILERO_VOICE_PROBABILITY_THRESHOLD: f32 = 0.65;
 pub const WEBRTC_VOICE_PROBABILITY_THRESHOLD: f32 = 0.70;
-pub const OFFLINE_VOICE_PROBABILITY_THRESHOLD: f32 = 0.85;
+pub const OFFLINE_VOICE_PROBABILITY_THRESHOLD: f32 = 0.75;
 
 // This is currently only used for testing purposes.
 pub const SAMPLE_DURATION: usize = 10000;

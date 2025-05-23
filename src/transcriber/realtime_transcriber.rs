@@ -142,7 +142,11 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
             VecDeque::with_capacity(constants::WORKING_SET_SIZE);
 
         // Set up whisper
-        let full_params = self.configs.to_whisper_full_params();
+        let mut full_params = self.configs.to_whisper_full_params();
+        // This seems to improve the output
+        // It might be something to consider exposing in the configurations, though it seems
+        // to be something to enforce for realtime
+        full_params.set_single_segment(true);
         let whisper_context_params = self.configs.to_whisper_context_params();
         let file_path_string = self.configs.model().file_path_string()?;
 
@@ -235,9 +239,10 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
             // This is admittedly a little haphazard, but it seems good enough and can tolerate
             // long sentences reasonably well. It is likely that a phrase will finish and get detected
             // by the VAD well before issues are encountered.
-            // There are chances of false negatives (duplicated output), and false positives (clobbering)
+            // There are small chances of false negatives (duplicated output), and false positives (clobbering)
+            // These tend to happen with abnormal speech patterns (extra long sentence length), strange prosody, and the like.
 
-            // In the worst cases, the entire working set can decay, but it is rare and difficult to trigger
+            // In the worst cases, the entire working set can decay, but it is rare and very difficult to trigger
             // because of how whisper works.
             else {
                 // Run a diff over the last N_SEGMENTS of the working set and the new segments and try
@@ -252,16 +257,21 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
                     .drain(..constants::N_SEGMENTS_DIFF.min(segments.len()))
                     .collect::<Vec<_>>();
 
-                // Naive approach here, lol.
-                let mut num_swaps = 0;
+                let mut swap_indices: Vec<_> = vec![];
+                // For collecting swaps
+                swap_indices.reserve(constants::N_SEGMENTS_DIFF);
 
+                // This is Amortized O(1), with an upper bound of constants::N_SEGMENTS_DIFF * constants::N_SEGMENTS_DIFF iterations
+                // In practice this is very unlikely to hit that upper bound.
                 for old_segment in tail {
                     // This might be a little conservative, but it's better to be safe.
                     // It is expected that if there is a good match, it's 1:1 on each of the timestamps
                     let mut best_score = 0.0;
                     let mut best_match = None::<&WhisperSegment>;
+                    // This is out of bounds, but it should always be swapped if there's a best_match
+                    let mut best_index = constants::N_SEGMENTS_DIFF;
                     // Get the head N_SEGMENTS
-                    for new_segment in &head {
+                    for (index, new_segment) in head.iter().enumerate() {
                         // With the way that segments are being output, it seems to work a little better
                         // If when comparing timestamps, to match on starting alignment.
                         // The size of the working set is small enough such that the
@@ -308,18 +318,28 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
                         if compare_score && similar > best_score {
                             best_score = similar;
                             best_match = Some(new_segment);
+                            best_index = index;
                         }
                     }
                     if let Some(new_seg) = best_match {
-                        *old_segment = new_seg.clone();
-                        num_swaps += 1;
+                        // Swap the longer of the two segments in hopes that false positives do not clobber the output
+                        // And also that it is the most semantically correct output. Anticipate and expect a little crunchiness.
+                        if new_seg.text.len() > old_segment.text.len() {
+                            *old_segment = new_seg.clone();
+                        }
+                        assert_ne!(best_index, constants::N_SEGMENTS_DIFF);
+                        swap_indices.push(best_index)
                     }
                 }
 
-                // If there are fewer swaps than the number of elements in the head,
-                // Push the remaining elements into the working_set.
-                if num_swaps < head.len() {
-                    working_set.extend(head.into_iter().skip(num_swaps))
+                // This is Amortized O(1), with an upper bound of constants::N_SEGMENTS_DIFF * constants::N_SEGMENTS_DIFF iterations
+                // In practice this is very unlikely to hit that upper bound.
+                for (index, new_seg) in head.into_iter().enumerate() {
+                    if !swap_indices.contains(&index) {
+                        // If the segment was never swapped in, treat it as a new segment and push it to the output buffer
+                        // It is not impossible for this to break sequence, but it is highly unlikely.
+                        working_set.push_back(new_seg)
+                    }
                 }
             }
             // If there are any remaining segments, drain them into the working set.
@@ -327,6 +347,10 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
 
             // Drain the working set when it exceeds its bounded size. It is most likely that the
             // n segments drained are actually part of the transcription.
+            // It is highly, highly unlikely for this condition to ever trigger, given that VAD are
+            // generally pretty good at detecting pauses.
+            // It is most likely that the working set will get drained beforehand, but this is a
+            // fallback to ensure the working_set is always WORKING_SET_SIZE
             if working_set.len() > constants::WORKING_SET_SIZE {
                 let next_text = working_set
                     .drain(
