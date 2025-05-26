@@ -13,11 +13,15 @@ pub trait AudioSampleFormat: Default + Clone + Copy + AudioFormatNum + 'static {
 impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioSampleFormat for T {}
 
 struct InnerAudioRingBuffer<T: AudioSampleFormat> {
+    // Insertion pointer
     head: AtomicUsize,
+    // The amount of audio within the buffer, in units of sizeof(T)
     audio_len: AtomicUsize,
     capacity_ms: AtomicUsize,
     buffer_len: AtomicUsize,
     sample_rate: AtomicUsize,
+    // If at some point in the future it becomes imperative to support multiple readers, this should
+    // change to an RW lock.
     buffer: Mutex<Vec<T>>,
 }
 

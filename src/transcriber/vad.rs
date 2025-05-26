@@ -391,7 +391,8 @@ impl WebRtc {
     }
 }
 
-// WebRtc is internally guarded as far as I know, the C-API is thread safe.
+// WebRtc is Mutex-protected to adhere to the following thread-safety guarantees made by WebRtc Vad:
+// https://chromium.googlesource.com/external/webrtc/+/0332c2db39d6f5c780ce9e92b850bcb57e24e7f8/webrtc/modules/audio_processing/include/audio_processing.h#197
 unsafe impl Send for WebRtc {}
 unsafe impl Sync for WebRtc {}
 

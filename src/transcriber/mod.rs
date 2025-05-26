@@ -10,7 +10,6 @@ pub mod offline_transcriber;
 pub mod realtime_transcriber;
 pub mod vad;
 
-// TODO: convenience functions for just one-and-done running offline/realtime transcription
 // TODO: finish documenting
 pub trait OfflineWhisperProgressCallback: Callback<Argument = i32> + Send + Sync + 'static {}
 impl<T: Callback<Argument = i32> + Send + Sync + 'static> OfflineWhisperProgressCallback for T {}

@@ -17,7 +17,8 @@ use crate::whisper::configs::WhisperConfigsV2;
 
 // TODO: proper documentation
 // Note: since audio is implicitly converted to a format understandable by whisper,
-// it isn't necessary for the VAD to be generic.
+// it isn't necessary for the VAD's type to be generic.
+// Note twice: The bottleneck for most (if not all) applications will be whisper.
 #[derive(Clone)]
 pub struct OfflineTranscriberBuilder<V>
 where

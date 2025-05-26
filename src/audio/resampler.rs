@@ -12,7 +12,8 @@ use crate::audio::WhisperAudioSample;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
-// This is to restrict the audio to formats supported by rubato.
+/// This is a basic struct to restrict the audio formats to those which are supported by the
+/// resampling API
 pub enum ResampleableAudio<'a> {
     I16(&'a [i16]),
     F32(&'a [f32]),

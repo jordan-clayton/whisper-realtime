@@ -94,6 +94,10 @@ name = "realtime_stream"
 required-features = ["downloader"]
 
 [[test]]
+name = "transcriber_tests"
+required-features = ["_gpu", "resampler"]
+
+[[test]]
 name = "resampler_tests"
 required-features = ["resampler"]
 

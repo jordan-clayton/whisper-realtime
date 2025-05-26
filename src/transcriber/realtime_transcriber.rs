@@ -13,6 +13,9 @@ use crate::utils::errors::WhisperRealtimeError;
 use crate::utils::Sender;
 use crate::whisper::configs::WhisperRealtimeConfigs;
 
+// TODO: documentation
+// NOTE: prefer Silero unless on windows and telemetry is of concern.
+// Whisper will always be the bottleneck.
 pub struct RealtimeTranscriberBuilder<V: VAD<f32> + Send + Sync> {
     configs: Option<WhisperRealtimeConfigs>,
     audio_buffer: Option<Arc<AudioRingBuffer<f32>>>,
@@ -160,24 +163,19 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
                 WhisperControlPhrase::StartSpeaking,
             ))
             .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
-
         while run_transcription.load(Ordering::Acquire) {
             let t_now = Instant::now();
             let diff = t_now - t_last;
             let millis = diff.as_millis();
             total_time += millis;
 
-            // If less than t=vad_sample_len() has passed, sleep for s = 100ms = constants::PAUSE_DURATION
-            if millis < self.configs.vad_sample_len() as u128 {
-                sleep(Duration::from_millis(constants::PAUSE_DURATION));
-                continue;
-            }
-
+            // read_into will return min(requested_len, audio_len)
+            // It will also escape early if the buffer is length 0
             self.audio_feed
                 .read_into(self.configs.vad_sample_len(), &mut audio_samples);
 
-            let vad_size = (self.configs.vad_sample_len() as f64 * constants::WHISPER_SAMPLE_RATE
-                / 1000f64) as usize;
+            let vad_size = (self.configs.vad_sample_len() as f64 / 1000f64
+                * constants::WHISPER_SAMPLE_RATE) as usize;
 
             // If the buffer has recently been cleared/there's not enough data to send to the voice detector,
             // sleep for a little bit longer.
@@ -398,6 +396,7 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
                 run_transcription.store(false, Ordering::Release);
             }
         }
+
         self.output_sender
             .send(WhisperOutput::ControlPhrase(
                 WhisperControlPhrase::EndTranscription,
@@ -412,6 +411,8 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
         let next_text = working_set.drain(..).map(|segment| segment.text);
         output_string.extend(next_text);
 
+        // Set internal state to non-ready in case the transcriber is going to be reused
+        self.ready.store(false, Ordering::Release);
         // Strip remaining whitespace and return
         Ok(output_string.trim().to_string())
     }
