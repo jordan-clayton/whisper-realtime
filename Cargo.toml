@@ -2,8 +2,16 @@
 name = "whisper_realtime"
 version = "0.1.1"
 edition = "2024"
-license = "MIT"
-# TODO LICENSE, DESCRIPTION, DOCS, REPO
+# TODO: Description
+description = ""
+readme = "README.md"
+license = "MIT AND BSD-3 AND MPL-2.0"
+repository = "https://github.com/jordan-clayton/whisper-realtime"
+# TODO: up to 5 kwds
+keywords = []
+# TODO: up to 5 categories
+categories = []
+# TODO DESCRIPTION, REPO, KEYWORDS, ETC. FINISH README
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]

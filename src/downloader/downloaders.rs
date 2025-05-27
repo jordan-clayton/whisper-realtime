@@ -6,9 +6,9 @@ use std::path::Path;
 #[cfg(feature = "downloader-async")]
 use bytes::Bytes;
 #[cfg(feature = "downloader-async")]
-pub use futures::StreamExt;
+use futures::StreamExt;
 #[cfg(feature = "downloader-async")]
-pub use futures_core::stream::Stream;
+use futures_core::stream::Stream;
 use url::Url;
 
 use crate::downloader::{SyncDownload, Writable};

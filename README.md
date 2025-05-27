@@ -36,3 +36,9 @@ This project includes third-party software components:
 - [`earshot`](https://github.com/pykeio/earshot) (BSD-3-Clause)
     - Used for (fallback) voice activity detection
     - See [`LICENSE-BSD-3`](./LICENSE-BSD-3) for the full license.
+
+### Tests
+
+Many of the tests and benchmarks in this project rely on audio files not included as part of the project.
+These will need to be replaced if you wish to run any of the tests. I do not claim any rights to these files
+nor will they ever be distributed; they are for testing purposes only.

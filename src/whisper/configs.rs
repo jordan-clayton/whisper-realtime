@@ -673,7 +673,6 @@ impl Default for WhisperRealtimeConfigs {
 }
 
 // Legacy Implementation
-
 /// Legacy configurations implementation. This is deprecated and will eventually be removed.
 /// Note: voice_probability_threshold has been moved out of configs and into the VAD API.
 /// If this value needs to be preserved, access it publicly, cache it, and store/set appropriately
