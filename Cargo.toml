@@ -5,7 +5,7 @@ edition = "2024"
 # TODO: Description
 description = ""
 readme = "README.md"
-license = "MIT AND BSD-3 AND MPL-2.0"
+license = "MIT"
 repository = "https://github.com/jordan-clayton/whisper-realtime"
 # TODO: up to 5 kwds
 keywords = []
