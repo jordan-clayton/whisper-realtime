@@ -22,7 +22,7 @@ See: Cargo.toml for feature flags to compile with GPU support
 
 ## License
 
-This project is licensed under MIT. See [LICENSE](./LICENSE-MIT).
+This project is licensed under MIT. See [LICENSE](./LICENSE).
 
 ### Third-Party Licenses
 
