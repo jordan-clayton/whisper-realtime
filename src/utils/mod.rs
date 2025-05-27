@@ -12,6 +12,8 @@ pub type Sender<T> = crossbeam::channel::Sender<T>;
 #[cfg(feature = "crossbeam")]
 pub type Receiver<T> = crossbeam::channel::Receiver<T>;
 
+/// Returns the appropriate channel type based on enabled features (crossbeam)
+/// Used for passing audio and text while transcribing
 pub fn get_channel<T>(channel_size: usize) -> (Sender<T>, Receiver<T>) {
     #[cfg(not(feature = "crossbeam"))]
     {

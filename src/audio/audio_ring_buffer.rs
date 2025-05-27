@@ -8,7 +8,7 @@ use sdl2::audio::AudioFormatNum;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
-/// This is a workaround for trait aliasing until nightly moves to stable.
+// This is a workaround for trait aliasing until the feature reaches stable.
 pub trait AudioSampleFormat: Default + Clone + Copy + AudioFormatNum + 'static {}
 impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioSampleFormat for T {}
 
@@ -18,23 +18,27 @@ struct InnerAudioRingBuffer<T: AudioSampleFormat> {
     // The amount of audio within the buffer, in units of sizeof(T)
     audio_len: AtomicUsize,
     capacity_ms: AtomicUsize,
-    buffer_len: AtomicUsize,
+    buffer_capacity: AtomicUsize,
     sample_rate: AtomicUsize,
     // If at some point in the future it becomes imperative to support multiple readers, this should
     // change to an RW lock.
     buffer: Mutex<Vec<T>>,
 }
 
-// TODO: documentation
+/// A thread-safe mpmc ring-buffer designed for use with a RealtimeTranscriber.
+/// Due to thread-safety requirements it cannot be lock-free, but the overhead is negligible
+/// in comparison with actual transcription.
 #[derive(Clone)]
 pub struct AudioRingBuffer<T: AudioSampleFormat> {
     inner: Arc<InnerAudioRingBuffer<T>>,
 }
 
+/// Builder to set the parameters of an AudioRingBuffer
 #[derive(Clone)]
 pub struct AudioRingBufferBuilder<T: AudioSampleFormat> {
-    // Size of the buffer in milliseconds
+    /// Size of the buffer in milliseconds
     capacity_ms: Option<usize>,
+    /// Sample rate of the audio in the buffer
     sample_rate: Option<usize>,
     _marker: PhantomData<T>,
 }
@@ -47,16 +51,20 @@ impl<T: AudioSampleFormat> AudioRingBufferBuilder<T> {
             _marker: PhantomData,
         }
     }
+
+    /// Sets the requested capacity measured in milliseconds
     pub fn with_capacity_ms(mut self, capacity_ms: usize) -> Self {
         self.capacity_ms = Some(capacity_ms);
         self
     }
+    /// Sets the requested sample rate measured in Hz
     pub fn with_sample_rate(mut self, sample_rate: usize) -> Self {
         self.sample_rate = Some(sample_rate);
         self
     }
 
-    // This will fail to build if the length/sample rate are missing or zero.
+    /// Build an AudioRingBuffer with the desired parameters.
+    /// This will return Err if the length/sample rate are missing or zero.
     pub fn build(self) -> Result<AudioRingBuffer<T>, WhisperRealtimeError> {
         let c_ms =
             self.capacity_ms
@@ -82,7 +90,7 @@ impl<T: AudioSampleFormat> AudioRingBufferBuilder<T> {
             head,
             audio_len,
             capacity_ms,
-            buffer_len,
+            buffer_capacity: buffer_len,
             sample_rate,
             buffer,
         });
@@ -92,32 +100,39 @@ impl<T: AudioSampleFormat> AudioRingBufferBuilder<T> {
 }
 
 impl<T: AudioSampleFormat> AudioRingBuffer<T> {
-    /// The audio length is measured in sizeof(T)
+    /// Returns the currently stored audio length measured in units of size_of(T)
     pub fn get_audio_length(&self) -> usize {
         self.inner.audio_len.load(Ordering::Acquire)
     }
 
+    /// Returns the currently stored audio length measured in ms
     pub fn get_audio_length_ms(&self) -> usize {
         let audio_len = self.inner.audio_len.load(Ordering::Acquire) as f64;
         let sample_rate = self.inner.sample_rate.load(Ordering::Acquire) as f64;
         ((audio_len * 1000f64) / sample_rate) as usize
     }
+    /// Returns the ringbuffer capacity measured in milliseconds
     pub fn get_capacity_in_ms(&self) -> usize {
         self.inner.capacity_ms.load(Ordering::Acquire)
     }
-    pub fn get_buffer_length(&self) -> usize {
-        self.inner.buffer_len.load(Ordering::Acquire)
+    /// Returns the ringbuffer capacity measured in size_of(T)
+    pub fn get_capacity(&self) -> usize {
+        self.inner.buffer_capacity.load(Ordering::Acquire)
     }
+    /// returns the current position of the write head
     pub fn get_head_position(&self) -> usize {
         self.inner.head.load(Ordering::Acquire)
     }
 
+    /// Writes the input samples to the buffer.
+    /// NOTE: if the input length exceeds the buffer capacity, only the last n samples are written
+    /// to the buffer, where n = buffer capacity
     pub fn push_audio(&self, input: &[T]) {
         let len = input.len();
         let mut n_samples = len;
         let mut stream = input.to_vec();
 
-        let buffer_len = self.inner.buffer_len.load(Ordering::Acquire);
+        let buffer_len = self.inner.buffer_capacity.load(Ordering::Acquire);
         if n_samples > buffer_len {
             n_samples = buffer_len;
             let new_start = len - n_samples;
@@ -162,12 +177,16 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
         }
     }
 
+    /// Reads min(len_ms, audio length) ms from the buffer and returns the output as Vec<T>
+    /// NOTE: set len_ms to 0 to read the full buffer.
     pub fn read(&self, len_ms: usize) -> Vec<T> {
         let mut buf = vec![];
         self.read_into(len_ms, &mut buf);
         buf
     }
 
+    /// Reads min(len_ms, audio length) ms from the buffer and writes to the provided result vector.
+    /// NOTE: set len_ms to 0 to read the full buffer.
     pub fn read_into(&self, len_ms: usize, result: &mut Vec<T>) {
         let mut ms = len_ms;
 
@@ -193,7 +212,7 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
         }
 
         let head_pos = self.inner.head.load(Ordering::Acquire);
-        let buffer_len = self.inner.buffer_len.load(Ordering::Acquire);
+        let buffer_len = self.inner.buffer_capacity.load(Ordering::Acquire);
 
         let mut start_pos: i64 = head_pos as i64 - n_samples as i64;
 
@@ -225,9 +244,8 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
             copy_buffer.copy_from_slice(stream);
         }
     }
-    // Move the head and update audio length to 0
-    // New data will overwrite old data, and grabbing audio from an empty ringbuffer will just
-    // result in an empty vector
+
+    /// Clears the AudioRingBuffer completely
     pub fn clear(&self) {
         // Guard the state by hogging the mutex until atomic operations are done
         let _buffer = self.inner.buffer.lock();
@@ -235,9 +253,8 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
         self.inner.audio_len.store(0, Ordering::SeqCst);
     }
 
-    // Clear the requested amount of audio data from the back of the buffer,
-    // minus a small amount of audio to try and resolve word boundaries.
-    // Data is not zeroed out, but it will be overwritten when new samples are added to the buffer.
+    /// Clears the requested amount of audio data from the back of the buffer,
+    /// minus a small amount of audio that can be used to try to resolve word boundaries.
     pub fn clear_n_samples(&self, len_ms: usize) {
         // Guard the state by hogging the mutex until atomic operations are done
         let _buffer = self.inner.buffer.lock();
@@ -261,6 +278,7 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
 }
 
 impl<T: AudioSampleFormat> Default for AudioRingBuffer<T> {
+    /// Returns a Whisper-ready AudioRingBuffer, ready for use in a RealtimeTranscriber.
     fn default() -> Self {
         AudioRingBufferBuilder::new()
             .with_capacity_ms(constants::INPUT_BUFFER_CAPACITY)

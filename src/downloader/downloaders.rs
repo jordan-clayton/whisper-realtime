@@ -17,22 +17,25 @@ use crate::downloader::AsyncDownload;
 use crate::utils::callback::{Callback, Nop};
 use crate::utils::errors::WhisperRealtimeError;
 
-/// Streamdownloader is for streaming in downloaded data from a successful request.
-///
-/// Use the progress callback to receive the in-progress total bytes downloaded + written
-/// to the desired file path.
+/// Streams in bytes (asynchrnously) to download data.
+/// Current progress can be obtained by supplying a Callback.
 #[cfg(feature = "downloader-async")]
 pub struct StreamDownloader<
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
     CB: Callback<Argument = usize>,
 > {
+    // Bytestream
     file_stream: S,
+    // Total progress thus far
     progress: usize,
+    // Total download size
     total_size: usize,
+    // Optional progress callback. Default is a Nop
     progress_callback: CB,
 }
 #[cfg(feature = "downloader-async")]
 impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin> StreamDownloader<S, Nop<usize>> {
+    /// Returns a StreamDownloader with the default (NOP) callback
     pub fn new_with_parameters(file_stream: S, total_size: usize) -> Self {
         Self {
             file_stream,
@@ -47,6 +50,7 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin> StreamDownloader<S
 impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argument = usize>>
     StreamDownloader<S, CB>
 {
+    /// Returns a StreamDownloader with a set ProgressCallback
     pub fn new_with_parameters_and_callback(
         file_stream: S,
         total_size: usize,
@@ -59,6 +63,7 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argum
             progress_callback,
         }
     }
+    /// Sets the file stream to be downloaded
     pub fn with_file_stream<S2: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin>(
         self,
         file_stream: S2,
@@ -69,6 +74,8 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argum
             self.progress_callback,
         )
     }
+    /// Sets an optional progress callback.
+    /// To un-set a callback, supply [crate::utils::callback::Nop]
     pub fn with_progress_callback<C: Callback<Argument = usize>>(
         self,
         progress_callback: C,
@@ -79,10 +86,8 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argum
             progress_callback,
         )
     }
-    pub fn with_total_size(mut self, total_size: usize) -> Self {
-        self.total_size = total_size;
-        return self;
-    }
+
+    /// Gets the download's total size
     pub fn total_size(&self) -> usize {
         self.total_size
     }
@@ -98,6 +103,8 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argum
 impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argument = usize>>
     AsyncDownload for StreamDownloader<S, CB>
 {
+    /// Downloads a given file asynchronously to the desired location. Returns Err on I/O failure.
+    /// This function must be awaited and should not be called on a UI thread.
     async fn download(
         &mut self,
         file_directory: &Path,
@@ -128,11 +135,8 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argum
     }
 }
 
-/// SyncDownloader is for making a synchronous copy of a downloaded request to the filesystem.
-/// It does not provide download progress, but will provide write progress.
-///
-/// Use the progress callback to receive the total number of bytes copied per read while copying
-/// the download to the filesystem using download_with_progress()
+/// Downloads a file synchronously (blocking).
+/// Current progress can be obtained by supplying a Callback.
 pub struct SyncDownloader<R: Read, CB: Callback<Argument = usize>> {
     file_stream: R,
     progress: usize,
@@ -141,6 +145,7 @@ pub struct SyncDownloader<R: Read, CB: Callback<Argument = usize>> {
 }
 
 impl<R: Read> SyncDownloader<R, Nop<usize>> {
+    /// Returns a SyncDownloader with the default (NOP) callback
     pub fn new_with_parameters(file_stream: R, total_size: usize) -> Self {
         Self {
             file_stream,
@@ -152,6 +157,7 @@ impl<R: Read> SyncDownloader<R, Nop<usize>> {
 }
 
 impl<R: Read, CB: Callback<Argument = usize>> SyncDownloader<R, CB> {
+    /// Returns a SyncDownloader with the provided optional progress callback.
     pub fn new_with_parameters_and_callback(
         file_stream: R,
         total_size: usize,
@@ -164,6 +170,8 @@ impl<R: Read, CB: Callback<Argument = usize>> SyncDownloader<R, CB> {
             progress_callback,
         }
     }
+
+    /// Sets the file stream.
     pub fn with_file_stream<R2: Read>(self, file_stream: R2) -> SyncDownloader<R2, CB> {
         SyncDownloader::new_with_parameters_and_callback(
             file_stream,
@@ -171,7 +179,8 @@ impl<R: Read, CB: Callback<Argument = usize>> SyncDownloader<R, CB> {
             self.progress_callback,
         )
     }
-
+    /// Sets the (optional) progress callback.
+    /// To un-set the callback, supply a [crate::utils::callback::Nop]
     pub fn with_progress_callback<C: Callback<Argument = usize>>(
         self,
         progress_callback: C,
@@ -182,15 +191,10 @@ impl<R: Read, CB: Callback<Argument = usize>> SyncDownloader<R, CB> {
             progress_callback,
         )
     }
-    pub fn with_total_size(mut self, total_size: usize) -> Self {
-        self.total_size = total_size;
-        self
-    }
+
+    /// Gets the download's total size
     pub fn total_size(&self) -> usize {
         self.total_size
-    }
-    pub fn progress(&self) -> usize {
-        self.progress
     }
 }
 
@@ -210,6 +214,8 @@ impl<R: Read, CB: Callback<Argument = usize>> Read for SyncDownloader<R, CB> {
 impl<R: Read, CB: Callback<Argument = usize>> Writable for SyncDownloader<R, CB> {}
 
 impl<R: Read, CB: Callback<Argument = usize>> SyncDownload for SyncDownloader<R, CB> {
+    /// Downloads a file synchronously to the desired location. Returns Err on I/O failure.
+    /// This will block the calling thread.
     fn download(
         &mut self,
         file_directory: &Path,
@@ -230,20 +236,23 @@ impl<R: Read, CB: Callback<Argument = usize>> SyncDownload for SyncDownloader<R,
     }
 }
 
-/// Returns a StreamDownloader struct encapsulating the request bytestream, progress,
-/// and total response size
-/// Use .with_progress_callback() to set an optional progress callback that operates on the download's
-/// current progress (ie. total bytes downloaded thus far)
-/// This function must be awaited and should not be called on a UI thread.
+/// Returns a StreamDownloader that encapsulates the request bytestream, progress,
+/// and total response size.
+/// Call [crate::downloader::downloaders::StreamDownloader::with_progress_callback] to set an optional callback to receive
+/// updates on the number of bytes downloaded.
+///
+/// NOTE: This function must be awaited and should not be called on a UI thread.
+/// # Returns:
+/// Ok(SyncDownloader) on success, Err on a failure to either send the request or get the content length
 #[cfg(feature = "downloader-async")]
 pub async fn async_download_request(
-    client: &reqwest::Client,
     url: &str,
 ) -> Result<
     StreamDownloader<impl Stream<Item = Result<Bytes, reqwest::Error>>, Nop<usize>>,
     WhisperRealtimeError,
 > {
     let m_url = Url::parse(url)?;
+    let client = reqwest::Client::new();
 
     let res = client.get(m_url).send().await?;
 
@@ -266,18 +275,20 @@ pub async fn async_download_request(
     Ok(StreamDownloader::new_with_parameters(stream, total_size))
 }
 
-/// Returns a SyncDownloader struct encapsulating the downloaded response, progress,
+/// Creates a SyncDownloader that encapsulates the request bytestream, progress,
 /// and total response size.
-/// Use .with_progress_callback() to set an optional progress callback that operates on the download's
-/// current progress (ie. total bytes downloaded thus far)
-/// This is strictly for synchronous downloading and will block the calling thread.
-/// It is recommended to call this function on a separate thread if other work needs to be performed.
+/// Call [crate::downloader::downloaders::SyncDownloader::with_progress_callback] to set an optional callback to receive
+/// updates on the number of bytes downloaded.
+///
+/// NOTE: SyncDownloaders are blocking and thus will block the calling thread.
+/// # Returns:
+/// Ok(SyncDownloader) on success, Err on a failure to either send the request or get the content length
 
 pub fn sync_download_request(
-    client: &reqwest::blocking::Client,
     url: &str,
 ) -> Result<SyncDownloader<impl Read, Nop<usize>>, WhisperRealtimeError> {
     let m_url = Url::parse(url)?;
+    let client = reqwest::blocking::Client::new();
 
     let res = client.get(m_url).send()?;
 

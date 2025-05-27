@@ -40,7 +40,7 @@ mod ringbuffer_tests {
         // This is expected to not panic.
         ring_buffer.push_audio(&mut samples);
         assert_eq!(ring_buffer.get_audio_length(), sample_len);
-        assert_eq!(ring_buffer.get_buffer_length(), sample_len * 2);
+        assert_eq!(ring_buffer.get_capacity(), sample_len * 2);
     }
 
     #[test]
@@ -86,10 +86,7 @@ mod ringbuffer_tests {
         }
 
         // Expect a full buffer
-        assert_eq!(
-            ring_buffer.get_audio_length(),
-            ring_buffer.get_buffer_length()
-        );
+        assert_eq!(ring_buffer.get_audio_length(), ring_buffer.get_capacity());
         // Expect head to be at the midpoint.
         assert_eq!(
             ring_buffer.get_head_position(),
@@ -117,10 +114,7 @@ mod ringbuffer_tests {
         ring_buffer.push_audio(&first_half_samples[0..sample_len / 2]);
 
         // Expect a full buffer
-        assert_eq!(
-            ring_buffer.get_audio_length(),
-            ring_buffer.get_buffer_length()
-        );
+        assert_eq!(ring_buffer.get_audio_length(), ring_buffer.get_capacity());
         // Expect head to be a quarter way in.
         assert_eq!(
             ring_buffer.get_head_position(),

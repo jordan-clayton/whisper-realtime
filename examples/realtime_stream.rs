@@ -29,24 +29,23 @@ use whisper_realtime::whisper::model;
 use whisper_realtime::whisper::model::Model;
 
 fn main() {
-    // Get a model; if not already downloaded, this will also download the model.
+    // Get a model. If not already downloaded, this will also download the model.
     let model = prepare_model();
-    // Set the number of threads according to your hardware;
+    // Set the number of threads according to your hardware.
     // If you can allocate around 7-8, do so as this tends to be more performant.
     let configs = WhisperRealtimeConfigs::default()
         .with_n_threads(8)
         .with_model(model)
         // Also, optionally set flash attention.
-        // Generally keep this on for a performance gain.
+        // (Generally keep this on for a performance gain with gpu processing).
         .set_flash_attention(true);
 
     let audio_ring_buffer = Arc::new(AudioRingBuffer::<f32>::default());
     let (audio_sender, audio_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
     let (text_sender, text_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
 
-    // Note: Any VAD<T> + Send can be used. Silero is most accurate but expensive; WebRtc is a good compromise, but can trigger false positives.
-    // It's not an exact science, so YMMV
-    let vad = WebRtc::try_new_whisper_realtime_default()
+    // Note: Any VAD<T> + Send can be used.
+    let vad = Silero::try_new_whisper_realtime_default()
         .expect("Earshot realtime VAD expected to build without issue");
     // let vad = Silero::try_new_whisper_realtime_default()
     //     .expect("Silero Vad expected to build without issue.");
@@ -102,7 +101,7 @@ fn main() {
 
         // Hide the logging away from stdout
         install_logging_hooks();
-        mic.resume();
+        mic.play();
         // Read data from the AudioBackend and write to the ringbuffer + (optional) static audio
         let _audio_thread = s.spawn(move || {
             // Just hog the mutex because there's only one writer.
@@ -149,7 +148,6 @@ fn main() {
                         }
                         WhisperOutput::CurrentSegments(segments) => latest_segments = segments,
 
-                        // This will need to be tweaked once ControlPhrases are thought out.
                         WhisperOutput::ControlPhrase(message) => {
                             latest_control_message = message;
                         }
@@ -268,9 +266,8 @@ fn prepare_model() -> Model {
 
         // Downloading.
         let url = model_type.url();
-        let client = reqwest::blocking::Client::new();
 
-        let sync_downloader = sync_download_request(&client, url.as_str());
+        let sync_downloader = sync_download_request(url.as_str());
         if let Err(e) = sync_downloader.as_ref() {
             eprintln!("{}", e);
         }

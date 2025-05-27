@@ -5,16 +5,21 @@ use sdl2::audio::{AudioCallback, AudioFormatNum};
 
 use crate::utils::Sender;
 
-/// This is a workaround for trait aliasing until nightly moves to stable.
+// This is a workaround for trait aliasing until the feature reaches stable.
 pub trait RecorderSample: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static {}
 impl<T: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static> RecorderSample for T {}
 
+/// Trait object to manage converting recorded audio into a sendable form across a message channel
+/// For use with [crate::audio::recorder::AudioRecorder]
 pub trait AudioInputAdapter<T: RecorderSample> {
     type SenderOutput: Send + Clone + 'static;
     fn convert(input: &[T]) -> Self::SenderOutput;
 }
+
+/// ZST type object that implements [crate::audio::recorder::AudioInputAdapter] using Vec<T>
 #[derive(Copy, Clone)]
 pub struct UseVec;
+/// ZST type object that implements [crate::audio::recorder::AudioInputAdapter] using Arc<[T]>
 #[derive(Copy, Clone)]
 pub struct UseArc;
 
@@ -24,6 +29,7 @@ impl<T: RecorderSample> AudioInputAdapter<T> for UseVec {
         input.to_vec()
     }
 }
+
 impl<T: RecorderSample> AudioInputAdapter<T> for UseArc {
     type SenderOutput = Arc<[T]>;
     fn convert(input: &[T]) -> Self::SenderOutput {
@@ -31,9 +37,11 @@ impl<T: RecorderSample> AudioInputAdapter<T> for UseArc {
     }
 }
 
-/// AudioRecorder: trait object to be passed to sdl2's AudioSubsystem.
+/// Implements [sdl2::audio::AudioCallback] to handle passing audio across a message channel
+/// to be used in the application.
+/// This does not write directly into a [crate::audio::audio_ring_buffer::AudioRingBuffer], and so this will need to be
+/// handled manually when running realtime transcription. See: examples/realtime_stream.rs.
 ///
-/// Incoming audio data is passed through a message channel to obtain the data elsewhere,
 /// For single-thread prefer UseArc for performance unless vectors are absolutely required.
 /// In multithreaded applications the bottleneck will always be the work done by other threads;
 /// use the sender that suits your needs.

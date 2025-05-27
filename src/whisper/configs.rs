@@ -71,18 +71,24 @@ impl Configs {
 #[derive(Clone, Debug)]
 pub struct WhisperConfigsV2 {
     // Whisper FullParams data
-    // The number of thread s to use for HW decoding.
+    /// The number of threads to use during whisper transcription. Defaults follow [whisper_rs::FullParams::set_n_threads]
     n_threads: std::ffi::c_int,
-    // As a prompt for the decoder, defaults to 16384
+    /// The number of past text tokens to use as a prompt for the decoder. Defaults follow [whisper_rs::FullParams::set_n_max_text_ctx]
     max_past_prompt_tokens: std::ffi::c_int,
+    /// The whisper sampling strategy: Greedy or BeamSearch
     sampling_strategy: WhisperSamplingStrategy,
+    /// Translate the output to the language specified by self::language
     translate: bool,
+    /// The target output language. Set to auto or None to auto-detect. Defaults follow [whisper_rs::FullParams::set_language]
     language: Option<Language>,
-    // Don't use past transcriptions as an initial prompt for the decoder.
+    /// Prevent using previous context as an initial prompt for the decoder.
     use_no_context: bool,
     // Whisper Context data
+    /// The model to use for transcription
     model: Model,
+    /// Use the gpu during transcription
     use_gpu: bool,
+    /// Use flash attention
     flash_attention: bool,
 }
 
@@ -101,76 +107,110 @@ impl WhisperConfigsV2 {
         }
     }
 
+    /// Sets the number of threads. This cannot be zero and will always be set to a minimum of 1 thread.
     pub fn with_n_threads(mut self, num_threads: usize) -> Self {
-        self.n_threads = num_threads as std::ffi::c_int;
+        let threads = num_threads.max(1);
+        self.n_threads = threads as std::ffi::c_int;
         self
     }
+
+    /// Sets the max number of past tokens used to prompt the next decode
     pub fn with_max_past_prompt_tokens(mut self, num_prompt_tokens: usize) -> Self {
         self.max_past_prompt_tokens = num_prompt_tokens as std::ffi::c_int;
         self
     }
+
+    /// Toggles translating to the specified output language
     pub fn set_translate(mut self, set_translate: bool) -> Self {
         self.translate = set_translate;
         self
     }
+
+    /// Sets the output language
     pub fn with_language(mut self, language: Option<Language>) -> Self {
         self.language = language;
         self
     }
+
+    /// Toggles whether to use the gpu to accelerate transcription.
+    /// For realtime applications, this should always be set true.
     pub fn set_gpu(mut self, use_gpu: bool) -> Self {
         self.use_gpu = use_gpu;
         self
     }
+
+    /// Toggles preventing using past context in the decoder.
+    /// For realtime applications, this should always be set true.
     pub fn set_use_no_context(mut self, use_no_context: bool) -> Self {
         self.use_no_context = use_no_context;
         self
     }
+    /// Toggles using flash attention when supported.
+    /// For realtime applications, this should always be set true.
     pub fn set_flash_attention(mut self, flash_attention: bool) -> Self {
         self.flash_attention = flash_attention;
         self
     }
 
+    /// Sets the sampling strategy.
     pub fn with_sampling_strategy(mut self, sampling_strategy: WhisperSamplingStrategy) -> Self {
         self.sampling_strategy = sampling_strategy;
         self
     }
+
+    /// Sets the model.
     pub fn with_model(mut self, model: Model) -> Self {
         self.model = model;
         self
     }
 
+    /// Gets the number of threads used in transcription.
     pub fn n_threads(&self) -> usize {
         self.n_threads as usize
     }
+
+    /// Gets the max number of past tokens used as prompt for the decoder
     pub fn max_past_prompt_tokens(&self) -> usize {
         self.max_past_prompt_tokens as usize
     }
+
+    /// Indicates whether whisper is set to translate the output text to the specified output language
     pub fn translate(&self) -> bool {
         self.translate
     }
+    /// Indicates the selected output language. None = auto = Auto-detect language.
     pub fn language(&self) -> &Option<Language> {
         &self.language
     }
+
+    /// Indicates whether the gpu should be used.
     pub fn using_gpu(&self) -> bool {
         self.use_gpu
     }
+
+    /// Indicates whether past context is used to prompt the decoder.
     pub fn using_no_context(&self) -> bool {
         self.use_no_context
     }
+    /// Indicates whether flash attention is being used
     pub fn using_flash_attention(&self) -> bool {
         self.flash_attention
     }
+
+    /// Gets a reference to the model being used for transcription
     pub fn model(&self) -> &Model {
         &self.model
     }
 
+    /// Consumes the configurations to convert to WhisperRealtime configs
     pub fn into_realtime_v1(self) -> WhisperRealtimeConfigs {
         WhisperRealtimeConfigs::new().with_whisper_configs(self)
     }
 
-    /// For constructing a FullParams object ready to be passed to WhisperState::full()
-    /// Note: these configurations do not cover FullParams in entirety.
-    /// See https://docs.rs/whisper-rs/latest/whisper_rs/struct.FullParams.html and set other fields accordingly.
+    /// Constructs a FullParams object ready to be passed to [whisper_rs::WhisperState::full]
+    /// Note: these configurations do not cover FullParams in entirety
+    /// Features are exposed on an as-needed bases.
+    /// See: [whisper_rs::FullParams] for documentation.
     pub fn to_whisper_full_params(&self) -> whisper_rs::FullParams {
         let mut params = match self.sampling_strategy {
             WhisperSamplingStrategy::Greedy { best_of } => {
@@ -194,7 +234,10 @@ impl WhisperConfigsV2 {
             params.set_language(Some(lang.into()))
         }
         params.set_no_context(self.use_no_context);
-        // Explicitly disable printing to stdout; these features are considered to be opt-in.
+        // Explicitly disable printing to stdout
+        // These are considered to be unnecessary features and are unlikely to be exposed.
+        // Progress can be obtained via the callback API
+        // Timestamps will be added to offline transcription when needed.
         params.set_print_realtime(false);
         params.set_print_progress(false);
         params.set_print_special(false);
@@ -202,6 +245,7 @@ impl WhisperConfigsV2 {
         params
     }
 
+    /// Constructs a WhisperContextParameters object used to build [whisper_rs::WhisperContext]
     pub fn to_whisper_context_params(&self) -> whisper_rs::WhisperContextParameters {
         let mut params = whisper_rs::WhisperContextParameters::default();
         params.use_gpu(self.use_gpu);
@@ -227,6 +271,7 @@ impl Default for WhisperConfigsV2 {
     }
 }
 
+/// Encapsulates the whisper sampling strategy.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Copy, Clone, Debug)]
 pub enum WhisperSamplingStrategy {
@@ -234,13 +279,11 @@ pub enum WhisperSamplingStrategy {
     BeamSearch { beam_size: usize, patience: f32 },
 }
 
-/// A configurations component that holds relevant configurations for tweaking realtime transcription.
+/// Encapsulates relevant configurations for tweaking realtime transcription.
 /// All timeouts/audio lengths are measured in milliseconds
-/// VAD configurations should be handled at the application level.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Copy, Clone, Debug)]
 pub struct RealtimeConfigs {
-    // in Milliseconds.
     realtime_timeout: u128,
     audio_sample_len: usize,
     vad_sample_len: usize,
@@ -254,24 +297,32 @@ impl RealtimeConfigs {
             vad_sample_len: 0,
         }
     }
+    /// Sets the realtime timeout. Set to 0 for "Infinite"
     pub fn with_realtime_timeout(mut self, realtime_timeout: u128) -> Self {
         self.realtime_timeout = realtime_timeout;
         self
     }
+    /// Sets the size of the audio sampling window. Defaults to 10 seconds (10 000 ms).
     pub fn with_audio_sample_len(mut self, len_ms: usize) -> Self {
         self.audio_sample_len = len_ms;
         self
     }
+    /// Sets the size of the voice-detection sampling window. Defaults to 300ms.
     pub fn with_vad_sample_len(mut self, len_ms: usize) -> Self {
         self.vad_sample_len = len_ms;
         self
     }
+
+    /// Gets the realtime timeout.
     pub fn realtime_timeout(&self) -> u128 {
         self.realtime_timeout
     }
+
+    /// Gets the audio sampling window size.
     pub fn audio_sample_len(&self) -> usize {
         self.audio_sample_len
     }
+    /// Gets the voice-detection sampling window size.
     pub fn vad_sample_len(&self) -> usize {
         self.vad_sample_len
     }
@@ -289,6 +340,8 @@ impl Default for RealtimeConfigs {
     }
 }
 
+/// A Serializable enumeration that maps to ISO-639-1 format.
+/// For use in [crate::whisper::configs::WhisperConfigsV2]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(
     Copy,
@@ -304,6 +357,8 @@ impl Default for RealtimeConfigs {
 )]
 #[strum(serialize_all = "lowercase")]
 pub enum Language {
+    /// Automatically detect language
+    Auto,
     En,
     Zh,
     De,
@@ -424,121 +479,178 @@ impl WhisperRealtimeConfigs {
     }
 
     // Convenience builder delegates
+    /// Sets the whisper configurations.
     pub fn with_whisper_configs(mut self, w_configs: WhisperConfigsV2) -> Self {
         self.whisper = w_configs;
         self
     }
+    /// Sets the realtime configurations.
     pub fn with_realtime_configs(mut self, r_configs: RealtimeConfigs) -> Self {
         self.realtime = r_configs;
         self
     }
 
+    /// Sets the number of threads. This cannot be zero and will always be set to a minimum of 1 thread.
     pub fn with_n_threads(mut self, num_threads: usize) -> Self {
-        self.whisper.n_threads = num_threads as std::ffi::c_int;
+        let threads = num_threads.max(1);
+        self.whisper.n_threads = threads as std::ffi::c_int;
         self
     }
+
+    /// Sets the max number of past tokens used to prompt the next decode
     pub fn with_max_past_prompt_tokens(mut self, num_prompt_tokens: usize) -> Self {
         self.whisper.max_past_prompt_tokens = num_prompt_tokens as std::ffi::c_int;
         self
     }
+    /// Toggles translating to the specified output language
     pub fn set_translate(mut self, set_translate: bool) -> Self {
         self.whisper.translate = set_translate;
         self
     }
+
+    /// Sets the output language
     pub fn with_language(mut self, language: Option<Language>) -> Self {
         self.whisper.language = language;
         self
     }
+
+    /// Toggles whether to use the gpu to accelerate transcription.
+    /// For realtime applications, this should always be set true.
     pub fn set_gpu(mut self, use_gpu: bool) -> Self {
         self.whisper.use_gpu = use_gpu;
         self
     }
+    /// Toggles preventing using past context in the decoder.
+    /// For realtime applications, this should always be set true.
     pub fn set_use_no_context(mut self, use_no_context: bool) -> Self {
         self.whisper.use_no_context = use_no_context;
         self
     }
+
+    /// Toggles using flash attention when supported.
+    /// For realtime applications, this should always be set true.
     pub fn set_flash_attention(mut self, flash_attention: bool) -> Self {
         self.whisper.flash_attention = flash_attention;
         self
     }
 
+    /// Sets the sampling strategy.
     pub fn with_sampling_strategy(mut self, sampling_strategy: WhisperSamplingStrategy) -> Self {
         self.whisper.sampling_strategy = sampling_strategy;
         self
     }
+
+    /// Sets the model.
     pub fn with_model(mut self, model: Model) -> Self {
         self.whisper.model = model;
         self
     }
 
+    /// Sets the model.
     pub fn with_realtime_timeout(mut self, realtime_timeout: u128) -> Self {
         self.realtime.realtime_timeout = realtime_timeout;
         self
     }
+
+    /// Sets the size of the audio sampling window (in ms). Defaults to 10 seconds (10 000 ms).
     pub fn with_audio_sample_len(mut self, len_ms: usize) -> Self {
         self.realtime.audio_sample_len = len_ms;
         self
     }
+    /// Sets the size of the voice-detection sampling window (in ms). Defaults to 300ms.
     pub fn with_vad_sample_len(mut self, len_ms: usize) -> Self {
         self.realtime.vad_sample_len = len_ms;
         self
     }
 
     // Whisper accessors
+    /// Gets the number of threads used in transcription.
     pub fn n_threads(&self) -> usize {
         self.whisper.n_threads as usize
     }
 
+    /// Gets the max number of past tokens used as prompt for the decoder
     pub fn max_past_prompt_tokens(&self) -> usize {
         self.whisper.max_past_prompt_tokens as usize
     }
+
+    /// Indicates whether whisper is set to translate the output text to the specified output language
     pub fn translate(&self) -> bool {
         self.whisper.translate
     }
+
+    /// Indicates the selected output language. None = auto = Auto-detect language.
     pub fn language(&self) -> &Option<Language> {
         &self.whisper.language
     }
+
+    /// Indicates whether the gpu should be used.
     pub fn using_gpu(&self) -> bool {
         self.whisper.use_gpu
     }
+    /// Indicates whether past context is used to prompt the decoder.
     pub fn using_no_context(&self) -> bool {
         self.whisper.use_no_context
     }
+    /// Indicates whether flash attention is being used
     pub fn using_flash_attention(&self) -> bool {
         self.whisper.flash_attention
     }
+
+    /// Gets a reference to the model being used for transcription
     pub fn model(&self) -> &Model {
         &self.whisper.model
     }
 
     // Realtime Accessors
+    /// Gets the realtime timeout (in ms).
     pub fn realtime_timeout(&self) -> u128 {
         self.realtime.realtime_timeout
     }
+
+    /// Gets the audio sampling window size (in ms).
     pub fn audio_sample_len_ms(&self) -> usize {
         self.realtime.audio_sample_len
     }
+
+    /// Gets the voice-detection sampling window size (in ms).
     pub fn vad_sample_len(&self) -> usize {
         self.realtime.vad_sample_len
     }
 
+    /// Gets the inner WhisperConfigsV2
     pub fn to_whisper_v2_configs(&self) -> &WhisperConfigsV2 {
         &self.whisper
     }
+
+    /// Gets the inner RealtimeConfigs
     pub fn to_realtime_configs(&self) -> &RealtimeConfigs {
         &self.realtime
     }
+
+    /// Consumes this object and converts to WhisperConfigsV2
     pub fn into_whisper_v2_configs(self) -> WhisperConfigsV2 {
         self.whisper
     }
 
+    /// Consumes this object and converts to RealtimeConfigs
     pub fn into_realtime_configs(self) -> RealtimeConfigs {
         self.realtime
     }
 
+    /// Constructs a FullParams object ready to be passed to [whisper_rs::WhisperState::full]
+    /// Note: these configurations do not cover FullParams in entirety
+    /// Features are exposed on an as-needed bases.
+    /// See: [whisper_rs::FullParams] for documentation.
     pub fn to_whisper_full_params(&self) -> whisper_rs::FullParams {
-        self.whisper.to_whisper_full_params()
+        let mut params = self.whisper.to_whisper_full_params();
+        // Forcing single segment transcription helps alleviate transcription artifacts when
+        // running realtime to reduce the amount of false negatives in the
+        // word-boundary resolution algorithm
+        params.set_single_segment(true);
+        params
     }
+    /// Constructs a WhisperContextParameters object used to build [whisper_rs::WhisperContext]
     pub fn to_whisper_context_params(&self) -> whisper_rs::WhisperContextParameters {
         self.whisper.to_whisper_context_params()
     }
@@ -560,12 +672,12 @@ impl Default for WhisperRealtimeConfigs {
     }
 }
 
-// LEGACY
-/// NOTE: voice_probability_threshold has been moved out of the configurations for v2
-/// These should be handled at the application level.
-/// To retain a serialized voice_probability_threshold value, access the public field to cache the
-/// value before converting to V2/Realtime V1
-/// This will be deprecated at a later date.
+// Legacy Implementation
+
+/// Legacy configurations implementation. This is deprecated and will eventually be removed.
+/// Note: voice_probability_threshold has been moved out of configs and into the VAD API.
+/// If this value needs to be preserved, access it publicly, cache it, and store/set appropriately
+/// before consuming into WhisperConfigsV2 or WhisperRealtimeConfigs.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
 pub struct WhisperConfigsV1 {
@@ -598,11 +710,14 @@ pub struct WhisperConfigsV1 {
 }
 
 impl WhisperConfigsV1 {
+    /// Consumes and converts into WhisperConfigsV2.
     pub fn into_v2(self) -> WhisperConfigsV2 {
         let model = self.model.to_model();
         self.into_v2_with_model(model)
     }
 
+    /// Consumes and converts into WhisperConfigsV2, while also setting the model's
+    /// path prefix (data directory).
     pub fn into_v2_with_models_directory(
         self,
         models_directory: &std::path::Path,
@@ -610,6 +725,7 @@ impl WhisperConfigsV1 {
         let model = self.model.to_model_with_path_prefix(models_directory);
         self.into_v2_with_model(model)
     }
+    /// Consumes and converts into WhisperRealtimeConfigs.
     pub fn into_realtime_v1(self) -> WhisperRealtimeConfigs {
         let realtime_configs = self.to_realtime_configs();
         let whisper_configs = self.into_v2();
@@ -618,6 +734,8 @@ impl WhisperConfigsV1 {
             .with_whisper_configs(whisper_configs)
     }
 
+    /// Consumes and converts into WhisperRealtimeConfigs, while also setting the model's
+    /// path prefix (data directory).
     pub fn into_realtime_v1_with_models_directory(
         self,
         models_directory: &std::path::Path,

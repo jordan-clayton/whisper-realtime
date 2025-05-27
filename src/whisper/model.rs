@@ -20,6 +20,7 @@ use crate::whisper::integrity_utils::{
     serialize_new_checksums, write_latest_repo_checksum_to_disk,
 };
 
+/// Encapsulates a compatible whisper model
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
 pub struct Model {
@@ -41,6 +42,7 @@ impl Model {
         }
     }
 
+    /// Constructs a model with the provided (user-facing) name, filename, and path prefix (model directory).
     pub fn new_with_parameters(name: &str, file_name: &str, path_prefix: &Path) -> Self {
         Self::new()
             .with_name(name)
@@ -48,11 +50,13 @@ impl Model {
             .with_path_prefix(path_prefix)
     }
 
+    /// Sets the model's user-facing name
     pub fn with_name(mut self, name: &str) -> Self {
         self.name = name.to_owned();
         self
     }
 
+    /// Sets the model's filename.
     pub fn with_file_name(mut self, file_name: &str) -> Self {
         self.file_name = file_name.to_owned();
         #[cfg(feature = "integrity")]
@@ -62,6 +66,7 @@ impl Model {
         self
     }
 
+    /// Sets the path prefix (model directory)
     pub fn with_path_prefix(mut self, path_prefix: &Path) -> Self {
         self.path_prefix = path_prefix.to_path_buf();
         #[cfg(feature = "integrity")]
@@ -70,21 +75,28 @@ impl Model {
         }
         self
     }
+
+    /// Gets the model's user-friendly name
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
+    /// Gets the model's filename
     pub fn file_name(&self) -> &str {
         &self.file_name
     }
 
+    /// Gets the path prefix (model-directory)
     pub fn path_prefix(&self) -> &Path {
         self.path_prefix.as_path()
     }
 
+    /// Canonicalizes the model's full path as a [std::path::PathBuf]
     pub fn file_path(&self) -> PathBuf {
         self.path_prefix.join(&self.file_name)
     }
 
+    /// Canonicalizes the model's full path as a String
+    /// Returns Err if the file path is not valid UTF-8
     pub fn file_path_string(&self) -> Result<String, WhisperRealtimeError> {
         let file_path = self.file_path();
         Ok(file_path
@@ -96,12 +108,14 @@ impl Model {
             .to_string())
     }
 
+    /// Gets the model's (checksum) verified status.
+    /// Requires the integrity feature flag to be set.
     #[cfg(feature = "integrity")]
     pub fn checksum_verified(&self) -> bool {
         self.checksum_verified
     }
 
-    /// This canonicalizes the file path and checks the directory for an existing file.
+    /// Canonicalizes the file path and checks the directory for an existing file.
     /// It does not verify file integrity
     pub fn exists_in_directory(&self) -> bool {
         return match fs::metadata(self.file_path().as_path()) {
@@ -125,13 +139,6 @@ impl Model {
         Ok(checksum.to_lowercase() == byte_str)
     }
 
-    /// For verifying file integrity against a user-provided checksum.
-    /// Since a Model file can come from anywhere, responsibility falls upon the user to ensure
-    /// integrity. This method provides a mechanism to carry out that responsibility.
-    /// Returns true on a checksum match.
-    /// Returns a WhisperRealtimeError when the file does not exist.
-    ///
-    ///
     #[cfg(feature = "integrity")]
     fn compare_sha1(&self, checksum: &str) -> Result<bool, WhisperRealtimeError> {
         // Compute the checksum on the file
@@ -146,6 +153,13 @@ impl Model {
         Ok(checksum.to_lowercase() == byte_str)
     }
 
+    /// For verifying file integrity against a user-provided checksum.
+    /// Since a Model file can come from anywhere, responsibility falls upon the user to ensure
+    /// integrity. This method provides a mechanism to carry out that responsibility.
+    /// # Arguments:
+    /// * checksum (Sha1/2)
+    /// # Returns
+    /// * Ok(matches) on success, Err on I/O error, or failure to compute the checksum.
     #[cfg(feature = "integrity")]
     pub fn verify_checksum(&mut self, checksum: &Checksum) -> Result<bool, WhisperRealtimeError> {
         if !self.exists_in_directory() {
@@ -175,6 +189,8 @@ impl Default for Model {
         Model::new()
     }
 }
+
+/// Encapsulates a series of base models available for download and use with WhisperRealtime
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(
     Copy,
@@ -242,18 +258,20 @@ impl DefaultModelType {
         }
     }
 
+    /// Constructs a model object and sets the path prefix to the current working directory
     pub fn to_model(&self) -> Model {
         Model::new()
             .with_name(self.as_ref())
             .with_file_name(self.to_file_name())
     }
 
+    /// Constructs a model and sets the path prefix.
     pub fn to_model_with_path_prefix(&self, prefix: &Path) -> Model {
         let file_name = self.to_file_name();
         Model::new_with_parameters(self.as_ref(), file_name, prefix)
     }
 
-    /// To canonicalize the huggingface url for downloading the appropriate ggml model.
+    /// Canonicalizes a download url to retrieve the model from huggingface.
     pub fn url(&self) -> String {
         let file_name = self.to_file_name();
         const URL_PREFIX: &'static str =
@@ -274,27 +292,34 @@ impl DefaultModelType {
         url.replace(".bin", "-encoder.mlmodelc.zip")
     }
 
-    /// This makes a blocking request to grab the checksum for each of the provided default models
+    /// Makes a blocking request to check the sha1 checksums for each of the provided default models
+    /// If the cached checksums are out of date, this will download and update the cache.
     /// This should be called on a separate thread if you do not want the program to hang.
     /// Async requests are not provided at this time and will only be implemented should the demand
     /// be present.
-    /// Upon failing to retrieve the JSON, or the checksum, this will return a WhisperRealtimeError::DownloadError
+    /// Requires the integrity feature flag to be set.
+    /// # Arguments:
+    /// * records_directory: The path to the stored model checksums
+    /// * client: An optional reference to a (blocking) Reqwest client. Supply None if client-reuse is not a concern.
+    /// # Returns:
+    /// * Ok(checksum) on successfully retrieving the cached checksum
+    /// * Err on network failure, or failure to retrieve the model checksum
     #[cfg(feature = "integrity")]
     pub fn get_checksum(
         &self,
-        model_directory: &Path,
+        records_directory: &Path,
         client: Option<&blocking::Client>,
     ) -> Result<String, WhisperRealtimeError> {
         let key = self.to_sha_key();
-        let needs_updating = checksums_need_updating(model_directory, client);
+        let needs_updating = checksums_need_updating(records_directory, client);
 
         // Handle the current status of the stored repository checksum
         match needs_updating {
             ChecksumStatus::UpToDate(_) => {}
             ChecksumStatus::NeedsUpdating(c) => {
                 let checksums = get_new_checksums(client)?;
-                serialize_new_checksums(&checksums, model_directory)?;
-                write_latest_repo_checksum_to_disk(c.as_str(), model_directory)?;
+                serialize_new_checksums(&checksums, records_directory)?;
+                write_latest_repo_checksum_to_disk(c.as_str(), records_directory)?;
             }
             // Treat an Unknown checksum status as a total failure and escape early
             ChecksumStatus::Unknown => {
@@ -304,7 +329,7 @@ impl DefaultModelType {
             }
         }
         // Grab the latest model checksum
-        let model_checksum = get_model_checksum(model_directory, key)?.ok_or(
+        let model_checksum = get_model_checksum(records_directory, key)?.ok_or(
             WhisperRealtimeError::ParameterError(format!("Failed to find mapping for: {}", key)),
         )?;
         Ok(model_checksum)

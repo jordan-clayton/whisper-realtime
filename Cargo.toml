@@ -1,8 +1,8 @@
 [package]
 name = "whisper_realtime"
-# TODO: update version to 0.1.1
-version = "0.1.0"
-edition = "2021"
+version = "0.1.1"
+edition = "2024"
+license = "MIT"
 # TODO LICENSE, DESCRIPTION, DOCS, REPO
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -88,6 +88,7 @@ harness = false
 [[bench]]
 name = "realtime_transcriber_benchmark"
 harness = false
+required-features = ["resampler"]
 
 [[example]]
 name = "realtime_stream"
@@ -108,6 +109,10 @@ required-features = ["downloader-async"]
 [[test]]
 name = "integrity_tests"
 required-features = ["integrity"]
+
+[[test]]
+name = "vad_tests"
+required-features = ["resampler"]
 
 
 

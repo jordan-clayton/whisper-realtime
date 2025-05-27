@@ -1,6 +1,9 @@
-// TODO: implement proper unit testing using mocked directories to avoid relying on integration tests
-// and encountering filesystem instability.
-// TODO: consider fuzz-testing the regex.
+// Since this is not considered to be within the scope of the core library, these will only be addressed
+// should there be a need.
+// Roadmap:
+// - implement proper unit testing using mocked directories to avoid relying on integration tests
+//   and encountering filesystem instability.
+// - fuzz-testing the regex.
 #[cfg(test)]
 #[cfg(feature = "integrity")]
 mod model_integrity_tests {

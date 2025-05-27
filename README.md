@@ -4,7 +4,7 @@ A rust-based, realtime-capable, wrapper library for [whisper-rs](https://github.
 Seeks to provide an ergonomic API to support realtime and static speech transcription applications.
 
 At this time, accurate realtime transcription (and use of larger models) requires GPU acceleration.
-Offline transcription is possible with larger models via the CPU.
+Offline transcription is possible with larger models using the CPU.
 
 See: Cargo.toml for feature flags to compile with GPU support
 
@@ -18,3 +18,21 @@ See: Cargo.toml for feature flags to compile with GPU support
 
 - Finish README
 - Documentation
+- Feature flags Documentation
+
+## License
+
+This project is licensed under MIT. See [LICENSE](./LICENSE-MIT).
+
+### Third-Party Licenses
+
+This project includes third-party software components:
+
+- [`symphonia`](https://github.com/pdeljanov/symphonia) (Mozilla Public License 2.0)
+    - Used for audio decoding and file loading.
+    - MPL-2.0 is a file-level copyleft license. This does **not** affect your usage of this library unless you modify
+      and redistribute Symphonia source files.
+    - See [`LICENSE-MPL-2.0`](./LICENSE-MPL-2.0) for the full license.
+- [`earshot`](https://github.com/pykeio/earshot) (BSD-3-Clause)
+    - Used for (fallback) voice activity detection
+    - See [`LICENSE-BSD-3`](./LICENSE-BSD-3) for the full license.

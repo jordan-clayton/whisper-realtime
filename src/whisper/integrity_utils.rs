@@ -8,12 +8,13 @@ use reqwest::blocking;
 
 use crate::utils::errors::WhisperRealtimeError;
 
-// Stores a string literal of the most up-to-date commit hash of whisper.cpp's huggingface repository
+// Filename for the recordfile that stores a literal of the most up-to-date commit hash of whisper.cpp's huggingface repository
 const LATEST_CHECKSUM: &str = "latest_checksum";
-// Stores a pretty-print JSON mapping models to their provided sha1
+// Filename for the recordfile that stores a pretty-print JSON that maps models to their expected sha1 hash
 const CHECKSUM_FILE: &str = "checksum.json";
+// Url for checking the latest model commits (to keep the cache up-to-date)
 const REPO_URL: &str = "https://huggingface.co/api/models/ggerganov/whisper.cpp";
-// As of this implementation, the checksums are made available in README.md
+// As of this implementation, model sha1 checksums are made available in README.md
 const README_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/raw/main/README.md";
 
 // (Very specific) Regex: Used to extract the required fields from README.md
@@ -25,6 +26,7 @@ pub static CHECKSUM_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("Failed to build checksum RE")
 });
 
+/// Encapsulates the status of verified checksum records
 pub enum ChecksumStatus {
     UpToDate(String),
     NeedsUpdating(String),
@@ -41,9 +43,9 @@ impl ChecksumStatus {
     }
 }
 
-/// This grabs the latest commit checksum from the huggingface repository
-/// and compares it with the one stored in the models directory.
-/// The ChecksumStatus will hold a copy of the latest checksum sha string if
+/// Grabs the latest commit checksum from the huggingface repository and compares with the
+/// cached one.
+/// The ChecksumStatus will hold a copy of the latest checksum sha1 string if
 /// it has known status.
 pub fn checksums_need_updating(
     models_directory: &Path,
@@ -74,7 +76,7 @@ pub fn checksums_need_updating(
     }
 }
 
-/// Requests and parses README.md and returns a map of model names to sha256 checksums.
+/// Requests and parses README.md and returns a map of model names to provided sha1 checksums.
 /// This does not yet filter out all non-default model types.
 pub fn get_new_checksums(
     client: Option<&blocking::Client>,
@@ -112,7 +114,7 @@ pub fn serialize_new_checksums(
     Ok(())
 }
 
-/// Stores the current whisper.cpp huggingface checksum to disk.
+/// Stores the current whisper.cpp huggingface repository checksum to disk.
 pub fn write_latest_repo_checksum_to_disk(
     new_checksum: &str,
     model_directory: &Path,
@@ -137,8 +139,8 @@ pub fn get_model_checksum(
     Ok(checksum)
 }
 
-/// Grabs the latest whisper.cpp commit Sha from HuggingFace's model API to be used as a mechanism
-/// for determining when to update the model checksums.
+// Grabs the latest whisper.cpp commit sha1 from HuggingFace's model API to be used as a mechanism
+// for determining when to update the model checksums.
 fn get_latest_repo_checksum(
     client: Option<&blocking::Client>,
 ) -> Result<String, WhisperRealtimeError> {

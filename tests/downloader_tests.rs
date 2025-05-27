@@ -40,15 +40,13 @@ mod downloader_tests {
         );
 
         let url = model_type.url();
-        let client = reqwest::Client::new();
 
         // Tokio runtime for block_on.
         let rt = Runtime::new().unwrap();
         let handle = rt.handle();
 
         // NOTE: callback url is public and can be set after creating the struct by using the builder.
-        let stream_downloader =
-            downloader::downloaders::async_download_request(&client, url.as_str());
+        let stream_downloader = downloader::downloaders::async_download_request(url.as_str());
 
         // Run the future -> At this time, tokio is not being used for async and this cannot be awaited in testing.
         let stream_downloader = handle.block_on(stream_downloader);
@@ -120,7 +118,7 @@ mod downloader_tests {
         let client = reqwest::blocking::Client::new();
 
         // NOTE: callback url is public and can be set after creating the struct by using the builder.
-        let sync_downloader = downloader::downloaders::sync_download_request(&client, url.as_str());
+        let sync_downloader = downloader::downloaders::sync_download_request(url.as_str());
 
         // Ensure proper struct creation + download.
         assert!(

@@ -1,12 +1,12 @@
 use std::marker::PhantomData;
 
+/// Encapsulates optional callbacks
 pub trait Callback {
     type Argument;
     fn call(&mut self, arg: Self::Argument);
 }
 
-/// Basic callback struct to encapsulate an FnMut closure
-/// Use if you require to supply a callback explicitly, otherwise, just provide a Nop.
+/// Encapsulates progress-related callbacks
 #[repr(C)]
 pub struct ProgressCallback<T, CB: FnMut(T)> {
     callback: CB,
@@ -28,7 +28,7 @@ impl<T, CB: FnMut(T)> Callback for ProgressCallback<T, CB> {
     }
 }
 
-/// This is the static equivalent of a ProgressCallback
+/// This is the static equivalent of  [crate::utils::callback::ProgressCallback]
 /// Encouraged for use when 'static lifetimes are required, (eg. OfflineWhisperProgressCallback).
 /// It is not strictly necessary to use this over ProgressCallback, but it may help with
 /// locating and debugging lifetime errors.
@@ -54,8 +54,8 @@ impl<T, CB: FnMut(T) + 'static> Callback for StaticProgressCallback<T, CB> {
     }
 }
 
-/// This is to deal with optional progress callbacks without repeated branching in hot loops.
-/// When the callback is unnecessary, supply NOP
+/// To indicate "None" in functions that expect a callback (eg. downloading, loading audio, etc.)
+/// Since all optional callbacks are called repeatedly
 #[repr(C)]
 pub struct Nop<T> {
     _marker: PhantomData<T>,

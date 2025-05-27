@@ -7,7 +7,7 @@ impl PcmS16Convertible for f32 {}
 impl PcmS16Convertible for f64 {}
 
 /// To handle and convert various numeric audio formats into i16 PCM for use with WebRtc
-/// and wherever required.
+/// and wherever else integer-audio is required.
 pub trait IntoPcmS16 {
     fn into_pcm_s16(self) -> i16;
 }

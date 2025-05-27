@@ -12,8 +12,7 @@ use crate::audio::WhisperAudioSample;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
-/// This is a basic struct to restrict the audio formats to those which are supported by the
-/// resampling API
+/// Encapsulates a reference to a slice of (supported-format) audio to be resampled.
 pub enum ResampleableAudio<'a> {
     I16(&'a [i16]),
     F32(&'a [f32]),
@@ -21,7 +20,14 @@ pub enum ResampleableAudio<'a> {
 }
 
 /// Resamples decoded audio to the desired sample rate.
-/// Audio will be converted to f32 because it is the most convenient for the application
+/// Audio will be converted to f32 because it is the most convenient applications using this library
+/// # Arguments:
+/// * samples: The audio to resample,
+/// * out_sample_rate: The new sample rate
+/// * in_sample_rate: The original audio's sample rate
+/// * num_channels: The channel configurations (number of channels)
+/// # Returns:
+/// * Ok(WhisperAudioSample) on success, Err(WhisperRealtimeError) on failure to resample
 pub fn resample(
     samples: &ResampleableAudio,
     out_sample_rate: f64,
@@ -104,7 +110,13 @@ fn resample_stereo(
     Ok(WhisperAudioSample::F32(interleaved.into_boxed_slice()))
 }
 
-// Since this is for whisper, it will also convert the samples to mono
+/// Normalizes audio to sample at 16kHz. For use with whisper.
+/// # Arguments:
+/// * samples: the audio to resample
+/// * in_sample_rate: the original sampling rate
+/// * num_channels: The channel configurations (number of channels)
+/// # Returns:
+/// * Ok(WhisperAudioSample) on success, Err(WhisperRealtimeError) on failure to resample
 #[inline]
 pub fn normalize_audio(
     samples: &ResampleableAudio,
@@ -123,6 +135,7 @@ pub fn normalize_audio(
     }
 }
 
+/// Opens an audio file to check whether it needs to be resampled to 16kHz for use with whisper.
 pub fn file_needs_normalizing<P: AsRef<Path>>(path: P) -> Result<bool, WhisperRealtimeError> {
     let file = Box::new(File::open(path)?);
     let mss = MediaSourceStream::new(file, Default::default());
@@ -141,6 +154,8 @@ pub fn file_needs_normalizing<P: AsRef<Path>>(path: P) -> Result<bool, WhisperRe
     needs_normalizing(track)
 }
 
+/// Uses a [symphonia_core::formats::Track] to determine if audio needs to be resampled to 16kHz
+/// for use with whisper.
 #[inline]
 pub fn needs_normalizing(track: &Track) -> Result<bool, WhisperRealtimeError> {
     let sample_rate = track

@@ -13,17 +13,19 @@ use crate::utils::errors::WhisperRealtimeError;
 use crate::utils::Sender;
 use crate::whisper::configs::WhisperRealtimeConfigs;
 
-// TODO: documentation
-// NOTE: prefer Silero unless on windows and telemetry is of concern.
-// Whisper will always be the bottleneck.
-pub struct RealtimeTranscriberBuilder<V: VAD<f32> + Send + Sync> {
+/// Builder for [crate::transcriber::realtime_transcriber::RealtimeTranscriber]
+/// All fields are necessary and thus required to successfully build a RealtimeTranscriber.
+/// Multiple VAD implementations have been provided, see: [crate::transcriber::vad]
+/// Silero: [crate::transcriber::vad::Silero] is recommended for accuracy.
+/// See: examples/realtime_transcriber.rs for example usage.
+pub struct RealtimeTranscriberBuilder<V: VAD<f32>> {
     configs: Option<WhisperRealtimeConfigs>,
     audio_buffer: Option<Arc<AudioRingBuffer<f32>>>,
     output_sender: Option<Sender<WhisperOutput>>,
     voice_activity_detector: Option<V>,
 }
 
-impl<V: VAD<f32> + Send + Sync> RealtimeTranscriberBuilder<V> {
+impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
     pub fn new() -> Self {
         Self {
             configs: None,
@@ -32,19 +34,25 @@ impl<V: VAD<f32> + Send + Sync> RealtimeTranscriberBuilder<V> {
             voice_activity_detector: None,
         }
     }
+
+    /// Set configurations.
     pub fn with_configs(mut self, configs: WhisperRealtimeConfigs) -> Self {
         self.configs = Some(configs);
         self
     }
-    // Since the AudioRingBuffer can be shared, the audio_buffer is accepted as an Arc
+    /// Set the (shared) AudioRingBuffer.
     pub fn with_audio_buffer(mut self, audio_buffer: Arc<AudioRingBuffer<f32>>) -> Self {
         self.audio_buffer = Some(audio_buffer);
         self
     }
+
+    /// Set the output sender.
     pub fn with_output_sender(mut self, sender: Sender<WhisperOutput>) -> Self {
         self.output_sender = Some(sender);
         self
     }
+
+    /// Set the voice activity detector.
     pub fn with_voice_activity_detector<U: VAD<f32> + Sync + Send>(
         self,
         vad: U,
@@ -58,13 +66,9 @@ impl<V: VAD<f32> + Send + Sync> RealtimeTranscriberBuilder<V> {
         }
     }
 
-    // This returns a tuple struct containing both the transcriber object and a handle to check the
-    // transcriber's ready state.
-
-    // Since process_audio() runs its own infinite loop with &mut self, it's not possible to check
-    // the ready state while RealtimeTranscriber is running.
-    // Use RealtimeTranscriberHandle::ready() to know if the whisper context has loaded and the
-    // transcribe loop has begun.
+    /// This returns a tuple struct containing both the transcriber object and a handle to check the
+    /// transcriber's ready state from another location.
+    /// Returns Err when a parameter is missing.
     pub fn build(
         self,
     ) -> Result<(RealtimeTranscriber<V>, RealtimeTranscriberHandle), WhisperRealtimeError> {
@@ -102,35 +106,49 @@ impl<V: VAD<f32> + Send + Sync> RealtimeTranscriberBuilder<V> {
     }
 }
 
-// TODO: proper documentation
-// This cannot be Clone without introducing undefined state.
-// It's also infeasible to run multiple RealtimeTranscribers in parallel due to the cost
-// of running whisper transcription.
-pub struct RealtimeTranscriber<V: VAD<f32> + Send + Sync> {
+/// A realtime whisper transcription runner. See: examples/realtime_stream.rs for suggested use
+/// RealtimeTranscriber cannot be shared across threads because it has a singular ready state.
+/// It is also infeasible to call [crate::transcriber::Transcriber::process_audio] in parallel due
+/// to the cost of running whisper.
+pub struct RealtimeTranscriber<V: VAD<f32>> {
     configs: WhisperRealtimeConfigs,
+    /// The shared input buffer from which samples are pulled for transcription
     audio_feed: Arc<AudioRingBuffer<f32>>,
+    /// For sending output to a UI
     output_sender: Sender<WhisperOutput>,
+    /// Ready flag.
+    /// A RealtimeTranscriber is considered to be ready when all of its whisper initialization has completed,
+    /// and it is about to enter its transcription loop.
+    /// NOTE: This cannot be accessed directly, because RealtimeTranscriber is not Sync.
+    /// Use a [crate::transcriber::realtime_transcriber::RealtimeTranscriberHandle] to check the ready state.
     ready: Arc<AtomicBool>,
+    /// For voice detection
     vad: V,
 }
 
-impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
-    /// This streaming implementation uses a sliding window + VAD + diffing approach to approximate
-    /// a continuous audio file. This will only start transcribing segments when voice is detected.
-    /// Its accuracy isn't bulletproof (and highly depends on the model), but it's reasonably fast
-    /// on average hardware.
-    /// GPU processing is more or less a necessity for running realtime; this will not work well using CPU inference.
-    ///
-    /// This implementation is synchronous and can be run on a single thread--however, due to the
-    /// bounded channel, it is recommended to process in parallel/spawn a worker to drain the data channel
-    ///
-    /// Argument:
-    /// - run_transcription: an atomic state flag so that the transcriber can be terminated from another location
-    /// eg. UI
+impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
+    // This streaming implementation uses a sliding window + VAD + diffing approach to approximate
+    // a continuous audio file. This will only start transcribing segments when voice is detected.
+    // Its accuracy isn't bulletproof (and highly depends on the model), but it's reasonably fast
+    // on average hardware.
+    // GPU processing is more or less a necessity for running realtime; this will not work well using CPU inference.
+    //
+    // This implementation is synchronous and can be run on a single thread--however, due to the
+    // bounded channel, it is recommended to process in parallel/spawn a worker to drain the data channel
+    //
+    // Argument:
+    // - run_transcription: an atomic state flag so that the transcriber can be terminated from another location
+    // eg. UI
     fn process_audio(
         &mut self,
         run_transcription: Arc<AtomicBool>,
     ) -> Result<String, WhisperRealtimeError> {
+        // Alert the UI
+        self.output_sender
+            .send(WhisperOutput::ControlPhrase(
+                WhisperControlPhrase::GettingReady,
+            ))
+            .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
         let mut t_last = Instant::now();
 
         // To collect audio from the ring buffer.
@@ -145,11 +163,7 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
             VecDeque::with_capacity(constants::WORKING_SET_SIZE);
 
         // Set up whisper
-        let mut full_params = self.configs.to_whisper_full_params();
-        // This seems to improve the output
-        // It might be something to consider exposing in the configurations, though it seems
-        // to be something to enforce for realtime
-        full_params.set_single_segment(true);
+        let full_params = self.configs.to_whisper_full_params();
         let whisper_context_params = self.configs.to_whisper_context_params();
         let file_path_string = self.configs.model().file_path_string()?;
 
@@ -168,6 +182,13 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
             let diff = t_now - t_last;
             let millis = diff.as_millis();
             total_time += millis;
+
+            // To prevent accidental audio clearing, hold off to ensure at least
+            // vad_sample_len ms have passed before trying to detect voice.
+            if millis < self.configs.vad_sample_len() as u128 {
+                sleep(Duration::from_millis(constants::PAUSE_DURATION));
+                continue;
+            }
 
             // read_into will return min(requested_len, audio_len)
             // It will also escape early if the buffer is length 0
@@ -418,6 +439,8 @@ impl<V: VAD<f32> + Send + Sync> Transcriber for RealtimeTranscriber<V> {
     }
 }
 
+/// A simple handle that allows for checking the ready state of a RealtimeTranscriber from another
+/// location (eg. a different thread).
 #[derive(Clone)]
 pub struct RealtimeTranscriberHandle {
     ready: Arc<AtomicBool>,

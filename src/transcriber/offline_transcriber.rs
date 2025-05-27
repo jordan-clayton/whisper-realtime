@@ -15,19 +15,19 @@ use crate::utils::errors::WhisperRealtimeError;
 use crate::utils::Sender;
 use crate::whisper::configs::WhisperConfigsV2;
 
-// TODO: proper documentation
-// Note: since audio is implicitly converted to a format understandable by whisper,
-// it isn't necessary for the VAD's type to be generic.
-// Note twice: The bottleneck for most (if not all) applications will be whisper.
+/// Builder for [crate::transcriber::offline_transcriber::OfflineTranscriber]
+/// Silero: [crate::transcriber::vad::Silero] is recommended for accuracy.
 #[derive(Clone)]
 pub struct OfflineTranscriberBuilder<V>
 where
     V: VAD<f32>,
 {
     configs: Option<Arc<WhisperConfigsV2>>,
+    /// (Optional) Used for sending transcribed segments to a UI.
     sender: Option<Sender<WhisperOutput>>,
     audio: Option<Arc<WhisperAudioSample>>,
     channels: Option<AudioChannelConfiguration>,
+    /// (Optional) Used to extract voiced segments to reduce overall transcription time.
     voice_activity_detector: Option<Arc<Mutex<V>>>,
 }
 
@@ -41,22 +41,31 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
             voice_activity_detector: None,
         }
     }
+    /// Sets the whisper configurations
     pub fn with_configs(mut self, configs: WhisperConfigsV2) -> Self {
         self.configs = Some(Arc::new(configs));
         self
     }
+    /// Sets an (optional) channel through which to send transcribed segments to a UI
     pub fn with_sender(mut self, sender: Sender<WhisperOutput>) -> Self {
         self.sender = Some(sender);
         self
     }
+
+    /// Sets the audio to be transcribed
     pub fn with_audio(mut self, audio: WhisperAudioSample) -> Self {
         self.audio = Some(Arc::new(audio));
         self
     }
+
+    /// Sets the audio channel configurations.
+    /// NOTE: This must match the audio source channel configurations or there will be transcription artefacts.
     pub fn with_channel_configurations(mut self, channels: AudioChannelConfiguration) -> Self {
         self.channels = Some(channels);
         self
     }
+
+    /// Sets an optional voice activity detector to optimize transcription by pruning out unvoiced audio frames
     pub fn with_voice_activity_detector<V2: VAD<f32>>(
         self,
         vad: V2,
@@ -70,6 +79,13 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
             voice_activity_detector: Some(v),
         }
     }
+    /// Builds an OfflineTranscriber<V> according to the given parameters
+    /// # Returns:
+    /// * Ok(OfflineTranscriber<V>) on successful build
+    /// * Err(WhisperRealtimeError) if one of the following are true:
+    /// ** missing whisper configurations,
+    /// ** missing channel configurations,
+    /// ** missing audio
     pub fn build(self) -> Result<OfflineTranscriber<V>, WhisperRealtimeError> {
         let configs = self.configs.ok_or(WhisperRealtimeError::ParameterError(
             "Configs missing in OfflineTranscriberBuilder..".to_string(),
@@ -95,13 +111,20 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
     }
 }
 
+/// For running offline (non-realtime) transcription using whisper.
+/// NOTE: timestamps have not yet been implemented.
 #[derive(Clone)]
 pub struct OfflineTranscriber<V: VAD<f32>> {
+    /// Whisper configurations
     configs: Arc<WhisperConfigsV2>,
+    /// (Optional) Used for sending transcribed segments to a UI.
+    /// Segments are sent as [crate::transcriber::WhisperOutput::ConfirmedTranscription]
     sender: Option<Sender<WhisperOutput>>,
+    /// The audio to transcribe.
     audio: Arc<WhisperAudioSample>,
-    // Supported Channels is just an enumeration member and does not need to be shared.
+    /// Mono or Stereo. Stereo will be converted to mono before transcription
     channels: AudioChannelConfiguration,
+    /// (Optional) Used to extract voiced segments to reduce overall transcription time.
     voice_activity_detector: Option<Arc<Mutex<V>>>,
 }
 
@@ -282,7 +305,7 @@ where
 /// Thus, the calling scope must manually consume the arc after this callback is no longer called.
 unsafe extern "C" fn abort_callback(user_data: *mut c_void) -> bool {
     // Consume the pointer
-    let ptr = Arc::from_raw(user_data as *const AtomicBool);
+    let ptr = unsafe { Arc::from_raw(user_data as *const AtomicBool) };
     // let arc = Arc::clone(&ptr);
     let run_transcription = ptr.load(Ordering::Acquire);
     // Prevent the refcount from decrementing
@@ -293,13 +316,13 @@ unsafe extern "C" fn abort_callback(user_data: *mut c_void) -> bool {
 /// This callback gets called in order to forward progress updates from Whisper to a UI.
 /// To guarantee the safety of the C library, whisper_context and whisper_states should
 /// not be mutated.
-/// This function may or may not be called from a multi-threaded context.
+/// This function may or may not be called from a multithreaded context.
 unsafe extern "C" fn progress_callback<PC: OfflineWhisperProgressCallback>(
     _: *mut whisper_rs_sys::whisper_context,
     _: *mut whisper_rs_sys::whisper_state,
     progress: c_int,
     user_data: *mut c_void,
 ) {
-    let callback = &mut *(user_data as *mut PC);
+    let callback = unsafe { &mut *(user_data as *mut PC) };
     callback.call(progress);
 }

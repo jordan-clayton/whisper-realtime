@@ -4,6 +4,8 @@ use std::path::Path;
 use crate::utils::errors::WhisperRealtimeError;
 
 pub mod downloaders;
+
+/// For downloading an object synchronously (blocking)
 pub trait SyncDownload: Writable {
     fn download(
         &mut self,
@@ -12,6 +14,7 @@ pub trait SyncDownload: Writable {
     ) -> Result<(), WhisperRealtimeError>;
 }
 
+/// For downloading an object asynchronously (non-blocking, requires async runtime)
 #[cfg(feature = "downloader-async")]
 pub trait AsyncDownload: Writable {
     fn download(
@@ -21,6 +24,7 @@ pub trait AsyncDownload: Writable {
     ) -> impl std::future::Future<Output = Result<(), WhisperRealtimeError>>;
 }
 
+/// To handle basic IO operations when downlading files
 pub trait Writable {
     // If a file path does not already exist, it will be created.
     fn prepare_file_path(file_directory: &Path) -> Result<(), WhisperRealtimeError> {

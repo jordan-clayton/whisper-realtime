@@ -2,41 +2,48 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum WhisperRealtimeError {
-    // TODO; if TranscriptionError goes unused, remove this.
-    #[error("Transcription Error {0}")]
-    TranscriptionError(String),
-    // Called on a data-channel failure
-    // Contains the message so it can be recovered.
+    /// Called on a data-channel failure
+    /// Contains the output message, so it can be recovered.
     #[error("{0}")]
     TranscriptionSenderError(String),
-    #[error("Write Error {0}")]
-    WriteError(String),
+    /// User either supplied an incorrect parameter, or failed to supply a parameter at all
     #[error("Parameter Error {0}")]
     ParameterError(String),
+    /// [std::io::Error]
     #[error("I/O error: {0}")]
     IOError(#[from] std::io::Error),
+    /// [symphonia::core::errors::Error]
     #[error("Decode error: {0}")]
     DecodeError(#[from] symphonia::core::errors::Error),
+    /// Otherwise unknown error
     #[error("Unknown Error {0}")]
     Unknown(String),
+    /// [std::string::ParseError]
     #[error("Parse Error {0}")]
     ParseError(#[from] std::string::ParseError),
+    /// [url::ParseError]
     #[error("UrlParse Error {0}")]
     UrlParseError(#[from] url::ParseError),
+    /// [whisper_rs::WhisperError]
     #[error("Whisper Error {0}")]
     WhisperError(#[from] whisper_rs::WhisperError),
+    /// [rubato::ResampleError]
     #[cfg(feature = "resampler")]
     #[error("ResampleError: {0}")]
     ResampleError(#[from] rubato::ResampleError),
+    /// [rubato::ResamplerConstructionError]
     #[cfg(feature = "resampler")]
     #[error("ResamplerConstructionError: {0}")]
     ResamplerConstructionError(#[from] rubato::ResamplerConstructionError),
+    /// [reqwest::Error]
     #[cfg(feature = "downloader")]
     #[error("Reqwest Error {0}")]
     ReqwestError(#[from] reqwest::Error),
+    /// Failure to download a model
     #[error("Download Error {0}")]
     #[cfg(feature = "downloader")]
     DownloadError(String),
+    /// [serde_json::Error]
     #[error("JSON Parse Error {0}")]
     #[cfg(feature = "integrity")]
     JsonParseError(#[from] serde_json::Error),

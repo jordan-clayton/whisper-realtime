@@ -24,7 +24,9 @@ fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, Whisp
     Ok(probe)
 }
 
-// The optional progress callback returns the number of bytes read per iteration of the decoding loop.
+/// Loads a WhisperRealtime-compatible (ie. Can be converted into whisper-compatible) audio file
+/// for transcription.
+/// NOTE: this expects the audio to be sampled at 16kHz. Either resample the audio beforehand, or use: [crate::audio::loading::load_normalized_audio_file]
 pub fn load_audio_file<P: AsRef<Path>>(
     path: P,
     progress_callback: Option<impl FnMut(usize)>,
@@ -48,8 +50,9 @@ pub fn load_audio_file<P: AsRef<Path>>(
     Ok(WhisperAudioSample::F32(samples.into_boxed_slice()))
 }
 
-// This will return f32 audio normalized for whisper
-// The optional progress callback returns the number of bytes read per iteration of the decoding loop.
+/// Loads a WhisperRealtime-compatible (ie. Can be converted into whisper-compatible) audio file,
+/// and resamples to 16 kHz as necessary
+/// NOTE: requires the resampler feature flag to be set
 #[cfg(feature = "resampler")]
 pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     path: P,

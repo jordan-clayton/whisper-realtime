@@ -5,13 +5,8 @@ use crate::audio::pcm::PcmS16Convertible;
 use crate::utils::constants;
 use crate::utils::errors::WhisperRealtimeError;
 
-/// TODO: properly document this trait to explain why it's here, what it's for, and what's available
-/// eg. Three provided VAD implementations: Silero, WebRtc, Earshot (a WebRtc) impl
-/// tl;dr:
-/// Silero is accurate and efficient; it's fast enough for realtime.
-/// WebRtc is extremely fast and is accurate-enough; it's built for realtime.
-/// Earshot is marginally faster than WebRtc and has poor accuracy; use as a fallback on lower hardware;
-/// as far as I know, it's much less accurate, but it is very fast--YMMV.
+/// A voice activity detector backend for use with [crate::transcriber::realtime_transcriber::RealtimeTranscriber]
+/// or [crate::transcriber::offline_transcriber::OfflineTranscriber].
 pub trait VAD<T>: Resettable {
     // For realtime VAD to determine pauses, ends of phrases, and to reduce the amount of whisper
     // processing.
@@ -20,28 +15,35 @@ pub trait VAD<T>: Resettable {
     fn extract_voiced_frames(&mut self, samples: &[T]) -> Box<[T]>;
 }
 
+/// For resetting the state of a voice activity detector backend so that it can be reused
+/// for different audio samples.
 pub trait Resettable {
     fn reset_session(&mut self);
 }
 
-/// A basic builder that produces a Silero VAD backend for use in realtime transcription.
-/// In effect, this adapts voice_activity_detector's builder and includes a starting detection probability.
-/// The probability threshold can be swapped after building a Silero VAD backend if needed.
-/// To mainatain the same flexibility as the supporting library, the sample rates and chunk sizes
-/// are not constrained. Their limitations are mentioned below:
+/// Builder for [crate::transcriber::vad::Silero] that adapts voice_activity_detector's builder
+/// and also includes a starting detection probability.
+/// The probability threshold can be swapped after building if needed.
 ///
-/// See: https://docs.rs/voice_activity_detector/0.2.0/voice_activity_detector/index.html#standalone-voice-activity-detector
-/// The provided model is trained using chunk sizes of 256, 512, and 768 samples for an 8kHz sample rate
+/// To mainatain the same flexibility as the underlying supporting library, the sample rates and chunk sizes
+/// are not constrained. Their limitations are as follows:
+/// https://docs.rs/voice_activity_detector/0.2.0/voice_activity_detector/index.html#standalone-voice-activity-detector
+/// The provided model is trained using chunk sizes of 256, 512, and 768 samples for an 8kHz sample rate.
 /// It is also trained using chunk sizes of 512, 768, and 1024 for a 16kHz sample rate.
-/// These are not hard-requirements, but are recommended for performance
+/// These are not hard-requirements but are recommended for performance.
 /// The only hard requirement is that the sample rate must be no larger than 31.25 times the chunk size.
-/// NOTE: detection_probability_threshold is considered to be a lower bound and is noninclusive;
-/// computed probabilities higher than this threshold are considered to have detected some amount
-/// of voice activity.
+///
+/// NOTE: On Windows, this may include some telemetry as per: https://docs.rs/ort/latest/ort/#strategies
+/// Self-hosted ONNX runtime binaries have not yet been implemented and may not be.
+/// In the meantime, use [crate::transcriber::vad::WebRtc] or [crate::transcriber::vad::Earshot]
+/// if telemetry is a concern.
 #[derive(Copy, Clone)]
 pub struct SileroBuilder {
     sample_rate: i64,
     chunk_size: usize,
+    /// Samples with probabilities higher than this threshold are considered to have voice activity.
+    /// More than half of the frames must meet this threshold for the sample to be considered as
+    /// having voice activity.
     detection_probability_threshold: f32,
 }
 
@@ -53,21 +55,26 @@ impl SileroBuilder {
             detection_probability_threshold: 0.,
         }
     }
+    /// Set the sample rate.
     pub fn with_sample_rate(mut self, sample_rate: i64) -> Self {
         self.sample_rate = sample_rate;
         self
     }
+    /// Set the chunks size.
     pub fn with_chunk_size(mut self, chunk_size: usize) -> Self {
         self.chunk_size = chunk_size;
         self
     }
+    /// Set the detection probability threshold.
     pub fn with_detection_probability_threshold(mut self, probability: f32) -> Self {
         self.detection_probability_threshold = probability;
         self
     }
 
-    // It's not entirely clear as to what might cause VoiceActivityDetectorBuilder::build() to fail
-    // but this function returns Err if the Silero Vad struct fails to build.
+    /// Builds a Silero VAD backend.
+    /// Returns Err when [voice_activity_detector::VoiceActivityDetector]'s builder fails to build.
+    /// To ensure this doesn't happen, ensure the sample rate and chunk size are provided
+    /// and that the sample rate is no larger than 31.25 times the chunk size.
     pub fn build(self) -> Result<Silero, WhisperRealtimeError> {
         voice_activity_detector::VoiceActivityDetector::builder()
             .sample_rate(self.sample_rate)
@@ -86,13 +93,17 @@ impl SileroBuilder {
     }
 }
 
-/// Represents the Silero VAD backend for use in realtime transcription
-/// Adapts voice_activity_detector::VoiceActivityDetector to predict voice activity using
-/// Silero and the ONNX runtime.
-/// NOTE: on Windows, this may or may not have telemetry, see: https://docs.rs/ort/latest/ort/#strategies
-/// If this is a problem, please file an issue.
+/// Silero VAD backend for use in realtime transcription.
+/// Adapts [voice_activity_detector::VoiceActivityDetector] to predict voice activity using Silero.
+/// NOTE: On Windows, this may include some telemetry as per: https://docs.rs/ort/latest/ort/#strategies
+/// Self-hosted ONNX runtime binaries have not yet been implemented and may not be.
+/// In the meantime, use [crate::transcriber::vad::WebRtc] or [crate::transcriber::vad::Earshot]
+/// if telemetry is a concern.
 pub struct Silero {
     vad: voice_activity_detector::VoiceActivityDetector,
+    /// Samples with probabilities higher than this threshold are considered to have voice activity.
+    /// More than half of the frames must meet this threshold for the sample to be considered as
+    /// having voice activity.
     detection_probability_threshold: f32,
 }
 
@@ -102,7 +113,7 @@ impl Silero {
         self
     }
 
-    /// A "Default" whisper-ready Silero configuration
+    /// A "Default" whisper-ready Silero configuration for realtime transcription.
     pub fn try_new_whisper_realtime_default() -> Result<Self, WhisperRealtimeError> {
         SileroBuilder::new()
             .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
@@ -111,6 +122,7 @@ impl Silero {
             .build()
     }
 
+    /// A "Default" whisper-ready Silero configuration for offline transcription.
     pub fn try_new_whisper_offline_default() -> Result<Self, WhisperRealtimeError> {
         SileroBuilder::new()
             .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
@@ -121,6 +133,7 @@ impl Silero {
 }
 
 impl Resettable for Silero {
+    /// Clears the state of the VAD backend. For VAD reuse.
     fn reset_session(&mut self) {
         // VoiceActivityDetector does not reset configurations to default settings when resetting the context
         // so this method is just a simple delegate.
@@ -129,7 +142,9 @@ impl Resettable for Silero {
 }
 
 impl<T: voice_activity_detector::Sample> VAD<T> for Silero {
-    /// NOTE: This implementation assumes that the samples are at the same sample rate as the configured VAD
+    /// Detects whether the given samples contain voiced audio.
+    /// NOTE: This implementation assumes that the samples are at the same sample rate as the configured VAD.
+    /// A mismatch is likely to produce incorrect results.
     fn voice_detected(&mut self, samples: &[T]) -> bool {
         // If a zero-length slice of samples are sent, there is obviously no voice
         if samples.len() == 0 {
@@ -181,9 +196,7 @@ impl<T: voice_activity_detector::Sample> VAD<T> for Silero {
     }
 }
 
-/// Wrapper Enumeration for WebRtcImplementations
-/// These are intended for the WebRTCBuilder which handles constructing the desired
-/// WebRtc backend.
+/// Encapsulates available sample rates available for [crate::transcriber::vad::WebRtc] and [crate::transcriber::vad::Earshot].
 #[derive(Copy, Clone, Debug)]
 pub enum WebRtcSampleRate {
     R8kHz,
@@ -211,10 +224,7 @@ impl WebRtcSampleRate {
     }
 }
 
-// TODO: reword, implementation can and will be generalized for both WebRTC implementors.
-/// Wrapper Enumeration for webrtc_vad::VadMode and earshot::VoiceActivityProfile.
-/// These are intended for the WebRTCBuilder which handles constructing the desired WebRtc backend.
-///
+/// Encapsulates available aggressiveness parameters for [crate::transcriber::vad::WebRtc] and [crate::transcriber::vad::Earshot]
 /// This parameter sets the "mode" from which predetermined speech threshold constants are selected for filtering out non-speech.
 /// See: https://chromium.googlesource.com/external/webrtc/+/refs/heads/master/common_audio/vad/vad_core.c#68
 /// Quality = low filtering, detects most speech and then some. May introduce some false positives
@@ -248,12 +258,13 @@ impl WebRtcFilterAggressiveness {
     }
 }
 
+/// Encapsulates available Frame lengths (in ms) for [crate::transcriber::vad::WebRtc]
+/// and [crate::transcriber::vad::Earshot].
 /// Since WebRTC expects frames of specific fixed length, this enumeration captures the only possible
 /// valid lengths. It is not used directly in the implementation or the VAD backend; its purpose is
 /// to provide information required to compute the necessary sample padding/truncation to fit the
-/// frame size requirements
-/// This is more or less equivalent to voice_activity_detector's more flexible chunk_size parameter,
-/// except measured in milliseconds instead of individual PCM samples.
+/// frame size requirements.
+/// This can be considered a less-flexible equivalent to the Silero chunk_size parameter.
 
 #[derive(Copy, Clone, Debug)]
 pub enum WebRtcFrameLengthMillis {
@@ -272,11 +283,12 @@ impl WebRtcFrameLengthMillis {
     }
 }
 
-/// A builder that can produce either a WebRtc or Earshot backend for use in realtime transcription.
+/// Builder for creating either a WebRtc or an Earshot backend for use in transcription.
 /// Due to the way WebRTC is implemented, detection_probability_threshold should be treated as the
-/// minimum proportion of frames that are detected to have speech.
+/// minimum proportion of frames that must be detected as having speech for the sample to contain
+/// voice activity.
 /// This is a non-inclusive lower-bound; samples with VAD frame proportions higher than this
-/// threshold are thus considered to contain speech
+/// threshold are thus considered to contain speech.
 #[derive(Copy, Clone)]
 pub struct WebRtcBuilder {
     sample_rate: WebRtcSampleRate,
@@ -294,10 +306,12 @@ impl WebRtcBuilder {
             detection_probability_threshold: 0.0,
         }
     }
+    /// Sets the sample rate.
     pub fn with_sample_rate(mut self, sample_rate: WebRtcSampleRate) -> Self {
         self.sample_rate = sample_rate;
         self
     }
+    /// Sets the filter aggressiveness.
     pub fn with_filter_aggressiveness(
         mut self,
         aggressiveness: WebRtcFilterAggressiveness,
@@ -305,17 +319,20 @@ impl WebRtcBuilder {
         self.aggressiveness = aggressiveness;
         self
     }
+    /// Sets the detection probability threshold: the proportion of sample frames that must contain
+    /// speech for the VAD to conclude a sample contains voice.
     pub fn with_detection_probability_threshold(mut self, probability_threshold: f32) -> Self {
         self.detection_probability_threshold = probability_threshold;
         self
     }
+    /// Sets the frame length (in ms).
     pub fn with_frame_length_millis(mut self, frame_length: WebRtcFrameLengthMillis) -> Self {
         self.frame_length = frame_length;
         self
     }
 
-    // This returns none if webrtc_vad panics, which will happen in the case of a memory allocation error.
-    // (eg. OOM).
+    /// Builds a [crate::transcriber::vad::WebRtc] VAD backend.
+    /// Returns Err if there's an internal panic due to a memory allocation error.
     pub fn build_webrtc(self) -> Result<WebRtc, WhisperRealtimeError> {
         std::panic::catch_unwind(|| {
             webrtc_vad::Vad::new_with_rate_and_mode(
@@ -337,6 +354,8 @@ impl WebRtcBuilder {
             )
         })
     }
+
+    /// Builds a [crate::transcriber::vad::Earshot] VAD backend.
     pub fn build_earshot(self) -> Result<Earshot, WhisperRealtimeError> {
         let vad = earshot::VoiceActivityDetector::new(self.aggressiveness.to_earshot_vad_profile());
         let predicate = match self.sample_rate {
@@ -355,25 +374,28 @@ impl WebRtcBuilder {
     }
 }
 
-// TODO: properly document this to provide relevant information, like Silero.
+/// A thread-safe WebRtc VAD backend for use in transcription.
+/// Adapts [webrtc_vad::Vad] to predict voice activity using WebRtc
 pub struct WebRtc {
     vad: Mutex<webrtc_vad::Vad>,
-    // Since webrtc_vad does not implement Copy or Clone, use the wrapper structs.
-    // These have matching methods to produce the internal enumeration equivalent as needed
     sample_rate: WebRtcSampleRate,
     aggressiveness: WebRtcFilterAggressiveness,
     // This value will always be restricted to either 10ms, 20ms, 30ms as per the Enumeration
     // used in the accompanying builder
     frame_length_in_ms: usize,
+    /// The proportion threshold for voiced frames. Samples with proportions of voiced frames higher
+    /// than this threshold are assumed to contain voice activity.
     realtime_detection_probability_threshold: f32,
 }
 
 impl WebRtc {
+    /// Sets the realtime detection probability threshold.
     pub fn with_realtime_detection_probability_threshold(mut self, probability: f32) -> Self {
         self.realtime_detection_probability_threshold = probability;
         self
     }
-    /// A "Default" whisper-ready WebRtc configuration
+
+    /// A "Default" whisper-ready WebRtc configuration for realtime transcription.
     pub fn try_new_whisper_realtime_default() -> Result<Self, WhisperRealtimeError> {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
@@ -381,7 +403,7 @@ impl WebRtc {
             .with_detection_probability_threshold(constants::WEBRTC_VOICE_PROBABILITY_THRESHOLD)
             .build_webrtc()
     }
-
+    /// A "Default" whisper-ready WebRtc configuration for offline transcription.
     pub fn try_new_whisper_offline_default() -> Result<Self, WhisperRealtimeError> {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
@@ -391,12 +413,13 @@ impl WebRtc {
     }
 }
 
-// WebRtc is Mutex-protected to adhere to the following thread-safety guarantees made by WebRtc Vad:
-// https://chromium.googlesource.com/external/webrtc/+/0332c2db39d6f5c780ce9e92b850bcb57e24e7f8/webrtc/modules/audio_processing/include/audio_processing.h#197
+/// WebRtc is Mutex-protected to adhere to the following thread-safety guarantees made by WebRtc Vad:
+/// https://chromium.googlesource.com/external/webrtc/+/0332c2db39d6f5c780ce9e92b850bcb57e24e7f8/webrtc/modules/audio_processing/include/audio_processing.h#197
 unsafe impl Send for WebRtc {}
 unsafe impl Sync for WebRtc {}
 
 impl Resettable for WebRtc {
+    /// Clears the state of the VAD backend. For VAD reuse.
     fn reset_session(&mut self) {
         // WebRtc_vad reverts to default settings when the context is cleared.
         // The vad must be reconfigured accordingly.
@@ -408,8 +431,10 @@ impl Resettable for WebRtc {
 }
 
 impl<T: PcmS16Convertible + Copy> VAD<T> for WebRtc {
-    // NOTE: This implementation assumes that the samples are at the same sample rate as the configured VAD
-    // Samples of insufficient length are zero-padded/truncated to avoid internal panicking.
+    /// Detects whether the given samples contain voiced audio.
+    /// NOTE: This implementation assumes that the samples are at the same sample rate as the configured VAD
+    /// A mismatch is likely to produce incorrect results.
+    /// Samples of insufficient length are zero-padded/truncated to avoid internal panicking.
     fn voice_detected(&mut self, samples: &[T]) -> bool {
         // If a zero-length slice of samples are sent, there is obviously no voice
         if samples.len() == 0 {
@@ -461,24 +486,34 @@ impl<T: PcmS16Convertible + Copy> VAD<T> for WebRtc {
     }
 }
 
+/// Type alias for earshot function pointers, eg [earshot::VoiceActivityDetector::predict_8khz].
+/// For statically dispatching the correct voice detection based on sample rate.
 type EarshotPredictionFilterPredicate =
     fn(&mut earshot::VoiceActivityDetector, &[i16]) -> Result<bool, earshot::Error>;
+
+/// Earshot VAD backend for use in transcription.
+/// Adapts [earshot::VoiceActivityDetector] to predict voice activity using Earshot (WebRtc)
 pub struct Earshot {
     vad: earshot::VoiceActivityDetector,
-    // For dispatching the appropriate method
+    /// Used to break the sample into frames of size frame_length_in_ms
     sample_rate: usize,
+    /// Used to break the sample into sized chunks that can be run through the voice detector.
     frame_length_in_ms: usize,
+    /// The proportion threshold for voiced frames. Samples with proportions of voiced frames higher
+    /// than this threshold are assumed to contain voice activity.
     realtime_detection_probability_threshold: f32,
+    /// Used to statically dispatch the correct method based on the sample rate.
     prediction_predicate: EarshotPredictionFilterPredicate,
 }
 
 impl Earshot {
+    /// Sets the realtime detection probability threshold.
     pub fn with_realtime_detection_probability_threshold(mut self, probability: f32) -> Self {
         self.realtime_detection_probability_threshold = probability;
         self
     }
 
-    /// A "Default" whisper-ready Earhshot configuration
+    /// A "Default" whisper-ready Earhshot configuration for realtime transcription.
     pub fn try_new_whisper_realtime_default() -> Result<Self, WhisperRealtimeError> {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
@@ -487,6 +522,7 @@ impl Earshot {
             .build_earshot()
     }
 
+    /// A "Default" whisper-ready Earhshot configuration for offline transcription.
     pub fn try_new_whisper_offline_default() -> Result<Self, WhisperRealtimeError> {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
@@ -497,6 +533,7 @@ impl Earshot {
 }
 
 impl Resettable for Earshot {
+    /// Clears the state of the VAD backend. For VAD reuse.
     fn reset_session(&mut self) {
         // Earshot does not revert back to default settings when resetting the context,
         // so this method is just a delegate.
@@ -505,6 +542,10 @@ impl Resettable for Earshot {
 }
 
 impl<T: PcmS16Convertible + Copy> VAD<T> for Earshot {
+    /// Detects whether the given samples contain voiced audio.
+    /// NOTE: This implementation assumes that the samples are at the same sample rate as the configured VAD.
+    /// A mismatch is likely to produce incorrect results.
+    /// Samples of insufficient length are zero-padded/truncated to avoid internal panicking.
     fn voice_detected(&mut self, samples: &[T]) -> bool {
         // If a zero-length slice of samples are sent, there is obviously no voice
         if samples.len() == 0 {
@@ -549,9 +590,9 @@ impl<T: PcmS16Convertible + Copy> VAD<T> for Earshot {
     }
 }
 
-/// This small utility function handles the padding/truncation required by WebRTC implementations
-/// It returns the converted and padded audio, as well as the frame size so that methods consuming
-/// this function do not need to recompute the frame size.
+// This small utility function handles the padding/truncation required by WebRTC implementations
+// It returns the converted and padded audio, as well as the frame size so that methods consuming
+// this function do not need to recompute the frame size.
 fn prepare_webrtc_frames<T: PcmS16Convertible + Copy>(
     samples: &[T],
     frame_length_in_ms: usize,
