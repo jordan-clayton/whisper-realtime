@@ -1,18 +1,18 @@
 mod transcriber_tests {
-    use std::sync::{Arc, LazyLock};
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, LazyLock};
     use std::thread::scope;
 
-    use whisper_realtime::audio::audio_ring_buffer::AudioRingBuffer;
-    use whisper_realtime::audio::loading::load_normalized_audio_file;
-    use whisper_realtime::audio::WhisperAudioSample;
-    use whisper_realtime::transcriber::{Transcriber, WhisperOutput};
-    use whisper_realtime::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
-    use whisper_realtime::transcriber::vad::{Silero, VAD};
-    use whisper_realtime::utils;
-    use whisper_realtime::utils::constants;
-    use whisper_realtime::whisper::configs::WhisperRealtimeConfigs;
-    use whisper_realtime::whisper::model::DefaultModelType;
+    use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
+    use ribble_whisper::audio::loading::load_normalized_audio_file;
+    use ribble_whisper::audio::WhisperAudioSample;
+    use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
+    use ribble_whisper::transcriber::vad::{Silero, VAD};
+    use ribble_whisper::transcriber::{Transcriber, WhisperOutput};
+    use ribble_whisper::utils;
+    use ribble_whisper::utils::constants;
+    use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
+    use ribble_whisper::whisper::model::DefaultModelType;
 
     // Prepare an audio sample with a known output to try and make conditions as replicable as
     // possible
@@ -147,8 +147,13 @@ mod transcriber_tests {
 
         let edit_distance = strsim::levenshtein(&transcription, expected_offline_transcription);
 
-        assert!(edit_distance <= max_edit_distance,
-                "Failed to output reasonable match.\nEdit distance: {}, Max distance: {}\n, Output: {}, Expected: {}",
-                edit_distance, max_edit_distance, transcription, expected_offline_transcription)
+        assert!(
+            edit_distance <= max_edit_distance,
+            "Failed to output reasonable match.\nEdit distance: {}, Max distance: {}\n, Output: {}, Expected: {}",
+            edit_distance,
+            max_edit_distance,
+            transcription,
+            expected_offline_transcription
+        )
     }
 }

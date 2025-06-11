@@ -1,12 +1,12 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use hound::SampleFormat;
 
-use whisper_realtime::audio::pcm::IntoPcmS16;
-use whisper_realtime::transcriber::vad::{
+use ribble_whisper::audio::pcm::IntoPcmS16;
+use ribble_whisper::transcriber::vad::WebRtcSampleRate::R8kHz;
+use ribble_whisper::transcriber::vad::{
     Earshot, Silero, SileroBuilder, VAD, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness,
 };
-use whisper_realtime::transcriber::vad::WebRtcSampleRate::R8kHz;
-use whisper_realtime::utils::constants;
+use ribble_whisper::utils::constants;
 
 pub fn vad_benchmark(c: &mut Criterion) {
     // Load the audio sample to pass to each benchmark function

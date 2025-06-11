@@ -1,23 +1,23 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread::scope;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 use parking_lot::Mutex;
 
-use whisper_realtime::audio::audio_ring_buffer::AudioRingBuffer;
-use whisper_realtime::audio::loading::load_normalized_audio_file;
-use whisper_realtime::audio::WhisperAudioSample;
-use whisper_realtime::transcriber::{Transcriber, WhisperOutput};
-use whisper_realtime::transcriber::realtime_transcriber::{
+use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
+use ribble_whisper::audio::loading::load_normalized_audio_file;
+use ribble_whisper::audio::WhisperAudioSample;
+use ribble_whisper::transcriber::realtime_transcriber::{
     RealtimeTranscriber, RealtimeTranscriberBuilder, RealtimeTranscriberHandle,
 };
-use whisper_realtime::transcriber::vad::{Earshot, Silero, VAD, WebRtc};
-use whisper_realtime::utils;
-use whisper_realtime::utils::{constants, Receiver};
-use whisper_realtime::utils::errors::WhisperRealtimeError;
-use whisper_realtime::whisper::configs::WhisperRealtimeConfigs;
-use whisper_realtime::whisper::model::DefaultModelType;
+use ribble_whisper::transcriber::vad::{Earshot, Silero, WebRtc, VAD};
+use ribble_whisper::transcriber::{Transcriber, WhisperOutput};
+use ribble_whisper::utils;
+use ribble_whisper::utils::errors::WhisperRealtimeError;
+use ribble_whisper::utils::{constants, Receiver};
+use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
+use ribble_whisper::whisper::model::DefaultModelType;
 
 // Bear in mind, this benchmark is a little fragile given the test structure and the difficulty of
 // simulating the realtime loop. It is highly unlikely to fail at a point where the bench will

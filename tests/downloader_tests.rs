@@ -5,12 +5,12 @@ mod downloader_tests {
     use reqwest;
     use tokio::runtime::Runtime;
 
-    use whisper_realtime::downloader;
-    use whisper_realtime::downloader::AsyncDownload;
-    use whisper_realtime::downloader::SyncDownload;
-    use whisper_realtime::utils::callback::ProgressCallback;
-    use whisper_realtime::utils::errors::WhisperRealtimeError;
-    use whisper_realtime::whisper::model::DefaultModelType;
+    use ribble_whisper::downloader;
+    use ribble_whisper::downloader::AsyncDownload;
+    use ribble_whisper::downloader::SyncDownload;
+    use ribble_whisper::utils::callback::ProgressCallback;
+    use ribble_whisper::utils::errors::WhisperRealtimeError;
+    use ribble_whisper::whisper::model::DefaultModelType;
 
     fn delete_model(file_path: &std::path::Path) -> std::io::Result<()> {
         std::fs::remove_file(file_path)
@@ -115,7 +115,6 @@ mod downloader_tests {
         );
 
         let url = model_type.url();
-        let client = reqwest::blocking::Client::new();
 
         // NOTE: callback url is public and can be set after creating the struct by using the builder.
         let sync_downloader = downloader::downloaders::sync_download_request(url.as_str());

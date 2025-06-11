@@ -3,13 +3,14 @@ use std::sync::mpsc::sync_channel;
 use std::thread::{scope, sleep};
 use std::time::Duration;
 
-use criterion::{black_box, Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 #[cfg(feature = "crossbeam")]
 use crossbeam::channel;
 use sdl2::audio::AudioCallback;
+use std::hint::black_box;
 
-use whisper_realtime::audio::recorder;
-use whisper_realtime::utils::constants;
+use ribble_whisper::audio::recorder;
+use ribble_whisper::utils::constants;
 
 // Benchmark summary:
 // Arc<[T]> is orders of magnitude faster in single thread, multi-thread with light work
@@ -109,7 +110,7 @@ fn run_with_slice_st(n_samples: usize) {
     let (a_sender, a_receiver) = channel::bounded(n_samples + 1);
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
-    let mut recorder = whisper_realtime::audio::recorder::AudioRecorder::new_arc(a_sender);
+    let mut recorder = ribble_whisper::audio::recorder::AudioRecorder::new_arc(a_sender);
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -153,7 +154,7 @@ fn run_with_recorder_par(n_samples: usize, work_millis: u64) {
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
 
-    let mut recorder = whisper_realtime::audio::recorder::AudioRecorder::new_vec(a_sender);
+    let mut recorder = ribble_whisper::audio::recorder::AudioRecorder::new_vec(a_sender);
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -202,40 +203,46 @@ fn run_with_recorder_par(n_samples: usize, work_millis: u64) {
         });
         // Worker threads to simulate working on audio
         // Suppose wt1 is a write thread and takes slightly longer due to IO
-        let _wt1 = s.spawn(move || loop {
-            let output = wt1_recv.recv();
-            match output {
-                Ok(_) => {
-                    if work_millis > 0 {
-                        sleep(Duration::from_millis(work_millis));
+        let _wt1 = s.spawn(move || {
+            loop {
+                let output = wt1_recv.recv();
+                match output {
+                    Ok(_) => {
+                        if work_millis > 0 {
+                            sleep(Duration::from_millis(work_millis));
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         });
-        let _wt2 = s.spawn(move || loop {
-            let output = wt2_recv.recv();
-            match output {
-                Ok(_) => {
-                    let frac_millis = work_millis / 5;
-                    if frac_millis > 0 {
-                        sleep(Duration::from_millis(frac_millis));
+        let _wt2 = s.spawn(move || {
+            loop {
+                let output = wt2_recv.recv();
+                match output {
+                    Ok(_) => {
+                        let frac_millis = work_millis / 5;
+                        if frac_millis > 0 {
+                            sleep(Duration::from_millis(frac_millis));
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         });
 
-        let _wt3 = s.spawn(move || loop {
-            let output = wt3_recv.recv();
-            match output {
-                Ok(_) => {
-                    let frac_millis = work_millis / 5;
-                    if frac_millis > 0 {
-                        sleep(Duration::from_millis(frac_millis));
+        let _wt3 = s.spawn(move || {
+            loop {
+                let output = wt3_recv.recv();
+                match output {
+                    Ok(_) => {
+                        let frac_millis = work_millis / 5;
+                        if frac_millis > 0 {
+                            sleep(Duration::from_millis(frac_millis));
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         });
     });
@@ -249,7 +256,7 @@ fn run_with_slice_par(n_samples: usize, work_millis: u64) {
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
 
-    let mut recorder = whisper_realtime::audio::recorder::AudioRecorder::new_arc(a_sender);
+    let mut recorder = ribble_whisper::audio::recorder::AudioRecorder::new_arc(a_sender);
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -299,40 +306,46 @@ fn run_with_slice_par(n_samples: usize, work_millis: u64) {
         });
         // Worker threads to simulate working on audio
         // Suppose wt1 is a write thread and takes slightly longer due to IO
-        let _wt1 = s.spawn(move || loop {
-            let output = wt1_recv.recv();
-            match output {
-                Ok(_) => {
-                    if work_millis > 0 {
-                        sleep(Duration::from_millis(work_millis));
+        let _wt1 = s.spawn(move || {
+            loop {
+                let output = wt1_recv.recv();
+                match output {
+                    Ok(_) => {
+                        if work_millis > 0 {
+                            sleep(Duration::from_millis(work_millis));
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         });
-        let _wt2 = s.spawn(move || loop {
-            let output = wt2_recv.recv();
-            match output {
-                Ok(_) => {
-                    let frac_millis = work_millis / 5;
-                    if frac_millis > 0 {
-                        sleep(Duration::from_millis(frac_millis));
+        let _wt2 = s.spawn(move || {
+            loop {
+                let output = wt2_recv.recv();
+                match output {
+                    Ok(_) => {
+                        let frac_millis = work_millis / 5;
+                        if frac_millis > 0 {
+                            sleep(Duration::from_millis(frac_millis));
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         });
 
-        let _wt3 = s.spawn(move || loop {
-            let output = wt3_recv.recv();
-            match output {
-                Ok(_) => {
-                    let frac_millis = work_millis / 5;
-                    if frac_millis > 0 {
-                        sleep(Duration::from_millis(frac_millis));
+        let _wt3 = s.spawn(move || {
+            loop {
+                let output = wt3_recv.recv();
+                match output {
+                    Ok(_) => {
+                        let frac_millis = work_millis / 5;
+                        if frac_millis > 0 {
+                            sleep(Duration::from_millis(frac_millis));
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         });
     });

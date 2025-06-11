@@ -1,7 +1,7 @@
 // Model unit tests: Checking model path coherence, DefaultModelType url canonicalization
 #[cfg(test)]
 mod model_tests {
-    use whisper_realtime::whisper::model::DefaultModelType;
+    use ribble_whisper::whisper::model::DefaultModelType;
 
     #[test]
     fn test_model_file_path() {

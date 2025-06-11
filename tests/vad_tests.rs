@@ -4,17 +4,17 @@ mod vad_tests {
 
     use hound::SampleFormat;
 
-    use whisper_realtime::audio::pcm::IntoPcmS16;
-    use whisper_realtime::audio::resampler::{resample, ResampleableAudio};
-    use whisper_realtime::audio::WhisperAudioSample;
-    use whisper_realtime::transcriber::vad::{
-        Earshot, Resettable, Silero, SileroBuilder, VAD, WebRtc,
-        WebRtcBuilder, WebRtcFilterAggressiveness, WebRtcFrameLengthMillis, WebRtcSampleRate,
+    use ribble_whisper::audio::pcm::IntoPcmS16;
+    use ribble_whisper::audio::resampler::{resample, ResampleableAudio};
+    use ribble_whisper::audio::WhisperAudioSample;
+    use ribble_whisper::transcriber::vad::{
+        Earshot, Resettable, Silero, SileroBuilder, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness,
+        WebRtcFrameLengthMillis, WebRtcSampleRate, VAD,
     };
-    use whisper_realtime::utils::constants;
-    use whisper_realtime::utils::constants::WHISPER_SAMPLE_RATE;
+    use ribble_whisper::utils::constants;
+    use ribble_whisper::utils::constants::WHISPER_SAMPLE_RATE;
 
-// This audio file contains a speaker who methodically reads out a series of random sentences.
+    // This audio file contains a speaker who methodically reads out a series of random sentences.
     // The voice clip is not super clear, nor loud, and there are significant gaps between phrases,
     // making it a relatively good candidate for testing the accuracy of the voice detection.
     // Tests that probe this sample for speech are expected to determine there is, in fact, speech.
@@ -76,7 +76,10 @@ mod vad_tests {
             .build_webrtc()
             .expect("WebRtc expected to build without issues.");
         let voice_detected = vad.voice_detected(&AUDIO_SAMPLE);
-        assert!(voice_detected, "WebRtc failed to detect voice in audio samples @ 65% threshold with LowBitrate aggressiveness.");
+        assert!(
+            voice_detected,
+            "WebRtc failed to detect voice in audio samples @ 65% threshold with LowBitrate aggressiveness."
+        );
 
         let mut whisper_vad = WebRtc::try_new_whisper_realtime_default()
             .expect("Whisper-ready WebRtc VAD expected to build without issues");
@@ -97,7 +100,10 @@ mod vad_tests {
             .build_earshot()
             .expect("Earshot expected to build without issues.");
         let voice_detected = vad.voice_detected(&AUDIO_SAMPLE);
-        assert!(voice_detected, "Earshot failed to detect voice in audio samples @ 65% threshold with LowBitrate aggressiveness.");
+        assert!(
+            voice_detected,
+            "Earshot failed to detect voice in audio samples @ 65% threshold with LowBitrate aggressiveness."
+        );
 
         let mut whisper_vad = Earshot::try_new_whisper_realtime_default()
             .expect("Whisper-ready WebRtc VAD expected to build without issues");

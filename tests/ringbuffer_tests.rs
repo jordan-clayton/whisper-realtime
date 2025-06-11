@@ -1,8 +1,8 @@
 // Basic tests to ensure the ring_buffer runs properly and wraparound logic is correct
 #[cfg(test)]
 mod ringbuffer_tests {
-    use whisper_realtime::audio::audio_ring_buffer::AudioRingBuffer;
-    use whisper_realtime::utils::constants;
+    use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
+    use ribble_whisper::utils::constants;
 
     #[test]
     fn test_get_audio_length_ms() {

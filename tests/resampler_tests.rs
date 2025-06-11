@@ -3,20 +3,20 @@
 mod resampler_test {
     // NOTE: You will need to supply your own audio file and modify the tests accordingly.
 
-    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
 
     use hound::{SampleFormat, WavSpec, WavWriter};
 
-    use whisper_realtime::audio::{AudioChannelConfiguration, WhisperAudioSample};
-    use whisper_realtime::audio::loading::load_normalized_audio_file;
-    use whisper_realtime::audio::resampler::file_needs_normalizing;
-    use whisper_realtime::transcriber::offline_transcriber::OfflineTranscriberBuilder;
-    use whisper_realtime::transcriber::Transcriber;
-    use whisper_realtime::transcriber::vad::Silero;
-    use whisper_realtime::utils::constants;
-    use whisper_realtime::whisper::configs::WhisperConfigsV2;
-    use whisper_realtime::whisper::model::DefaultModelType;
+    use ribble_whisper::audio::loading::load_normalized_audio_file;
+    use ribble_whisper::audio::resampler::file_needs_normalizing;
+    use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
+    use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
+    use ribble_whisper::transcriber::vad::Silero;
+    use ribble_whisper::transcriber::Transcriber;
+    use ribble_whisper::utils::constants;
+    use ribble_whisper::whisper::configs::WhisperConfigsV2;
+    use ribble_whisper::whisper::model::DefaultModelType;
 
     // Tests the resampling from a file path, which will also implicitly using the track handle
     #[test]

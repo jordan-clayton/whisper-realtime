@@ -1,32 +1,32 @@
 use std::io::{stdout, Write};
 use std::process::Command;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread::scope;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use parking_lot::Mutex;
 use whisper_rs::install_logging_hooks;
 
-use whisper_realtime::audio::{AudioChannelConfiguration, WhisperAudioSample};
-use whisper_realtime::audio::audio_ring_buffer::AudioRingBuffer;
-use whisper_realtime::audio::microphone::AudioBackend;
-use whisper_realtime::downloader::downloaders::sync_download_request;
+use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
+use ribble_whisper::audio::microphone::AudioBackend;
+use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
+use ribble_whisper::downloader::downloaders::sync_download_request;
 #[cfg(feature = "downloader")]
-use whisper_realtime::downloader::SyncDownload;
-use whisper_realtime::transcriber::{
+use ribble_whisper::downloader::SyncDownload;
+use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
+use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
+use ribble_whisper::transcriber::vad::{Silero, WebRtc};
+use ribble_whisper::transcriber::Transcriber;
+use ribble_whisper::transcriber::{
     CallbackTranscriber, WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
 };
-use whisper_realtime::transcriber::offline_transcriber::OfflineTranscriberBuilder;
-use whisper_realtime::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
-use whisper_realtime::transcriber::Transcriber;
-use whisper_realtime::transcriber::vad::{Silero, WebRtc};
-use whisper_realtime::utils;
-use whisper_realtime::utils::callback::{ProgressCallback, StaticProgressCallback};
-use whisper_realtime::utils::constants;
-use whisper_realtime::whisper::configs::WhisperRealtimeConfigs;
-use whisper_realtime::whisper::model;
-use whisper_realtime::whisper::model::Model;
+use ribble_whisper::utils;
+use ribble_whisper::utils::callback::{ProgressCallback, StaticProgressCallback};
+use ribble_whisper::utils::constants;
+use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
+use ribble_whisper::whisper::model;
+use ribble_whisper::whisper::model::Model;
 
 fn main() {
     // Get a model. If not already downloaded, this will also download the model.
@@ -47,7 +47,7 @@ fn main() {
     // Note: Any VAD<T> + Send can be used.
     let vad = Silero::try_new_whisper_realtime_default()
         .expect("Earshot realtime VAD expected to build without issue");
-    // let vad = Silero::try_new_whisper_realtime_default()
+    // let vad = Silero::try_new_ribble_whisper_default()
     //     .expect("Silero Vad expected to build without issue.");
 
     // Transcriber
@@ -247,8 +247,9 @@ fn main() {
     };
 }
 
+// Downloads the model if it doesn't exist within CWD/data/models.
+// If the path does not exist already, this will create the full path upon downloading the model.
 fn prepare_model() -> Model {
-    // Download the model.
     let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
 
     // GPU acceleration is currently required to run larger models in realtime.

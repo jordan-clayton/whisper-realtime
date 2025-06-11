@@ -9,8 +9,8 @@
 mod model_integrity_tests {
     use std::collections::HashMap;
 
-    use whisper_realtime::whisper::integrity_utils::CHECKSUM_RE;
-    use whisper_realtime::whisper::model::{Checksum, DefaultModelType};
+    use ribble_whisper::whisper::integrity_utils::CHECKSUM_RE;
+    use ribble_whisper::whisper::model::{Checksum, DefaultModelType};
 
     fn delete_model(file_path: &std::path::Path) -> std::io::Result<()> {
         std::fs::remove_file(file_path)
