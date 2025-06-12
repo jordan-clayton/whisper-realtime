@@ -1,18 +1,21 @@
 # Ribble-Whisper
 
-An adapter library that provides a high-level API for realtime (streaming) and offline transcription using
-OpenAI's Whisper. This library wraps core [whisper-rs](https://github.com/tazz4843/whisper-rs) functionality,
-voice activity detection (VAD), file loading, as well as additional optional features (e.g. resampling) to make
-integrating Whisper into projects fast and easy.
+A high-level adapter for real-time (streaming) and offline transcription using
+OpenAI's Whisper. This crate wraps core [whisper-rs](https://github.com/tazz4843/whisper-rs) functionality,
+voice activity detection (VAD), file loading, and optional features like resampling, making Whisper easier to integrate
+into your own projects.
 
-Realtime transcription is fairly difficult to run well without GPU acceleration.
+Real-time transcription is fairly difficult to run well without GPU acceleration.
 It is recommended to build this crate using one of the exposed GPU backends (CUDA, Vulkan, etc.) to achieve
-better performance (see: [Features](#features)). Depending on your hardware, it might be feasible to run realtime on
+better performance (see: [Features](#features)). Depending on your hardware, it might be feasible to run real-time on
 CPU using a smaller quantized model (e.g. base.en-q5, tiny.en-q5). These are likely to be less accurate, but
 your results may vary.
 
-***NOTE: While this API is being used in [Ribble](https://github.com/jordan-clayton/ribble), bear in mind that it is a
-young project and may not necessarily be a good fit for production.***
+***NOTE: This library is primarily intended for personal and research use, but is actively used
+in [Ribble](https://github.com/jordan-clayton/ribble) and has proven stable in that context.
+While it has not been tested in large-scale deployments, it is likely suitable for production--though this is not
+guaranteed.
+***
 
 ## External Dependencies
 
@@ -34,27 +37,30 @@ Building is expected to work out-of-the-box for Windows/macOS/Linux.
 If you encounter issues with building due to whisper-rs,
 check [here](https://github.com/tazz4843/whisper-rs/blob/master/BUILDING.md).
 
-***NOTE: This library has not been tested on platforms other than Windows/macOS/Linux, and thus I cannot guarantee
-support.***
+***NOTE: This library currently targets Windows, macOS, and Linux. Other platforms are not officially supported or
+tested.***
 
-## Stream Example
+## Quickstart: Real-time Transcription
 
 ```bash
 git clone --recursive https://github.com/jordan-clayton/ribble-whisper.git
 cd ribble_whisper
-# Hardware acceleration is more-or-less required for realtime transcription.
+# Hardware acceleration is more-or-less required for real-time transcription.
 # Swap out CUDA with your preferred backend (see: Features).
 cargo run --example realtime_stream --features "cuda downloader"
 ```
 
-## Example Usage (Realtime)
+## Example Usage (Real-time)
+
+Here is a minimal but complete example. For a more detailed version,
+see [examples/realtime_stream](https://github.com/jordan-clayton/whisper-realtime/blob/main/examples/realtime_stream.rs).
 
 ```rust
-// Handle imports accordingly. They are omitted here for brevity.
+// Imports are omitted here for brevity; refer to examples/realtime_stream.
 use ribble_whisper::*;
 fn main() {
     // Handle this how you see fit and pass a model to the configs builder.
-    // See: realtime_stream::prepare_model() for an example of how to use the downloading API to retreive a model from huggingface.
+    // See: realtime_stream::prepare_model() for an example of how to use the downloading API to retrieve a model from huggingface.
     let model = prepare_model();
     // Set the number of threads according to your hardware.
     // If you can allocate around 7-8, do so as this tends to be more performant.
@@ -67,7 +73,6 @@ fn main() {
 
     // Prepare a ring buffer for writing into; the RealtimeTranscriber reads from this buffer as part of
     // its transcription loop.
-    // If no additional processing is required outside of transcription, the ClosedLoopCapture API is simpler.
     let audio_ring_buffer = AudioRingBuffer::<f32>::default();
 
     // Message channels for grabbing audio from SDL, and sending transcribed segments to a UI.
@@ -79,7 +84,7 @@ fn main() {
 
     // Note: Any VAD<T> + Send can be used in a RealtimeTranscriber for voice detection.
     let vad = Silero::try_new_whisper_realtime_default()
-        .expect("Earshot realtime VAD expected to build without issue");
+        .expect("Silero realtime VAD expected to build without issue when configured properly.");
 
     // Set up the RealtimeTranscriber + Ready handle.
     let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<WebRtc>::new()
@@ -88,7 +93,7 @@ fn main() {
         .with_output_sender(text_sender)
         .with_voice_activity_detector(vad)
         .build()
-        .expect("RealtimeTranscriber expected to build without issues.");
+        .expect("RealtimeTranscriber expected to build without issues when configured properly.");
 
     // Atomic flag for starting/stopping the transcription loop.
     // This is a "UI control" to allow the user to stop the transcription without an explicit timeout.
@@ -96,12 +101,13 @@ fn main() {
 
     // Set up the Audio Backend.
     let audio_backend = AudioBackend::new().expect("Audio backend should build without issue");
-    // The default implementation assumes there will be additional processing
+    // The default implementation assumes there will be additional processing happening concurrently with transcription.
+    // If this is not required, consider the ClosedLoopCapture for simpler audio cpature API.
     let mic: FanoutMicCapture<f32, UseArc> = audio_backend
         .build_whisper_fanout_default(audio_sender)
         .expect("Mic handle expected to build without issue.");
 
-    // Ribble-Whisper is designed to be as flexible as possible, but realtime transcriptions needs to be run using 
+    // Ribble-Whisper is designed to be as flexible as possible, but real-time transcriptions need to be run using 
     // asynchronous/concurrent programming.
     // It is recommended to do this using threads.
     let transcriber_thread = scope(|s| {
@@ -187,9 +193,8 @@ fn main() {
     // Stop audio capture.
     mic.pause();
 
-    // Obtain the final transcription string
-    // The scoped thread handle returns Result<Result<String, RibbleWhisperError>>, so this needs to be handled accordingly.
-    // Since concurrency is not explicitly handled by this library, there is no mapping to an equivalent RibbleWhisperError.
+    // Obtain the final transcription string:
+    // The outer result is for thread panics, the inner result is for transcriber logic.
     let transcription = transcriber_thread
         .expect("Transcription thread should not panic.")
         .expect("Transcription should return without error.");
@@ -198,17 +203,15 @@ fn main() {
 }
 ```
 
-- See: [realtime_stream](https://github.com/jordan-clayton/whisper-realtime/blob/main/examples/realtime_stream.rs)
-
 ## Features
 
-### Whisper Backends:
+### Whisper Hardware Acceleration
 
 This library follows
 whisper-rs [conventions](https://github.com/tazz4843/whisper-rs/tree/master?tab=readme-ov-file#feature-flags).
 All backends are disabled by default and considered opt-in features.
 It is recommended to enable at least one of these if supported by your system to ensure
-that realtime performance is acceptable.
+that real-time performance is acceptable.
 
 - cuda: enable CUDA support (Windows and Linux)
 - hipblas: enable ROCm/hipBLAS support (Linux only)
@@ -217,12 +220,12 @@ that realtime performance is acceptable.
 - coreml: enable CoreML support. Implicitly enables metal support (Apple only)
 - vulkan: enable Vulkan support (Windows and Linux)
 
-### Additional Whisper-rs Flags:
+### Additional Whisper-rs Flags
 
 - log_backend: enable whisper-rs log_backend for hooking into whisper.cpp's log output
 - tracing_backend: enable whisper-rs tracing_backend for hooking into whisper.cpp's log output
 
-### Symphonia Codecs:
+### Symphonia Codecs
 
 See: [here](https://github.com/pdeljanov/Symphonia?tab=readme-ov-file#codecs-decoders) for more information.
 These flags implicitly enable the required format container flags required to support the codec.
@@ -232,11 +235,11 @@ These flags implicitly enable the required format container flags required to su
 - symphonia-aac: enable support for AAC audio
 - symphonia-alac: enable support for ALAC audio
 
-### Additional Symphonia Flags:
+### Additional Symphonia Flags
 
 - symphonia-simd: enables all Symphonia SIMD optimizations
 
-### Additional Features:
+### Additional Features
 
 - all: enable all optional additional features
 - resampler: enable support for resampling audio and normalizing audio for transcribing with Whisper (highly
@@ -267,14 +270,15 @@ This project includes third-party software components:
 ## A Note About Tests
 
 Many of the tests and benchmarks in this project rely on audio files not included as part of the project.
-These will need to be replaced if you wish to run any of the tests. I do not claim any rights to these files
+You will need to provide your own audio files if you wish to run the included tests and benchmarks. I do not claim any
+rights to these files
 nor will they ever be distributed; they are for testing purposes only.
 
 ### Telemetry Concerns
 
-This crate on its own does not collect telemetry, but one of the provided Voice Activity Detection implementations
-might, as
-mentioned [here](https://github.com/jordan-clayton/whisper-realtime/blob/dec51c350d80a5442f515f08737c5c14b5b07868/src/transcriber/vad.rs#L36).
+This crate on its own does not collect telemetry. However, one of the included Voice Activity Detection implementations
+may, as
+noted [here](https://github.com/jordan-clayton/whisper-realtime/blob/dec51c350d80a5442f515f08737c5c14b5b07868/src/transcriber/vad.rs#L36).
 This only affects Windows platforms, but if this is of concern, prefer using one of the other provided implementations
 (WebRtc, etc.) or implement VAD with your preferred solution. At some point in the distant future, I will look into
 self-hosting

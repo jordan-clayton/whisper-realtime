@@ -47,7 +47,7 @@ fn main() {
 
     // Note: Any VAD<T> + Send can be used.
     let vad = Silero::try_new_whisper_realtime_default()
-        .expect("Earshot realtime VAD expected to build without issue");
+        .expect("Silero realtime VAD expected to build without issue when configured properly.");
 
     // Transcriber
     let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<WebRtc>::new()
@@ -56,7 +56,7 @@ fn main() {
         .with_output_sender(text_sender)
         .with_voice_activity_detector(vad)
         .build()
-        .expect("RealtimeTranscriber expected to build without issues.");
+        .expect("RealtimeTranscriber expected to build without issues when configured properly.");
 
     // Optional store + re-transcription.
     // Get input for stdin.
