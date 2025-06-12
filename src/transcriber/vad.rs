@@ -3,7 +3,7 @@ use voice_activity_detector::{IteratorExt, LabeledAudio};
 
 use crate::audio::pcm::PcmS16Convertible;
 use crate::utils::constants;
-use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::errors::RibbleWhisperError;
 
 /// A voice activity detector backend for use with [crate::transcriber::realtime_transcriber::RealtimeTranscriber]
 /// or [crate::transcriber::offline_transcriber::OfflineTranscriber].
@@ -75,7 +75,7 @@ impl SileroBuilder {
     /// Returns Err when [voice_activity_detector::VoiceActivityDetector]'s builder fails to build.
     /// To ensure this doesn't happen, ensure the sample rate and chunk size are provided
     /// and that the sample rate is no larger than 31.25 times the chunk size.
-    pub fn build(self) -> Result<Silero, WhisperRealtimeError> {
+    pub fn build(self) -> Result<Silero, RibbleWhisperError> {
         voice_activity_detector::VoiceActivityDetector::builder()
             .sample_rate(self.sample_rate)
             .chunk_size(self.chunk_size)
@@ -85,7 +85,7 @@ impl SileroBuilder {
                 detection_probability_threshold: self.detection_probability_threshold,
             })
             .map_err(|e| {
-                WhisperRealtimeError::ParameterError(format!(
+                RibbleWhisperError::ParameterError(format!(
                     "Failed to build Silero VAD. Error: {}",
                     e
                 ))
@@ -114,7 +114,7 @@ impl Silero {
     }
 
     /// A "Default" whisper-ready Silero configuration for realtime transcription.
-    pub fn try_new_whisper_realtime_default() -> Result<Self, WhisperRealtimeError> {
+    pub fn try_new_whisper_realtime_default() -> Result<Self, RibbleWhisperError> {
         SileroBuilder::new()
             .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
             .with_chunk_size(constants::SILERO_CHUNK_SIZE)
@@ -123,7 +123,7 @@ impl Silero {
     }
 
     /// A "Default" whisper-ready Silero configuration for offline transcription.
-    pub fn try_new_whisper_offline_default() -> Result<Self, WhisperRealtimeError> {
+    pub fn try_new_whisper_offline_default() -> Result<Self, RibbleWhisperError> {
         SileroBuilder::new()
             .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
             .with_chunk_size(constants::SILERO_CHUNK_SIZE)
@@ -333,7 +333,7 @@ impl WebRtcBuilder {
 
     /// Builds a [crate::transcriber::vad::WebRtc] VAD backend.
     /// Returns Err if there's an internal panic due to a memory allocation error.
-    pub fn build_webrtc(self) -> Result<WebRtc, WhisperRealtimeError> {
+    pub fn build_webrtc(self) -> Result<WebRtc, RibbleWhisperError> {
         std::panic::catch_unwind(|| {
             webrtc_vad::Vad::new_with_rate_and_mode(
                 self.sample_rate.to_webrtc_sample_rate(),
@@ -349,14 +349,14 @@ impl WebRtcBuilder {
             realtime_detection_probability_threshold: self.detection_probability_threshold,
         })
         .map_err(|_| {
-            WhisperRealtimeError::ParameterError(
+            RibbleWhisperError::ParameterError(
                 "Failed to build WebRTC due to memory allocation error.".to_string(),
             )
         })
     }
 
     /// Builds a [crate::transcriber::vad::Earshot] VAD backend.
-    pub fn build_earshot(self) -> Result<Earshot, WhisperRealtimeError> {
+    pub fn build_earshot(self) -> Result<Earshot, RibbleWhisperError> {
         let vad = earshot::VoiceActivityDetector::new(self.aggressiveness.to_earshot_vad_profile());
         let predicate = match self.sample_rate {
             WebRtcSampleRate::R8kHz => earshot::VoiceActivityDetector::predict_8khz,
@@ -396,7 +396,7 @@ impl WebRtc {
     }
 
     /// A "Default" whisper-ready WebRtc configuration for realtime transcription.
-    pub fn try_new_whisper_realtime_default() -> Result<Self, WhisperRealtimeError> {
+    pub fn try_new_whisper_realtime_default() -> Result<Self, RibbleWhisperError> {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
@@ -404,7 +404,7 @@ impl WebRtc {
             .build_webrtc()
     }
     /// A "Default" whisper-ready WebRtc configuration for offline transcription.
-    pub fn try_new_whisper_offline_default() -> Result<Self, WhisperRealtimeError> {
+    pub fn try_new_whisper_offline_default() -> Result<Self, RibbleWhisperError> {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
@@ -514,7 +514,7 @@ impl Earshot {
     }
 
     /// A "Default" whisper-ready Earhshot configuration for realtime transcription.
-    pub fn try_new_whisper_realtime_default() -> Result<Self, WhisperRealtimeError> {
+    pub fn try_new_whisper_realtime_default() -> Result<Self, RibbleWhisperError> {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
@@ -523,7 +523,7 @@ impl Earshot {
     }
 
     /// A "Default" whisper-ready Earhshot configuration for offline transcription.
-    pub fn try_new_whisper_offline_default() -> Result<Self, WhisperRealtimeError> {
+    pub fn try_new_whisper_offline_default() -> Result<Self, RibbleWhisperError> {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
