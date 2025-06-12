@@ -1,6 +1,6 @@
-use std::io::{copy, Read};
 #[cfg(feature = "downloader-async")]
 use std::io::Write;
+use std::io::{copy, Read};
 use std::path::Path;
 
 #[cfg(feature = "downloader-async")]
@@ -11,11 +11,11 @@ use futures::StreamExt;
 use futures_core::stream::Stream;
 use url::Url;
 
-use crate::downloader::{SyncDownload, Writable};
 #[cfg(feature = "downloader-async")]
 use crate::downloader::AsyncDownload;
+use crate::downloader::{SyncDownload, Writable};
 use crate::utils::callback::{Callback, Nop};
-use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::errors::RibbleWhisperError;
 
 /// Streams in bytes (asynchrnously) to download data.
 /// Current progress can be obtained by supplying a Callback.
@@ -109,7 +109,7 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argum
         &mut self,
         file_directory: &Path,
         file_name: &str,
-    ) -> Result<(), WhisperRealtimeError> {
+    ) -> Result<(), RibbleWhisperError> {
         Self::prepare_file_path(file_directory)?;
 
         let mut destination = file_directory.to_path_buf();
@@ -220,7 +220,7 @@ impl<R: Read, CB: Callback<Argument = usize>> SyncDownload for SyncDownloader<R,
         &mut self,
         file_directory: &Path,
         file_name: &str,
-    ) -> Result<(), WhisperRealtimeError> {
+    ) -> Result<(), RibbleWhisperError> {
         let path_available = Self::prepare_file_path(file_directory);
         if let Err(e) = path_available {
             return Err(e);
@@ -249,7 +249,7 @@ pub async fn async_download_request(
     url: &str,
 ) -> Result<
     StreamDownloader<impl Stream<Item = Result<Bytes, reqwest::Error>>, Nop<usize>>,
-    WhisperRealtimeError,
+    RibbleWhisperError,
 > {
     let m_url = Url::parse(url)?;
     let client = reqwest::Client::new();
@@ -257,7 +257,7 @@ pub async fn async_download_request(
     let res = client.get(m_url).send().await?;
 
     if !res.status().is_success() {
-        return Err(WhisperRealtimeError::DownloadError(format!(
+        return Err(RibbleWhisperError::DownloadError(format!(
             "Failed to download, status code: {}",
             res.status()
         )));
@@ -265,7 +265,7 @@ pub async fn async_download_request(
 
     let total_size = res
         .content_length()
-        .ok_or(WhisperRealtimeError::ParameterError(
+        .ok_or(RibbleWhisperError::ParameterError(
             "Failed to get content length".to_owned(),
         ))? as usize;
 
@@ -286,14 +286,14 @@ pub async fn async_download_request(
 
 pub fn sync_download_request(
     url: &str,
-) -> Result<SyncDownloader<impl Read, Nop<usize>>, WhisperRealtimeError> {
+) -> Result<SyncDownloader<impl Read, Nop<usize>>, RibbleWhisperError> {
     let m_url = Url::parse(url)?;
     let client = reqwest::blocking::Client::new();
 
     let res = client.get(m_url).send()?;
 
     if !res.status().is_success() {
-        return Err(WhisperRealtimeError::DownloadError(format!(
+        return Err(RibbleWhisperError::DownloadError(format!(
             "Failed to download, status code: {}",
             res.status()
         )));
@@ -301,7 +301,7 @@ pub fn sync_download_request(
 
     let total_size = res
         .content_length()
-        .ok_or(WhisperRealtimeError::ParameterError(
+        .ok_or(RibbleWhisperError::ParameterError(
             "Failed to get content length".to_owned(),
         ))? as usize;
 

@@ -14,7 +14,7 @@ use ribble_whisper::transcriber::realtime_transcriber::{
 use ribble_whisper::transcriber::vad::{Earshot, Silero, WebRtc, VAD};
 use ribble_whisper::transcriber::{Transcriber, WhisperOutput};
 use ribble_whisper::utils;
-use ribble_whisper::utils::errors::WhisperRealtimeError;
+use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::{constants, Receiver};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::DefaultModelType;
@@ -218,7 +218,7 @@ fn prep_configs() -> WhisperRealtimeConfigs {
 fn build_transcriber<V: VAD<f32> + Send + Sync>(
     configs: &WhisperRealtimeConfigs,
     audio_buffer: Arc<AudioRingBuffer<f32>>,
-    build_method: fn() -> Result<V, WhisperRealtimeError>,
+    build_method: fn() -> Result<V, RibbleWhisperError>,
 ) -> (
     RealtimeTranscriber<V>,
     RealtimeTranscriberHandle,
@@ -244,7 +244,7 @@ fn build_transcriber<V: VAD<f32> + Send + Sync>(
     // Transcriber
     let (transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<V>::new()
         .with_configs(configs.clone())
-        .with_audio_buffer(Arc::clone(&audio_buffer))
+        .with_audio_buffer(&audio_buffer)
         .with_output_sender(text_sender)
         .with_voice_activity_detector(vad)
         .build()

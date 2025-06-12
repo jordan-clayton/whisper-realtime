@@ -1,12 +1,12 @@
 use std::marker::PhantomData;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use parking_lot::Mutex;
 use sdl2::audio::AudioFormatNum;
 
 use crate::utils::constants;
-use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::errors::RibbleWhisperError;
 
 // This is a workaround for trait aliasing until the feature reaches stable.
 pub trait AudioSampleFormat: Default + Clone + Copy + AudioFormatNum + 'static {}
@@ -20,8 +20,8 @@ struct InnerAudioRingBuffer<T: AudioSampleFormat> {
     capacity_ms: AtomicUsize,
     buffer_capacity: AtomicUsize,
     sample_rate: AtomicUsize,
-    // If at some point in the future it becomes imperative to support multiple readers, this should
-    // change to an RW lock.
+    // If at some point in the future it becomes imperative to support a reader/writer paradigm
+    // this will change to an RW lock.
     buffer: Mutex<Vec<T>>,
 }
 
@@ -65,17 +65,17 @@ impl<T: AudioSampleFormat> AudioRingBufferBuilder<T> {
 
     /// Build an AudioRingBuffer with the desired parameters.
     /// This will return Err if the length/sample rate are missing or zero.
-    pub fn build(self) -> Result<AudioRingBuffer<T>, WhisperRealtimeError> {
+    pub fn build(self) -> Result<AudioRingBuffer<T>, RibbleWhisperError> {
         let c_ms =
             self.capacity_ms
                 .filter(|&ms| ms > 0)
-                .ok_or(WhisperRealtimeError::ParameterError(
+                .ok_or(RibbleWhisperError::ParameterError(
                     "AudioRingBufferBuilder has zero-length buffer.".to_string(),
                 ))?;
         let s_rate =
             self.sample_rate
                 .filter(|&sr| sr > 0)
-                .ok_or(WhisperRealtimeError::ParameterError(
+                .ok_or(RibbleWhisperError::ParameterError(
                     " AudioRingBufferBuilder has zero-size sample rate.".to_string(),
                 ))?;
 

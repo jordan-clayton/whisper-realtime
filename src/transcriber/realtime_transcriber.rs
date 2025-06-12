@@ -1,15 +1,15 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
+use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use strsim::jaro_winkler;
 
 use crate::audio::audio_ring_buffer::AudioRingBuffer;
-use crate::transcriber::{Transcriber, WhisperControlPhrase, WhisperOutput, WhisperSegment};
 use crate::transcriber::vad::VAD;
+use crate::transcriber::{Transcriber, WhisperControlPhrase, WhisperOutput, WhisperSegment};
 use crate::utils::constants;
-use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::errors::RibbleWhisperError;
 use crate::utils::Sender;
 use crate::whisper::configs::WhisperRealtimeConfigs;
 
@@ -20,7 +20,7 @@ use crate::whisper::configs::WhisperRealtimeConfigs;
 /// See: examples/realtime_transcriber.rs for example usage.
 pub struct RealtimeTranscriberBuilder<V: VAD<f32>> {
     configs: Option<WhisperRealtimeConfigs>,
-    audio_buffer: Option<Arc<AudioRingBuffer<f32>>>,
+    audio_buffer: Option<AudioRingBuffer<f32>>,
     output_sender: Option<Sender<WhisperOutput>>,
     voice_activity_detector: Option<V>,
 }
@@ -41,8 +41,8 @@ impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
         self
     }
     /// Set the (shared) AudioRingBuffer.
-    pub fn with_audio_buffer(mut self, audio_buffer: Arc<AudioRingBuffer<f32>>) -> Self {
-        self.audio_buffer = Some(audio_buffer);
+    pub fn with_audio_buffer(mut self, audio_buffer: &AudioRingBuffer<f32>) -> Self {
+        self.audio_buffer = Some(audio_buffer.clone());
         self
     }
 
@@ -71,23 +71,21 @@ impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
     /// Returns Err when a parameter is missing.
     pub fn build(
         self,
-    ) -> Result<(RealtimeTranscriber<V>, RealtimeTranscriberHandle), WhisperRealtimeError> {
-        let configs = self.configs.ok_or(WhisperRealtimeError::ParameterError(
+    ) -> Result<(RealtimeTranscriber<V>, RealtimeTranscriberHandle), RibbleWhisperError> {
+        let configs = self.configs.ok_or(RibbleWhisperError::ParameterError(
             "Configs missing in RealtimeTranscriberBuilder.".to_string(),
         ))?;
-        let audio_feed = self
-            .audio_buffer
-            .ok_or(WhisperRealtimeError::ParameterError(
-                "Audio feed missing in RealtimeTranscriberBuilder".to_string(),
-            ))?;
+        let audio_feed = self.audio_buffer.ok_or(RibbleWhisperError::ParameterError(
+            "Audio feed missing in RealtimeTranscriberBuilder".to_string(),
+        ))?;
         let output_sender = self
             .output_sender
-            .ok_or(WhisperRealtimeError::ParameterError(
+            .ok_or(RibbleWhisperError::ParameterError(
                 "Output sender missing in RealtimeTranscriberBuilder".to_string(),
             ))?;
         let vad = self
             .voice_activity_detector
-            .ok_or(WhisperRealtimeError::ParameterError(
+            .ok_or(RibbleWhisperError::ParameterError(
                 "Voice activity detector missing in RealtimeTranscriberBuilder.".to_string(),
             ))?;
         let ready = Arc::new(AtomicBool::new(false));
@@ -113,7 +111,7 @@ impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
 pub struct RealtimeTranscriber<V: VAD<f32>> {
     configs: WhisperRealtimeConfigs,
     /// The shared input buffer from which samples are pulled for transcription
-    audio_feed: Arc<AudioRingBuffer<f32>>,
+    audio_feed: AudioRingBuffer<f32>,
     /// For sending output to a UI
     output_sender: Sender<WhisperOutput>,
     /// Ready flag.
@@ -142,13 +140,13 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
     fn process_audio(
         &mut self,
         run_transcription: Arc<AtomicBool>,
-    ) -> Result<String, WhisperRealtimeError> {
+    ) -> Result<String, RibbleWhisperError> {
         // Alert the UI
         self.output_sender
             .send(WhisperOutput::ControlPhrase(
                 WhisperControlPhrase::GettingReady,
             ))
-            .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
+            .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?;
         let mut t_last = Instant::now();
 
         // To collect audio from the ring buffer.
@@ -176,7 +174,7 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
             .send(WhisperOutput::ControlPhrase(
                 WhisperControlPhrase::StartSpeaking,
             ))
-            .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
+            .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?;
         while run_transcription.load(Ordering::Acquire) {
             let t_now = Instant::now();
             let diff = t_now - t_last;
@@ -386,7 +384,7 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
             if !output_string.is_empty() {
                 self.output_sender
                     .send(WhisperOutput::ConfirmedTranscription(output_string.clone()))
-                    .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?
+                    .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?
             }
 
             // If there are segments, push them to the UI to update the display.
@@ -397,7 +395,7 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
             if !working_set.is_empty() {
                 self.output_sender
                     .send(WhisperOutput::CurrentSegments(send_out))
-                    .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?
+                    .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?
             }
 
             // If the timeout is set to 0, this loop runs infinitely.
@@ -411,9 +409,7 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
                     .send(WhisperOutput::ControlPhrase(
                         WhisperControlPhrase::TranscriptionTimeout,
                     ))
-                    .map_err(|e| {
-                        WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner())
-                    })?;
+                    .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?;
                 run_transcription.store(false, Ordering::Release);
             }
         }
@@ -422,7 +418,7 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
             .send(WhisperOutput::ControlPhrase(
                 WhisperControlPhrase::EndTranscription,
             ))
-            .map_err(|e| WhisperRealtimeError::TranscriptionSenderError(e.0.into_inner()))?;
+            .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?;
 
         // Clean up the whisper context
         drop(whisper_state);

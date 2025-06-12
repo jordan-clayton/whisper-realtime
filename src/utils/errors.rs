@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum WhisperRealtimeError {
+pub enum RibbleWhisperError {
     /// Called on a data-channel failure
     /// Contains the output message, so it can be recovered.
     #[error("{0}")]

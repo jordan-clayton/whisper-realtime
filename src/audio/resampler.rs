@@ -10,7 +10,7 @@ use symphonia::core::probe::Hint;
 
 use crate::audio::WhisperAudioSample;
 use crate::utils::constants;
-use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::errors::RibbleWhisperError;
 
 /// Encapsulates a reference to a slice of (supported-format) audio to be resampled.
 pub enum ResampleableAudio<'a> {
@@ -33,9 +33,9 @@ pub fn resample(
     out_sample_rate: f64,
     in_sample_rate: f64,
     num_channels: usize,
-) -> Result<WhisperAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, RibbleWhisperError> {
     if num_channels == 0 {
-        return Err(WhisperRealtimeError::ParameterError(
+        return Err(RibbleWhisperError::ParameterError(
             "Zero channels.".to_owned(),
         ));
     }
@@ -78,7 +78,7 @@ pub fn resample(
 fn resample_mono(
     samples: Vec<f32>,
     mut resampler: SincFixedIn<f32>,
-) -> Result<WhisperAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, RibbleWhisperError> {
     let waves_in = vec![samples];
     let waves_out = resampler.process(&waves_in, None)?;
     Ok(WhisperAudioSample::F32(
@@ -90,7 +90,7 @@ fn resample_mono(
 fn resample_stereo(
     samples: Vec<f32>,
     mut resampler: SincFixedIn<f32>,
-) -> Result<WhisperAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, RibbleWhisperError> {
     let waves_in: Vec<Vec<f32>> = vec![
         samples.iter().step_by(2).copied().collect(),
         samples[1..].iter().step_by(2).copied().collect(),
@@ -122,21 +122,21 @@ pub fn normalize_audio(
     samples: &ResampleableAudio,
     in_sample_rate: f64,
     num_channels: usize,
-) -> Result<WhisperAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, RibbleWhisperError> {
     let resampled = resample(samples, 16000., in_sample_rate, num_channels)?;
     if let WhisperAudioSample::F32(stereo) = resampled {
         let mono = whisper_rs::convert_stereo_to_mono_audio(&stereo)?;
         Ok(WhisperAudioSample::F32(mono.into_boxed_slice()))
     } else {
         // This should never, ever happen
-        Err(WhisperRealtimeError::ParameterError(
+        Err(RibbleWhisperError::ParameterError(
             "Resampling returned invalid audio format".to_owned(),
         ))
     }
 }
 
 /// Opens an audio file to check whether it needs to be resampled to 16kHz for use with whisper.
-pub fn file_needs_normalizing<P: AsRef<Path>>(path: P) -> Result<bool, WhisperRealtimeError> {
+pub fn file_needs_normalizing<P: AsRef<Path>>(path: P) -> Result<bool, RibbleWhisperError> {
     let file = Box::new(File::open(path)?);
     let mss = MediaSourceStream::new(file, Default::default());
     let hint = Hint::new();
@@ -148,7 +148,7 @@ pub fn file_needs_normalizing<P: AsRef<Path>>(path: P) -> Result<bool, WhisperRe
     let format = probed.format;
     let track = format
         .default_track()
-        .ok_or(WhisperRealtimeError::ParameterError(
+        .ok_or(RibbleWhisperError::ParameterError(
             "Failed to get default track".to_owned(),
         ))?;
     needs_normalizing(track)
@@ -157,11 +157,11 @@ pub fn file_needs_normalizing<P: AsRef<Path>>(path: P) -> Result<bool, WhisperRe
 /// Uses a [symphonia_core::formats::Track] to determine if audio needs to be resampled to 16kHz
 /// for use with whisper.
 #[inline]
-pub fn needs_normalizing(track: &Track) -> Result<bool, WhisperRealtimeError> {
+pub fn needs_normalizing(track: &Track) -> Result<bool, RibbleWhisperError> {
     let sample_rate = track
         .codec_params
         .sample_rate
-        .ok_or(WhisperRealtimeError::ParameterError(
+        .ok_or(RibbleWhisperError::ParameterError(
             "Failed to get sample rate".to_owned(),
         ))? as f64;
     Ok(sample_rate != constants::WHISPER_SAMPLE_RATE)

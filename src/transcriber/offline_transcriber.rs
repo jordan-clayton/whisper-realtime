@@ -1,17 +1,17 @@
 use std::ffi::{c_int, c_void};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use whisper_rs::WhisperProgressCallback;
 
 use crate::audio::{AudioChannelConfiguration, WhisperAudioSample};
+use crate::transcriber::vad::VAD;
 use crate::transcriber::{
     CallbackTranscriber, OfflineWhisperProgressCallback, Transcriber, WhisperCallbacks,
     WhisperOutput,
 };
-use crate::transcriber::vad::VAD;
-use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::errors::RibbleWhisperError;
 use crate::utils::Sender;
 use crate::whisper::configs::WhisperConfigsV2;
 
@@ -86,17 +86,17 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
     /// ** missing whisper configurations,
     /// ** missing channel configurations,
     /// ** missing audio
-    pub fn build(self) -> Result<OfflineTranscriber<V>, WhisperRealtimeError> {
-        let configs = self.configs.ok_or(WhisperRealtimeError::ParameterError(
+    pub fn build(self) -> Result<OfflineTranscriber<V>, RibbleWhisperError> {
+        let configs = self.configs.ok_or(RibbleWhisperError::ParameterError(
             "Configs missing in OfflineTranscriberBuilder..".to_string(),
         ))?;
         let sender = self.sender;
         let audio = self.audio.filter(|audio| audio.len() > 0).ok_or(
-            WhisperRealtimeError::ParameterError(
+            RibbleWhisperError::ParameterError(
                 "Audio missing in OfflineTranscriberBuilder.".to_string(),
             ),
         )?;
-        let channels = self.channels.ok_or(WhisperRealtimeError::ParameterError(
+        let channels = self.channels.ok_or(RibbleWhisperError::ParameterError(
             "Channel configurations missing in OfflineTranscriberBuilder.".to_string(),
         ))?;
         // Vad can be None; if there is no VAD provided, the full speech will be processed.
@@ -133,7 +133,7 @@ impl<V: VAD<f32>> OfflineTranscriber<V> {
         &mut self,
         full_params: whisper_rs::FullParams,
         run_transcription: Arc<AtomicBool>,
-    ) -> Result<String, WhisperRealtimeError> {
+    ) -> Result<String, RibbleWhisperError> {
         let whisper_context_params = self.configs.to_whisper_context_params();
         let file_path_string = self.configs.model().file_path_string()?;
         // Set up a whisper context
@@ -177,7 +177,7 @@ impl<V: VAD<f32>> OfflineTranscriber<V> {
             // Otherwise, the abort callback fired true, and run_transcription is false - indicating
             // the user has stopped the transcription.
             if run_transcription.load(Ordering::Acquire) {
-                return Err(WhisperRealtimeError::WhisperError(e));
+                return Err(RibbleWhisperError::WhisperError(e));
             }
         }
 
@@ -216,7 +216,7 @@ impl<V: VAD<f32>> Transcriber for OfflineTranscriber<V> {
     fn process_audio(
         &mut self,
         run_transcription: Arc<AtomicBool>,
-    ) -> Result<String, WhisperRealtimeError> {
+    ) -> Result<String, RibbleWhisperError> {
         let confs = Arc::clone(&self.configs);
         let mut full_params = confs.to_whisper_full_params();
         // Abort callback
@@ -249,7 +249,7 @@ where
         &mut self,
         run_transcription: Arc<AtomicBool>,
         callbacks: WhisperCallbacks<P>,
-    ) -> Result<String, WhisperRealtimeError> {
+    ) -> Result<String, RibbleWhisperError> {
         // Decompose the callbacks struct
         let WhisperCallbacks {
             progress: maybe_progress_callback,

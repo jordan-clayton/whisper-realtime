@@ -9,7 +9,7 @@ mod downloader_tests {
     use ribble_whisper::downloader::AsyncDownload;
     use ribble_whisper::downloader::SyncDownload;
     use ribble_whisper::utils::callback::ProgressCallback;
-    use ribble_whisper::utils::errors::WhisperRealtimeError;
+    use ribble_whisper::utils::errors::RibbleWhisperError;
     use ribble_whisper::whisper::model::DefaultModelType;
 
     fn delete_model(file_path: &std::path::Path) -> std::io::Result<()> {
@@ -144,7 +144,7 @@ mod downloader_tests {
         let mut sync_downloader = sync_downloader.with_progress_callback(progress_callback);
 
         // File copy:
-        let download: Result<(), WhisperRealtimeError> =
+        let download: Result<(), RibbleWhisperError> =
             sync_downloader.download(file_directory, file_name);
 
         assert!(download.is_ok(), "{}", format!("{}", download.unwrap_err()));

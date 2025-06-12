@@ -13,11 +13,11 @@ use strum::{
     VariantArray, VariantNames,
 };
 
-use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::errors::RibbleWhisperError;
 #[cfg(feature = "integrity")]
 use crate::whisper::integrity_utils::{
-    checksums_need_updating, ChecksumStatus, get_model_checksum, get_new_checksums,
-    serialize_new_checksums, write_latest_repo_checksum_to_disk,
+    checksums_need_updating, get_model_checksum, get_new_checksums, serialize_new_checksums,
+    write_latest_repo_checksum_to_disk, ChecksumStatus,
 };
 
 /// Encapsulates a compatible whisper model
@@ -97,11 +97,11 @@ impl Model {
 
     /// Canonicalizes the model's full path as a String
     /// Returns Err if the file path is not valid UTF-8
-    pub fn file_path_string(&self) -> Result<String, WhisperRealtimeError> {
+    pub fn file_path_string(&self) -> Result<String, RibbleWhisperError> {
         let file_path = self.file_path();
         Ok(file_path
             .to_str()
-            .ok_or(WhisperRealtimeError::ParameterError(format!(
+            .ok_or(RibbleWhisperError::ParameterError(format!(
                 "File Path: {:?} is not a valid utf-8 str",
                 file_path
             )))?
@@ -126,7 +126,7 @@ impl Model {
 
     #[allow(dead_code)]
     #[cfg(feature = "integrity")]
-    fn compare_sha256(&self, checksum: &str) -> Result<bool, WhisperRealtimeError> {
+    fn compare_sha256(&self, checksum: &str) -> Result<bool, RibbleWhisperError> {
         // Compute the checksum on the file
         let mut file = fs::File::open(self.file_path())?;
         let mut hasher = Sha256::new();
@@ -140,7 +140,7 @@ impl Model {
     }
 
     #[cfg(feature = "integrity")]
-    fn compare_sha1(&self, checksum: &str) -> Result<bool, WhisperRealtimeError> {
+    fn compare_sha1(&self, checksum: &str) -> Result<bool, RibbleWhisperError> {
         // Compute the checksum on the file
         let mut file = fs::File::open(self.file_path())?;
         let mut hasher = Sha1::new();
@@ -161,7 +161,7 @@ impl Model {
     /// # Returns
     /// * Ok(matches) on success, Err on I/O error, or failure to compute the checksum.
     #[cfg(feature = "integrity")]
-    pub fn verify_checksum(&mut self, checksum: &Checksum) -> Result<bool, WhisperRealtimeError> {
+    pub fn verify_checksum(&mut self, checksum: &Checksum) -> Result<bool, RibbleWhisperError> {
         if !self.exists_in_directory() {
             self.checksum_verified = false;
             return Ok(false);
@@ -309,7 +309,7 @@ impl DefaultModelType {
         &self,
         records_directory: &Path,
         client: Option<&blocking::Client>,
-    ) -> Result<String, WhisperRealtimeError> {
+    ) -> Result<String, RibbleWhisperError> {
         let key = self.to_sha_key();
         let needs_updating = checksums_need_updating(records_directory, client);
 
@@ -323,14 +323,14 @@ impl DefaultModelType {
             }
             // Treat an Unknown checksum status as a total failure and escape early
             ChecksumStatus::Unknown => {
-                return Err(WhisperRealtimeError::DownloadError(
+                return Err(RibbleWhisperError::DownloadError(
                     "Failed to get checksum due to network failure".to_string(),
-                ))
+                ));
             }
         }
         // Grab the latest model checksum
         let model_checksum = get_model_checksum(records_directory, key)?.ok_or(
-            WhisperRealtimeError::ParameterError(format!("Failed to find mapping for: {}", key)),
+            RibbleWhisperError::ParameterError(format!("Failed to find mapping for: {}", key)),
         )?;
         Ok(model_checksum)
     }

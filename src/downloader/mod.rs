@@ -1,7 +1,7 @@
 use std::fs::{self, File};
 use std::path::Path;
 
-use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::errors::RibbleWhisperError;
 
 pub mod downloaders;
 
@@ -11,7 +11,7 @@ pub trait SyncDownload: Writable {
         &mut self,
         file_directory: &Path,
         file_name: &str,
-    ) -> Result<(), WhisperRealtimeError>;
+    ) -> Result<(), RibbleWhisperError>;
 }
 
 /// For downloading an object asynchronously (non-blocking, requires async runtime)
@@ -21,13 +21,13 @@ pub trait AsyncDownload: Writable {
         &mut self,
         file_directory: &Path,
         file_name: &str,
-    ) -> impl std::future::Future<Output = Result<(), WhisperRealtimeError>>;
+    ) -> impl std::future::Future<Output = Result<(), RibbleWhisperError>>;
 }
 
 /// To handle basic IO operations when downlading files
 pub trait Writable {
     // If a file path does not already exist, it will be created.
-    fn prepare_file_path(file_directory: &Path) -> Result<(), WhisperRealtimeError> {
+    fn prepare_file_path(file_directory: &Path) -> Result<(), RibbleWhisperError> {
         if !file_directory.exists() {
             fs::create_dir_all(file_directory)?;
         }
@@ -35,7 +35,7 @@ pub trait Writable {
         Ok(())
     }
 
-    fn open_write_file(file_path: &Path) -> Result<File, WhisperRealtimeError> {
+    fn open_write_file(file_path: &Path) -> Result<File, RibbleWhisperError> {
         let dest = fs::OpenOptions::new()
             .create(true)
             .write(true)

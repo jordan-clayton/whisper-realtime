@@ -1,12 +1,12 @@
-use std::{fs, io};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::LazyLock;
+use std::{fs, io};
 
 use regex::Regex;
 use reqwest::blocking;
 
-use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::errors::RibbleWhisperError;
 
 // Filename for the recordfile that stores a literal of the most up-to-date commit hash of whisper.cpp's huggingface repository
 const LATEST_CHECKSUM: &str = "latest_checksum";
@@ -80,7 +80,7 @@ pub fn checksums_need_updating(
 /// This does not yet filter out all non-default model types.
 pub fn get_new_checksums(
     client: Option<&blocking::Client>,
-) -> Result<HashMap<String, String>, WhisperRealtimeError> {
+) -> Result<HashMap<String, String>, RibbleWhisperError> {
     let response = match client {
         None => blocking::get(README_URL),
         Some(r_client) => r_client.get(README_URL).send(),
@@ -104,7 +104,7 @@ pub fn get_new_checksums(
 pub fn serialize_new_checksums(
     checksums: &HashMap<String, String>,
     model_directory: &Path,
-) -> Result<(), WhisperRealtimeError> {
+) -> Result<(), RibbleWhisperError> {
     let path = model_directory.join(CHECKSUM_FILE);
     let outfile = fs::File::create(path)?;
     let writer = io::BufWriter::new(outfile);
@@ -118,7 +118,7 @@ pub fn serialize_new_checksums(
 pub fn write_latest_repo_checksum_to_disk(
     new_checksum: &str,
     model_directory: &Path,
-) -> Result<(), WhisperRealtimeError> {
+) -> Result<(), RibbleWhisperError> {
     let outfile_path = model_directory.join(LATEST_CHECKSUM);
     fs::write(outfile_path, new_checksum)?;
     Ok(())
@@ -129,7 +129,7 @@ pub fn write_latest_repo_checksum_to_disk(
 pub fn get_model_checksum(
     model_directory: &Path,
     model_key: &str,
-) -> Result<Option<String>, WhisperRealtimeError> {
+) -> Result<Option<String>, RibbleWhisperError> {
     let path = model_directory.join(CHECKSUM_FILE);
     let in_file = fs::File::open(path)?;
     let reader = io::BufReader::new(in_file);
@@ -143,7 +143,7 @@ pub fn get_model_checksum(
 // for determining when to update the model checksums.
 fn get_latest_repo_checksum(
     client: Option<&blocking::Client>,
-) -> Result<String, WhisperRealtimeError> {
+) -> Result<String, RibbleWhisperError> {
     let json: serde_json::Value = match client {
         None => blocking::get(REPO_URL),
         Some(r_client) => r_client.get(REPO_URL).send(),
@@ -152,7 +152,7 @@ fn get_latest_repo_checksum(
 
     let latest_checksum = json["sha"]
         .as_str()
-        .ok_or(WhisperRealtimeError::DownloadError(
+        .ok_or(RibbleWhisperError::DownloadError(
             "Response JSON missing expecting 'sha'".to_owned(),
         ))?;
     Ok(latest_checksum.to_owned())

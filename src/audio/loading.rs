@@ -12,9 +12,9 @@ use symphonia::core::probe::{Hint, ProbeResult};
 use crate::audio::resampler::{needs_normalizing, normalize_audio, ResampleableAudio};
 use crate::audio::WhisperAudioSample;
 use crate::utils::callback::{Callback, Nop, ProgressCallback};
-use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::errors::RibbleWhisperError;
 
-fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, WhisperRealtimeError> {
+fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, RibbleWhisperError> {
     let file = Box::new(File::open(path)?);
     let mss = MediaSourceStream::new(file, Default::default());
     let hint = Hint::new();
@@ -30,14 +30,14 @@ fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, Whisp
 pub fn load_audio_file<P: AsRef<Path>>(
     path: P,
     progress_callback: Option<impl FnMut(usize)>,
-) -> Result<WhisperAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, RibbleWhisperError> {
     let decoder_opts = Default::default();
     let probed = get_audio_probe(path)?;
 
     let format = probed.format;
     let track = format
         .default_track()
-        .ok_or(WhisperRealtimeError::ParameterError(
+        .ok_or(RibbleWhisperError::ParameterError(
             "Failed to get default audio track".to_owned(),
         ))?;
 
@@ -57,13 +57,13 @@ pub fn load_audio_file<P: AsRef<Path>>(
 pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     path: P,
     progress_callback: Option<impl FnMut(usize)>,
-) -> Result<WhisperAudioSample, WhisperRealtimeError> {
+) -> Result<WhisperAudioSample, RibbleWhisperError> {
     let decoder_opts = Default::default();
     let probed = get_audio_probe(path)?;
     let format = probed.format;
     let track = format
         .default_track()
-        .ok_or(WhisperRealtimeError::ParameterError(
+        .ok_or(RibbleWhisperError::ParameterError(
             "Failed to get default track".to_owned(),
         ))?;
 
@@ -71,13 +71,13 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     let codec_params = &track.codec_params;
     let sample_rate = codec_params
         .sample_rate
-        .ok_or(WhisperRealtimeError::ParameterError(
+        .ok_or(RibbleWhisperError::ParameterError(
             "Failed to grab sample rate".to_owned(),
         ))? as f64;
 
     let num_channels = codec_params
         .channels
-        .ok_or(WhisperRealtimeError::ParameterError(
+        .ok_or(RibbleWhisperError::ParameterError(
             "Failed to grab number of channels".to_owned(),
         ))?
         .count();
