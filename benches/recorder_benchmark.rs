@@ -67,7 +67,7 @@ fn run_with_recorder_st(n_samples: usize) {
     let (a_sender, a_receiver) = channel::bounded(n_samples + 1);
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
-    let mut recorder = recorder::AudioRecorder::new_vec(a_sender);
+    let mut recorder = recorder::FanoutRecorder::new_vec(a_sender);
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -110,7 +110,7 @@ fn run_with_slice_st(n_samples: usize) {
     let (a_sender, a_receiver) = channel::bounded(n_samples + 1);
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
-    let mut recorder = ribble_whisper::audio::recorder::AudioRecorder::new_arc(a_sender);
+    let mut recorder = ribble_whisper::audio::recorder::FanoutRecorder::new_arc(a_sender);
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -154,7 +154,7 @@ fn run_with_recorder_par(n_samples: usize, work_millis: u64) {
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
 
-    let mut recorder = ribble_whisper::audio::recorder::AudioRecorder::new_vec(a_sender);
+    let mut recorder = ribble_whisper::audio::recorder::FanoutRecorder::new_vec(a_sender);
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -256,7 +256,7 @@ fn run_with_slice_par(n_samples: usize, work_millis: u64) {
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
 
-    let mut recorder = ribble_whisper::audio::recorder::AudioRecorder::new_arc(a_sender);
+    let mut recorder = ribble_whisper::audio::recorder::FanoutRecorder::new_arc(a_sender);
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]

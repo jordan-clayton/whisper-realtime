@@ -6,10 +6,10 @@ use std::thread::scope;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use parking_lot::Mutex;
-use whisper_rs::install_logging_hooks;
 
 use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
-use ribble_whisper::audio::microphone::AudioBackend;
+use ribble_whisper::audio::microphone::{AudioBackend, FanoutMicCapture, MicCapture};
+use ribble_whisper::audio::recorder::UseArc;
 use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
 use ribble_whisper::downloader::downloaders::sync_download_request;
 #[cfg(feature = "downloader")]
@@ -17,7 +17,7 @@ use ribble_whisper::downloader::SyncDownload;
 use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::{Silero, WebRtc};
-use ribble_whisper::transcriber::Transcriber;
+use ribble_whisper::transcriber::{redirect_whisper_logging_to_hooks, Transcriber};
 use ribble_whisper::transcriber::{
     CallbackTranscriber, WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
 };
@@ -40,20 +40,19 @@ fn main() {
         // (Generally keep this on for a performance gain with gpu processing).
         .set_flash_attention(true);
 
-    let audio_ring_buffer = Arc::new(AudioRingBuffer::<f32>::default());
-    let (audio_sender, audio_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
+    let audio_ring_buffer = AudioRingBuffer::<f32>::default();
+    let (audio_sender, audio_receiver) =
+        utils::get_channel::<Arc<[f32]>>(constants::INPUT_BUFFER_CAPACITY);
     let (text_sender, text_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
 
     // Note: Any VAD<T> + Send can be used.
     let vad = Silero::try_new_whisper_realtime_default()
         .expect("Earshot realtime VAD expected to build without issue");
-    // let vad = Silero::try_new_ribble_whisper_default()
-    //     .expect("Silero Vad expected to build without issue.");
 
     // Transcriber
     let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<WebRtc>::new()
         .with_configs(configs.clone())
-        .with_audio_buffer(Arc::clone(&audio_ring_buffer))
+        .with_audio_buffer(&audio_ring_buffer)
         .with_output_sender(text_sender)
         .with_voice_activity_detector(vad)
         .build()
@@ -90,8 +89,8 @@ fn main() {
 
     // Set up the Audio Backend.
     let audio_backend = AudioBackend::new().expect("Audio backend should build without issue");
-    let mic = audio_backend
-        .build_whisper_default(audio_sender)
+    let mic: FanoutMicCapture<f32, UseArc> = audio_backend
+        .build_whisper_fanout_default(audio_sender)
         .expect("Mic handle expected to build without issue.");
 
     let transcriber_thread = scope(|s| {
@@ -99,8 +98,8 @@ fn main() {
         let t_thread_run_transcription = Arc::clone(&run_transcription);
         let p_thread_run_transcription = Arc::clone(&run_transcription);
 
-        // Hide the logging away from stdout
-        install_logging_hooks();
+        // Block Whisper.cpp from logging to stdout/stderr and instead redirect to an optional logging hook.
+        redirect_whisper_logging_to_hooks();
         mic.play();
         // Read data from the AudioBackend and write to the ringbuffer + (optional) static audio
         let _audio_thread = s.spawn(move || {
@@ -158,9 +157,9 @@ fn main() {
                 clear_stdout();
                 println!("Latest Control Message: {}\n", latest_control_message);
                 println!("Transcription:\n");
-                // Print the up-to-date transcription thus far
+                // Print the remaining current working set of segments.
                 print!("{}", latest_confirmed);
-                // Print the working set of current segments.
+                // Print the remaining current working set of segments.
                 for segment in latest_segments.iter() {
                     print!("{}", segment);
                 }

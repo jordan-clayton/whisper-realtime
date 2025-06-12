@@ -1,12 +1,13 @@
-use std::marker::PhantomData;
 use std::sync::Arc;
 
-use sdl2::{AudioSubsystem, Sdl};
-use sdl2::audio::{AudioDevice, AudioSpecDesired};
-
-use crate::audio::recorder::{AudioInputAdapter, AudioRecorder, RecorderSample, UseArc, UseVec};
+use crate::audio::audio_ring_buffer::AudioRingBuffer;
+use crate::audio::recorder::{
+    AudioInputAdapter, ClosedLoopRecorder, FanoutRecorder, RecorderSample, UseArc, UseVec,
+};
+use crate::utils::errors::RibbleWhisperError;
 use crate::utils::{constants, Sender};
-use crate::utils::errors::WhisperRealtimeError;
+use sdl2::audio::{AudioDevice, AudioSpecDesired};
+use sdl2::{AudioSubsystem, Sdl};
 
 /// A Basic Audio Backend that uses SDL to gain access to the default audio input
 /// At this time there is no support for other audio backends, but this may change in the future.
@@ -20,16 +21,16 @@ impl AudioBackend {
     /// Initializes the audio backend to access the microphone when running a realtime transcription
     /// It is not encouraged to call new more than once, but it is not an error to do so.
     /// Returns an error if the backend fails to initialize.
-    pub fn new() -> Result<Self, WhisperRealtimeError> {
+    pub fn new() -> Result<Self, RibbleWhisperError> {
         let ctx = sdl2::init().map_err(|e| {
-            WhisperRealtimeError::ParameterError(format!(
+            RibbleWhisperError::ParameterError(format!(
                 "Failed to create SDL context, error: {}",
                 e
             ))
         })?;
 
         let audio_subsystem = ctx.audio().map_err(|e| {
-            WhisperRealtimeError::ParameterError(format!(
+            RibbleWhisperError::ParameterError(format!(
                 "Failed to initialize audio subsystem, error: {}",
                 e
             ))
@@ -53,78 +54,62 @@ impl AudioBackend {
 
     /// A convenience method that prepares [sdl2::audio::AudioDevice] for use
     /// with [crate::transcriber::realtime_transcriber::RealtimeTranscriber] to transcribe
-    /// audio realtime.
-    /// This sends audio out as Arc<[T]> because it's the most efficient. Use a builder if
-    /// vectors are required. See: [crate::audio::microphone::AudioBackend::build_microphone_vec]
+    /// audio realtime. Use the fanout capture when doing other audio processing concurrently
+    /// with transcription.
+    ///
     /// # Arguments:
     /// * audio_sender: a message sender to forward audio from the input device
     /// # Returns:
     /// * Ok(AudioDevice) on success, Err(WhisperRealtimeError) on failure to build.
-    /// See: [crate::audio::microphone::MicrophoneBuilder] for error conditions.
-    pub fn build_whisper_default<T: RecorderSample>(
+    /// See: [crate::audio::microphone::MicCaptureBuilder] for error conditions.
+    pub fn build_whisper_fanout_default<
+        T: RecorderSample,
+        AC: AudioInputAdapter<T> + Send + Clone,
+    >(
         &self,
-        audio_sender: Sender<Arc<[T]>>,
-    ) -> Result<Microphone<T, UseArc>, WhisperRealtimeError> {
-        self.build_microphone(audio_sender)
+        audio_sender: Sender<AC::SenderOutput>,
+    ) -> Result<FanoutMicCapture<T, AC>, RibbleWhisperError> {
+        self.build_whisper_default().build_fanout(audio_sender)
+    }
+
+    /// A convenience method that prepares [sdl2::audio::AudioDevice] for use
+    /// with [crate::transcriber::realtime_transcriber::RealtimeTranscriber] to transcribe
+    /// audio realtime. Use the closed loop capture when only transcription processing is required.
+    ///
+    /// # Arguments:
+    /// * buffer: a ringbuffer for storing audio from the input device.
+    /// # Returns:
+    /// * Ok(AudioDevice) on success, Err(WhisperRealtimeError) on failure to build.
+    /// See: [crate::audio::microphone::MicCaptureBuilder] for error conditions.
+    pub fn build_whisper_closed_loop_default<T: RecorderSample>(
+        &self,
+        buffer: &AudioRingBuffer<T>,
+    ) -> Result<ClosedLoopMicCapture<T>, RibbleWhisperError> {
+        self.build_whisper_default().build_closed_loop(buffer)
+    }
+
+    fn build_whisper_default(&self) -> MicCaptureBuilder {
+        self.build_microphone()
             .with_num_channels(Some(1))
             .with_sample_rate(Some(constants::WHISPER_SAMPLE_RATE as i32))
             .with_sample_size(Some(constants::AUDIO_BUFFER_SIZE))
-            .build()
     }
 
-    /// The "default" way to start building an audio capture
-    /// Returns a builder to set up the audio capture parameters with a callback that sends audio
-    /// using Arc<[T]>
-    /// Prefer this over Vec<T> unless Vectors are absolutely required.
-    pub fn build_microphone<T: RecorderSample>(
-        &self,
-        audio_sender: Sender<Arc<[T]>>,
-    ) -> MicrophoneBuilder<T, UseArc> {
-        self.build_microphone_arc(audio_sender)
-    }
-
-    /// Returns a builder to set up the audio capture parameters with a callback that sends audio
-    /// using Arc<[T]>
-    pub fn build_microphone_arc<T: RecorderSample>(
-        &self,
-        audio_sender: Sender<Arc<[T]>>,
-    ) -> MicrophoneBuilder<T, UseArc> {
-        MicrophoneBuilder::new_arc(&self.audio_subsystem, audio_sender)
-    }
-
-    /// Returns a builder to set up the audio capture parameters with a callback that sends audio
-    /// using Vec<[T]>
-    pub fn build_microphone_vec<T: RecorderSample>(
-        &self,
-        audio_sender: Sender<Vec<T>>,
-    ) -> MicrophoneBuilder<T, UseVec> {
-        MicrophoneBuilder::new_vec(&self.audio_subsystem, audio_sender)
+    /// Returns a builder to set up the audio capture parameters
+    pub fn build_microphone(&self) -> MicCaptureBuilder {
+        MicCaptureBuilder::new(&self.audio_subsystem)
     }
 }
 
-/// A builder for setting audio input configurations
+/// A builder for setting (SDL) audio input configurations
 #[derive(Clone)]
-pub struct MicrophoneBuilder<'a, T, AC>
-where
-    T: RecorderSample,
-    AC: AudioInputAdapter<T> + Send + Clone,
-{
+pub struct MicCaptureBuilder<'a> {
     audio_subsystem: &'a AudioSubsystem,
     audio_spec_desired: AudioSpecDesired,
-    /// Used in the [sdl2::audio::AudioCallback] to forward input audio
-    audio_sender: Sender<AC::SenderOutput>,
-    _marker: PhantomData<AC>,
 }
 
-impl<'a, T, AC> MicrophoneBuilder<'a, T, AC>
-where
-    T: RecorderSample,
-    AC: AudioInputAdapter<T> + Clone + Send,
-{
-    pub fn new(
-        audio_subsystem: &'a AudioSubsystem,
-        audio_sender: Sender<AC::SenderOutput>,
-    ) -> Self {
+impl<'a> MicCaptureBuilder<'a> {
+    pub fn new(audio_subsystem: &'a AudioSubsystem) -> Self {
         // AudioSpecDesired does not implement Default
         let audio_spec_desired = AudioSpecDesired {
             freq: None,
@@ -135,8 +120,6 @@ where
         Self {
             audio_subsystem,
             audio_spec_desired,
-            audio_sender,
-            _marker: Default::default(),
         }
     }
     /// To change the [sdl2::sdl::AudioSubsystem]
@@ -169,82 +152,103 @@ where
 
     /// To set the desired audio spec all at once.
     /// This will not be useful unless you are already managing SDL on your own.
+    ///
     pub fn with_desired_audio_spec(mut self, spec: AudioSpecDesired) -> Self {
         self.audio_spec_desired = spec;
         self
     }
 
-    /// To set the audio callback sender.
-    pub fn with_vec_sender<S: RecorderSample>(
-        self,
-        sender: Sender<Vec<S>>,
-    ) -> MicrophoneBuilder<'a, S, UseVec> {
-        MicrophoneBuilder {
-            audio_subsystem: self.audio_subsystem,
-            audio_spec_desired: self.audio_spec_desired,
-            audio_sender: sender,
-            _marker: Default::default(),
-        }
-    }
-
-    /// To set the audio callback sender.
-    pub fn with_arc_sender<S: RecorderSample>(
-        self,
-        sender: Sender<Arc<[S]>>,
-    ) -> MicrophoneBuilder<'a, S, UseArc> {
-        MicrophoneBuilder {
-            audio_subsystem: self.audio_subsystem,
-            audio_spec_desired: self.audio_spec_desired,
-            audio_sender: sender,
-            _marker: Default::default(),
-        }
-    }
-
-    /// Builds [sdl2::audio::AudioDevice] to open audio capture (eg. for use in realtime transcription)
+    /// Builds [sdl2::audio::AudioDevice] to open audio capture (eg. for use in realtime transcription).
+    /// Fans out data via message passing for use when doing additional audio processing concurrently
+    /// with transcription.
+    /// # Arguments:
+    /// * audio_sender: a message sender to forward audio from the input device
     /// # Returns:
-    /// * Ok(AudioDevice) on success, Err on SDL failure.
-    pub fn build(self) -> Result<Microphone<T, AC>, WhisperRealtimeError> {
-        let device = build_audio_stream(
-            &self.audio_subsystem,
-            &self.audio_spec_desired,
-            self.audio_sender,
-        )?;
-        Ok(Microphone { device })
+    /// * Ok(AudioDevice) on success, Err(WhisperRealtimeError) on an SDL failure.
+    pub fn build_fanout<T: RecorderSample, AC: AudioInputAdapter<T> + Send + Clone>(
+        self,
+        sender: Sender<AC::SenderOutput>,
+    ) -> Result<FanoutMicCapture<T, AC>, RibbleWhisperError> {
+        let device = self
+            .audio_subsystem
+            .open_capture(None, &self.audio_spec_desired, |_| {
+                FanoutRecorder::new(sender)
+            })
+            .map_err(|e| {
+                RibbleWhisperError::ParameterError(format!("Failed to build audio stream: {}", e))
+            })?;
+        Ok(FanoutMicCapture { device })
+    }
+
+    /// Builds [sdl2::audio::AudioDevice] to open audio capture (eg. for use in realtime transcription).
+    /// Writes directly into the ringbuffer, for when only transcription is required.
+    /// Prefer the fanout implementation when doing additional processing during transcription
+    /// to guarantee data coherence.
+    ///
+    /// # Arguments:
+    /// * buffer: a ringbuffer for storing audio from the input device.
+    /// # Returns:
+    /// * Ok(AudioDevice) on success, Err(WhisperRealtimeError) on an SDL failure.
+    pub fn build_closed_loop<T: RecorderSample>(
+        self,
+        buffer: &AudioRingBuffer<T>,
+    ) -> Result<ClosedLoopMicCapture<T>, RibbleWhisperError> {
+        let device = self
+            .audio_subsystem
+            .open_capture(None, &self.audio_spec_desired, |_| {
+                ClosedLoopRecorder::new(buffer.clone())
+            })
+            .map_err(|e| {
+                RibbleWhisperError::ParameterError(format!("Failed to build audio stream: {}", e))
+            })?;
+        Ok(ClosedLoopMicCapture { device })
     }
 }
 
-impl<'a, T: RecorderSample> MicrophoneBuilder<'a, T, UseVec> {
-    pub fn new_vec(audio_subsystem: &'a AudioSubsystem, audio_sender: Sender<Vec<T>>) -> Self {
-        Self::new(audio_subsystem, audio_sender)
-    }
+/// Trait for starting/stopping audio capture.
+pub trait MicCapture {
+    fn play(&self);
+    fn pause(&self);
 }
 
-impl<'a, T: RecorderSample> MicrophoneBuilder<'a, T, UseArc> {
-    pub fn new_arc(audio_subsystem: &'a AudioSubsystem, audio_sender: Sender<Arc<[T]>>) -> Self {
-        Self::new(audio_subsystem, audio_sender)
-    }
-}
-
-/// Encapsulates [sdl2::audio::AudioDevice]. This may become a trait if/when multiple audio backends are needed.
-/// NOTE: this does not implement Sync or Send; construct this on the thread that will be opening
-/// and closing the audio capture.
-pub struct Microphone<T, AC>
+/// Encapsulates [sdl2::audio::AudioDevice] and sends audio samples out via message channels.
+/// Use when performing other audio processing concurrently with transcription
+/// (see: examples/realtime_stream.rs).
+/// Due to the use of SDL, this cannot be shared across threads.
+pub struct FanoutMicCapture<T, AC>
 where
     T: RecorderSample,
     AC: AudioInputAdapter<T> + Clone + Send,
 {
-    device: AudioDevice<AudioRecorder<T, AC>>,
+    device: AudioDevice<FanoutRecorder<T, AC>>,
 }
 
-impl<T, AC> Microphone<T, AC>
+impl<T, AC> MicCapture for FanoutMicCapture<T, AC>
 where
     T: RecorderSample,
     AC: AudioInputAdapter<T> + Clone + Send,
 {
-    pub fn play(&self) {
+    fn play(&self) {
         self.device.resume()
     }
-    pub fn pause(&self) {
+    fn pause(&self) {
+        self.device.pause()
+    }
+}
+
+/// Encapsulates [sdl2::audio::AudioDevice] and writes directly into [crate::audio::audio_ring_buffer::AudioRingBuffer].
+/// Use when only transcription processing is required.
+/// Due to the use of SDL, this cannot be shared across threads.
+pub struct ClosedLoopMicCapture<T: RecorderSample> {
+    device: AudioDevice<ClosedLoopRecorder<T>>,
+}
+
+impl<T: RecorderSample> MicCapture for ClosedLoopMicCapture<T> {
+    fn play(&self) {
+        self.device.resume()
+    }
+
+    fn pause(&self) {
         self.device.pause()
     }
 }
@@ -252,7 +256,7 @@ where
 // The following functions are exposed but their use is not encouraged unless required.
 
 /// This is deprecated and will be removed at a later date.
-/// Prefer [crate::audio::microphone::MicrophoneBuilder].
+/// Prefer [crate::audio::microphone::MicCaptureBuilder].
 #[inline]
 pub fn get_desired_audio_spec(
     freq: Option<i32>,
@@ -268,22 +272,22 @@ pub fn get_desired_audio_spec(
 
 /// Visibility is currently exposed due to legacy implementations.
 /// Do not rely on this function, as it will be marked private in the future.
-/// Prefer [crate::audio::microphone::MicrophoneBuilder]
+/// Prefer [crate::audio::microphone::MicCaptureBuilder]
 #[inline]
 pub fn build_audio_stream<T: RecorderSample, AC: AudioInputAdapter<T> + Send>(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: Sender<AC::SenderOutput>,
-) -> Result<AudioDevice<AudioRecorder<T, AC>>, WhisperRealtimeError> {
+) -> Result<AudioDevice<FanoutRecorder<T, AC>>, RibbleWhisperError> {
     let audio_stream = audio_subsystem
         .open_capture(
             // Device - should be default, SDL should change if the user changes devices in their sysprefs.
             None,
             desired_spec,
-            |_spec| AudioRecorder::new(audio_sender),
+            |_spec| FanoutRecorder::new(audio_sender),
         )
         .map_err(|e| {
-            WhisperRealtimeError::ParameterError(format!("Failed to build audio stream: {}", e))
+            RibbleWhisperError::ParameterError(format!("Failed to build audio stream: {}", e))
         })?;
 
     Ok(audio_stream)
@@ -291,21 +295,21 @@ pub fn build_audio_stream<T: RecorderSample, AC: AudioInputAdapter<T> + Send>(
 
 /// Visibility is currently exposed due to legacy implementations.
 /// Do not rely on this function, as it will be marked private in the future.
-/// Prefer [crate::audio::microphone::MicrophoneBuilder]
+/// Prefer [crate::audio::microphone::MicCaptureBuilder]
 #[inline]
 pub fn build_audio_stream_vec_sender<T: RecorderSample>(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: Sender<Vec<T>>,
-) -> Result<AudioDevice<AudioRecorder<T, UseVec>>, WhisperRealtimeError> {
+) -> Result<AudioDevice<FanoutRecorder<T, UseVec>>, RibbleWhisperError> {
     let audio_stream = audio_subsystem.open_capture(
         // Device - should be default, SDL should change if the user changes devices in their sysprefs.
         None,
         desired_spec,
-        |_spec| AudioRecorder::new_vec(audio_sender),
+        |_spec| FanoutRecorder::new_vec(audio_sender),
     );
     match audio_stream {
-        Err(e) => Err(WhisperRealtimeError::ParameterError(format!(
+        Err(e) => Err(RibbleWhisperError::ParameterError(format!(
             "Failed to build audio stream: {}",
             e
         ))),
@@ -315,22 +319,22 @@ pub fn build_audio_stream_vec_sender<T: RecorderSample>(
 
 /// Visibility is currently exposed due to legacy implementations.
 /// Do not rely on this function, as it will be marked private in the future.
-/// Prefer [crate::audio::microphone::MicrophoneBuilder]
+/// Prefer [crate::audio::microphone::MicCaptureBuilder]
 #[inline]
 pub fn build_audio_stream_slice_sender<T: RecorderSample>(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: Sender<Arc<[T]>>,
-) -> Result<AudioDevice<AudioRecorder<T, UseArc>>, WhisperRealtimeError> {
+) -> Result<AudioDevice<FanoutRecorder<T, UseArc>>, RibbleWhisperError> {
     let audio_stream = audio_subsystem
         .open_capture(
             // Device - should be default, SDL should change if the user changes devices in their sysprefs.
             None,
             desired_spec,
-            |_spec| AudioRecorder::new_arc(audio_sender),
+            |_spec| FanoutRecorder::new_arc(audio_sender),
         )
         .map_err(|e| {
-            WhisperRealtimeError::ParameterError(format!("Failed to build audio stream: {}", e))
+            RibbleWhisperError::ParameterError(format!("Failed to build audio stream: {}", e))
         })?;
 
     Ok(audio_stream)

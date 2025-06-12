@@ -31,7 +31,7 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
     // resources as feasible. Pass and share where appropriate.
     let configs = prep_configs();
     let audio_sample = prep_audio();
-    let audio_ring_buffer = Arc::new(AudioRingBuffer::default());
+    let audio_ring_buffer = AudioRingBuffer::default();
     // Pre-fill the audio buffer to warm up the VAD - it can sometimes fail on first read.
     // In practice, this is fine because it will pick up next read and the audio will not get lost.
     // In these test conditions, there is a risk the audio buffer might get cleared prematurely
@@ -45,20 +45,20 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
     // Silero
     let (mut s_transcriber, s_handle, s_channel) = build_transcriber(
         &configs,
-        Arc::clone(&audio_ring_buffer),
+        &audio_ring_buffer,
         Silero::try_new_whisper_realtime_default,
     );
     eprintln!("SILERO BUILT");
     let (mut w_transcriber, w_handle, w_channel) = build_transcriber(
         &configs,
-        Arc::clone(&audio_ring_buffer),
+        &audio_ring_buffer,
         WebRtc::try_new_whisper_realtime_default,
     );
 
     eprintln!("WEBRTC BUILT");
     let (mut e_transcriber, e_handle, e_channel) = build_transcriber(
         &configs,
-        Arc::clone(&audio_ring_buffer),
+        &audio_ring_buffer,
         Earshot::try_new_whisper_realtime_default,
     );
     eprintln!("EARSHOT BUILT");
@@ -73,7 +73,7 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
                 &mut s_transcriber,
                 s_handle.clone(),
                 Arc::clone(&s_channel),
-                Arc::clone(&audio_ring_buffer),
+                &audio_ring_buffer,
                 Box::clone(&audio_sample),
             )
         });
@@ -85,7 +85,7 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
                 &mut w_transcriber,
                 w_handle.clone(),
                 Arc::clone(&w_channel),
-                Arc::clone(&audio_ring_buffer),
+                &audio_ring_buffer,
                 Box::clone(&audio_sample),
             )
         });
@@ -97,7 +97,7 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
                 &mut e_transcriber,
                 e_handle.clone(),
                 Arc::clone(&e_channel),
-                Arc::clone(&audio_ring_buffer),
+                &audio_ring_buffer,
                 Box::clone(&audio_sample),
             )
         });
@@ -108,7 +108,7 @@ pub fn realtime_bencher<V: VAD<f32> + Send + Sync>(
     transcriber: &mut RealtimeTranscriber<V>,
     handle: RealtimeTranscriberHandle,
     receiver: Arc<Mutex<Receiver<WhisperOutput>>>,
-    audio_ring_buffer: Arc<AudioRingBuffer<f32>>,
+    audio_ring_buffer: &AudioRingBuffer<f32>,
     audio_sample: Box<[f32]>,
 ) {
     // Prevent logging whisper to stderr
@@ -217,7 +217,7 @@ fn prep_configs() -> WhisperRealtimeConfigs {
 
 fn build_transcriber<V: VAD<f32> + Send + Sync>(
     configs: &WhisperRealtimeConfigs,
-    audio_buffer: Arc<AudioRingBuffer<f32>>,
+    audio_buffer: &AudioRingBuffer<f32>,
     build_method: fn() -> Result<V, RibbleWhisperError>,
 ) -> (
     RealtimeTranscriber<V>,
