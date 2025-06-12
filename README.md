@@ -17,7 +17,7 @@ young project and may not necessarily be a good fit for production.***
 ## External Dependencies
 
 - At this time, Ribble-Whisper does not support the use of multiple audio input backends. You will require SDL2 to build
-  this library.
+  this library
 - If you are building with an optional GPU backend (e.g. CUDA), you will require the appropriate SDK
 
 ## Building
@@ -34,6 +34,9 @@ Building is expected to work out-of-the-box for Windows/macOS/Linux.
 If you encounter issues with building due to whisper-rs,
 check [here](https://github.com/tazz4843/whisper-rs/blob/master/BUILDING.md).
 
+***NOTE: This library has not been tested on platforms other than Windows/macOS/Linux, and thus I cannot guarantee
+support.***
+
 ## Stream Example
 
 ```bash
@@ -44,27 +47,205 @@ cd ribble_whisper
 cargo run --example realtime_stream --features "cuda downloader"
 ```
 
-## Example Usage
+## Example Usage (Realtime)
 
 ```rust
-// TODO: Snippet from realtime_stream + explanation
+// Handle imports accordingly. They are omitted here for brevity.
+use ribble_whisper::*;
+fn main() {
+    // Handle this how you see fit and pass a model to the configs builder.
+    // See: realtime_stream::prepare_model() for an example of how to use the downloading API to retreive a model from huggingface.
+    let model = prepare_model();
+    // Set the number of threads according to your hardware.
+    // If you can allocate around 7-8, do so as this tends to be more performant.
+    let configs = WhisperRealtimeConfigs::default()
+        .with_n_threads(8)
+        .with_model(model)
+        // Also, optionally set flash attention.
+        // (Generally keep this on for a performance gain with gpu processing).
+        .set_flash_attention(true);
+
+    // Prepare a ring buffer for writing into; the RealtimeTranscriber reads from this buffer as part of
+    // its transcription loop.
+    // If no additional processing is required outside of transcription, the ClosedLoopCapture API is simpler.
+    let audio_ring_buffer = AudioRingBuffer::<f32>::default();
+
+    // Message channels for grabbing audio from SDL, and sending transcribed segments to a UI.
+    // Since this crate offers optional crossbeam support, utils::get_channel<T> will return the appropriate channel
+    // based on both configurations and type.
+    let (audio_sender, audio_receiver) =
+        utils::get_channel::<Arc<[f32]>>(constants::INPUT_BUFFER_CAPACITY);
+    let (text_sender, text_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
+
+    // Note: Any VAD<T> + Send can be used in a RealtimeTranscriber for voice detection.
+    let vad = Silero::try_new_whisper_realtime_default()
+        .expect("Earshot realtime VAD expected to build without issue");
+
+    // Set up the RealtimeTranscriber + Ready handle.
+    let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<WebRtc>::new()
+        .with_configs(configs.clone())
+        .with_audio_buffer(&audio_ring_buffer)
+        .with_output_sender(text_sender)
+        .with_voice_activity_detector(vad)
+        .build()
+        .expect("RealtimeTranscriber expected to build without issues.");
+
+    // Atomic flag for starting/stopping the transcription loop.
+    // This is a "UI control" to allow the user to stop the transcription without an explicit timeout.
+    let run_transcription = Arc::new(AtomicBool::new(true));
+
+    // Set up the Audio Backend.
+    let audio_backend = AudioBackend::new().expect("Audio backend should build without issue");
+    // The default implementation assumes there will be additional processing
+    let mic: FanoutMicCapture<f32, UseArc> = audio_backend
+        .build_whisper_fanout_default(audio_sender)
+        .expect("Mic handle expected to build without issue.");
+
+    // Ribble-Whisper is designed to be as flexible as possible, but realtime transcriptions needs to be run using 
+    // asynchronous/concurrent programming.
+    // It is recommended to do this using threads.
+    let transcriber_thread = scope(|s| {
+        let a_thread_run_transcription = Arc::clone(&run_transcription);
+        let t_thread_run_transcription = Arc::clone(&run_transcription);
+        let p_thread_run_transcription = Arc::clone(&run_transcription);
+
+        // Block Whisper.cpp from logging to stdout/stderr and instead redirect to an optional logging hook.
+        redirect_whisper_logging_to_hooks();
+        // Start audio capture.
+        mic.play();
+        // Read data from the AudioBackend and write to the ringbuffer + (optional) static audio
+        let _audio_thread = s.spawn(move || {
+            while a_thread_run_transcription.load(Ordering::Acquire) {
+                match audio_receiver.recv() {
+                    Ok(audio_data) => {
+                        // If the transcriber is not yet loaded, just consume the audio
+                        if !transcriber_handle.ready() {
+                            continue;
+                        }
+                        // Write the sample into the ringbuffer
+                        audio_ring_buffer.push_audio(&audio_data);
+
+                        // ... Fan out data for other audio processing.
+                    }
+                    Err(_) => {
+                        a_thread_run_transcription.store(false, Ordering::Release);
+                    }
+                }
+            }
+        });
+
+        // Move the transcriber off to a thread to handle processing audio
+        let transcription_thread =
+            s.spawn(move || transcriber.process_audio(t_thread_run_transcription));
+
+        // Update the UI with the newly transcribed data
+        let print_thread = s.spawn(move || {
+            let mut latest_control_message = WhisperControlPhrase::GettingReady;
+            let mut latest_confirmed = String::default();
+            let mut latest_segments: Vec<String> = vec![];
+            while p_thread_run_transcription.load(Ordering::Acquire) {
+                match text_receiver.recv() {
+                    Ok(output) => match output {
+                        // This is the most up-to-date full string transcription
+                        WhisperOutput::ConfirmedTranscription(text) => {
+                            latest_confirmed = text;
+                        }
+                        WhisperOutput::CurrentSegments(segments) => latest_segments = segments,
+
+                        WhisperOutput::ControlPhrase(message) => {
+                            latest_control_message = message;
+                        }
+                    },
+                    Err(_) => p_thread_run_transcription.store(false, Ordering::Release),
+                }
+
+                clear_stdout();
+                println!("Latest Control Message: {}\n", latest_control_message);
+                println!("Transcription:\n");
+                // Print the up-to-date transcription thus far.
+                print!("{}", latest_confirmed);
+
+                // Print the remaining current working set of segments.
+                for segment in latest_segments.iter() {
+                    print!("{}", segment);
+                }
+
+                stdout().flush().expect("Stdout should clear normally.");
+            }
+
+            // Drain the last of the segments into the final string.
+            let last_text = latest_segments.drain(..);
+            latest_confirmed.extend(last_text);
+            // In realtime_stream, this is returned for demonstration/comparison purposes.
+            latest_confirmed
+        });
+
+        // Return the full transcription once the loop has either timed out or been stopped by the user.
+        transcription_thread.join()
+    });
+
+    // Stop audio capture.
+    mic.pause();
+
+    // Obtain the final transcription string
+    // The scoped thread handle returns Result<Result<String, RibbleWhisperError>>, so this needs to be handled accordingly.
+    // Since concurrency is not explicitly handled by this library, there is no mapping to an equivalent RibbleWhisperError.
+    let transcription = transcriber_thread
+        .expect("Transcription thread should not panic.")
+        .expect("Transcription should return without error.");
+
+    println!("Final Transcription: {}", &transcription);
+}
 ```
 
-- From: [realtime_stream](https://github.com/jordan-clayton/whisper-realtime/blob/main/examples/realtime_stream.rs)
+- See: [realtime_stream](https://github.com/jordan-clayton/whisper-realtime/blob/main/examples/realtime_stream.rs)
 
 ## Features
 
 ### Whisper Backends:
 
-- TODO
+This library follows
+whisper-rs [conventions](https://github.com/tazz4843/whisper-rs/tree/master?tab=readme-ov-file#feature-flags).
+All backends are disabled by default and considered opt-in features.
+It is recommended to enable at least one of these if supported by your system to ensure
+that realtime performance is acceptable.
+
+- cuda: enable CUDA support (Windows and Linux)
+- hipblas: enable ROCm/hipBLAS support (Linux only)
+- openblas: enable OpenBLAS support (Windows only)
+- metal: enable Metal support (Apple only)
+- coreml: enable CoreML support. Implicitly enables metal support (Apple only)
+- vulkan: enable Vulkan support (Windows and Linux)
+
+### Additional Whisper-rs Flags:
+
+- log_backend: enable whisper-rs log_backend for hooking into whisper.cpp's log output
+- tracing_backend: enable whisper-rs tracing_backend for hooking into whisper.cpp's log output
 
 ### Symphonia Codecs:
 
-- TODO
+See: [here](https://github.com/pdeljanov/Symphonia?tab=readme-ov-file#codecs-decoders) for more information.
+These flags implicitly enable the required format container flags required to support the codec.
+
+- symphonia-all: enable support for all symphonia supported codecs
+- symphonia-mpeg: enable support for all MPEG audio codecs
+- symphonia-aac: enable support for AAC audio
+- symphonia-alac: enable support for ALAC audio
+
+### Additional Symphonia Flags:
+
+- symphonia-simd: enables all Symphonia SIMD optimizations
 
 ### Additional Features:
 
-- TODO
+- all: enable all optional additional features
+- resampler: enable support for resampling audio and normalizing audio for transcribing with Whisper (highly
+  recommended)
+- crossbeam: enable Crossbeam support for message channels
+- serde: enable Serde support for Configs serialization
+- downloader: enable the synchronous (blocking) download API
+- downloader-async: enables both the asynchronous and synchronous downloading APIs
+- integrity: enable utilities for verifying ggml model integrity
 
 ## License
 
@@ -75,16 +256,26 @@ This project is licensed under MIT. See [LICENSE](./LICENSE).
 This project includes third-party software components:
 
 - [`symphonia`](https://github.com/pdeljanov/symphonia) (Mozilla Public License 2.0)
-    - Used for audio decoding and file loading.
+    - Used for audio decoding and file loading
     - MPL-2.0 is a file-level copyleft license. This does **not** affect your usage of this library unless
-      you modify and redistribute Symphonia source files.
-    - See [`LICENSE-MPL-2.0`](./LICENSE-MPL-2.0) for the full license.
+      you modify and redistribute Symphonia source files
+    - See [`LICENSE-MPL-2.0`](./LICENSE-MPL-2.0) for the full license
 - [`earshot`](https://github.com/pykeio/earshot) (BSD-3-Clause)
     - Used for (fallback) voice activity detection
-    - See [`LICENSE-BSD-3`](./LICENSE-BSD-3) for the full license.
+    - See [`LICENSE-BSD-3`](./LICENSE-BSD-3) for the full license
 
-## A note about tests
+## A Note About Tests
 
 Many of the tests and benchmarks in this project rely on audio files not included as part of the project.
 These will need to be replaced if you wish to run any of the tests. I do not claim any rights to these files
 nor will they ever be distributed; they are for testing purposes only.
+
+### Telemetry Concerns
+
+This crate on its own does not collect telemetry, but one of the provided Voice Activity Detection implementations
+might, as
+mentioned [here](https://github.com/jordan-clayton/whisper-realtime/blob/dec51c350d80a5442f515f08737c5c14b5b07868/src/transcriber/vad.rs#L36).
+This only affects Windows platforms, but if this is of concern, prefer using one of the other provided implementations
+(WebRtc, etc.) or implement VAD with your preferred solution. At some point in the distant future, I will look into
+self-hosting
+the ONNX runtime binaries to remove any potential telemetry.
