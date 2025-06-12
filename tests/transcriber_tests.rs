@@ -8,7 +8,9 @@ mod transcriber_tests {
     use ribble_whisper::audio::WhisperAudioSample;
     use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
     use ribble_whisper::transcriber::vad::{Silero, VAD};
-    use ribble_whisper::transcriber::{Transcriber, WhisperOutput};
+    use ribble_whisper::transcriber::{
+        redirect_whisper_logging_to_hooks, Transcriber, WhisperOutput,
+    };
     use ribble_whisper::utils;
     use ribble_whisper::utils::constants;
     use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
@@ -68,10 +70,10 @@ mod transcriber_tests {
         }
         assert!(detected_audio, "Failed to detect audio after warming up");
 
-        let audio_ring_buffer = Arc::new(AudioRingBuffer::default());
+        let audio_ring_buffer = AudioRingBuffer::default();
         let (mut transcriber, handle) = RealtimeTranscriberBuilder::<Silero>::new()
             .with_configs(configs.clone())
-            .with_audio_buffer(Arc::clone(&audio_ring_buffer))
+            .with_audio_buffer(&audio_ring_buffer)
             .with_output_sender(text_sender)
             .with_voice_activity_detector(vad)
             .build()
@@ -82,7 +84,7 @@ mod transcriber_tests {
             "Mary has many dreams but can't touch Tennessee by way of flight";
 
         // Prevent logging to stderr
-        whisper_rs::install_logging_hooks();
+        redirect_whisper_logging_to_hooks();
         // Break the audio sample into chunks of size constants::AUDIO_CHUNK_SIZE to simulate default
         // audio input
         let chunks = AUDIO_SAMPLE.chunks(constants::AUDIO_BUFFER_SIZE as usize);

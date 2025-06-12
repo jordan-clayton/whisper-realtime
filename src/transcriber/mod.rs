@@ -1,10 +1,10 @@
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use strum::{Display, EnumString, IntoStaticStr};
 
 use crate::utils::callback::Callback;
-use crate::utils::errors::WhisperRealtimeError;
+use crate::utils::errors::RibbleWhisperError;
 
 pub mod offline_transcriber;
 pub mod realtime_transcriber;
@@ -13,6 +13,11 @@ pub mod vad;
 // Trait alias, used until the feature reaches stable
 pub trait OfflineWhisperProgressCallback: Callback<Argument = i32> + Send + Sync + 'static {}
 impl<T: Callback<Argument = i32> + Send + Sync + 'static> OfflineWhisperProgressCallback for T {}
+
+#[inline]
+pub fn redirect_whisper_logging_to_hooks() {
+    whisper_rs::install_logging_hooks()
+}
 
 /// Handles running Whisper transcription
 pub trait Transcriber {
@@ -24,7 +29,7 @@ pub trait Transcriber {
     fn process_audio(
         &mut self,
         run_transcription: Arc<AtomicBool>,
-    ) -> Result<String, WhisperRealtimeError>;
+    ) -> Result<String, RibbleWhisperError>;
 }
 
 /// Handles running Whisper transcription, with support for optional callbacks
@@ -38,7 +43,7 @@ where
         &mut self,
         run_transcription: Arc<AtomicBool>,
         callbacks: WhisperCallbacks<P>,
-    ) -> Result<String, WhisperRealtimeError>;
+    ) -> Result<String, RibbleWhisperError>;
 }
 
 /// Encapsulates various whisper callbacks which can be set before running transcription
