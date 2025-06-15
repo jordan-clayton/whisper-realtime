@@ -16,10 +16,10 @@ pub trait AudioInputAdapter<T: RecorderSample> {
     fn convert(input: &[T]) -> Self::SenderOutput;
 }
 
-/// ZST type object that implements [crate::audio::recorder::AudioInputAdapter] using Vec<T>
+/// ZST type object that implements [crate::audio::recorder::AudioInputAdapter] using `Vec<T>`
 #[derive(Copy, Clone)]
 pub struct UseVec;
-/// ZST type object that implements [crate::audio::recorder::AudioInputAdapter] using Arc<[T]>
+/// ZST type object that implements [crate::audio::recorder::AudioInputAdapter] using `Arc<[T]>`
 #[derive(Copy, Clone)]
 pub struct UseArc;
 

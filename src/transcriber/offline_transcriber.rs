@@ -79,10 +79,10 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
             voice_activity_detector: Some(v),
         }
     }
-    /// Builds an OfflineTranscriber<V> according to the given parameters
+    /// Builds an `OfflineTranscriber<V>` according to the given parameters
     /// # Returns:
-    /// * Ok(OfflineTranscriber<V>) on successful build
-    /// * Err(WhisperRealtimeError) if one of the following are true:
+    /// * Ok(`OfflineTranscriber<V>`) on successful build
+    /// * Err(RibbleWhisperError) if one of the following are true:
     /// ** missing whisper configurations,
     /// ** missing channel configurations,
     /// ** missing audio

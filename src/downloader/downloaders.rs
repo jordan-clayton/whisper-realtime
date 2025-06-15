@@ -17,7 +17,7 @@ use crate::downloader::{SyncDownload, Writable};
 use crate::utils::callback::{Callback, Nop};
 use crate::utils::errors::RibbleWhisperError;
 
-/// Streams in bytes (asynchrnously) to download data.
+/// Streams in bytes (asynchronously) to download data.
 /// Current progress can be obtained by supplying a Callback.
 #[cfg(feature = "downloader-async")]
 pub struct StreamDownloader<

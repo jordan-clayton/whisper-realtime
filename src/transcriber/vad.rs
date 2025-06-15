@@ -27,13 +27,13 @@ pub trait Resettable {
 ///
 /// To mainatain the same flexibility as the underlying supporting library, the sample rates and chunk sizes
 /// are not constrained. Their limitations are as follows:
-/// https://docs.rs/voice_activity_detector/0.2.0/voice_activity_detector/index.html#standalone-voice-activity-detector
+/// <https://docs.rs/voice_activity_detector/0.2.0/voice_activity_detector/index.html#standalone-voice-activity-detector>
 /// The provided model is trained using chunk sizes of 256, 512, and 768 samples for an 8kHz sample rate.
 /// It is also trained using chunk sizes of 512, 768, and 1024 for a 16kHz sample rate.
 /// These are not hard-requirements but are recommended for performance.
 /// The only hard requirement is that the sample rate must be no larger than 31.25 times the chunk size.
 ///
-/// NOTE: On Windows, this may include some telemetry as per: https://docs.rs/ort/latest/ort/#strategies
+/// NOTE: On Windows, this may include some telemetry as per: <https://docs.rs/ort/latest/ort/#strategies>
 /// Self-hosted ONNX runtime binaries have not yet been implemented and may not be.
 /// In the meantime, use [crate::transcriber::vad::WebRtc] or [crate::transcriber::vad::Earshot]
 /// if telemetry is a concern.
@@ -95,7 +95,7 @@ impl SileroBuilder {
 
 /// Silero VAD backend for use in realtime transcription.
 /// Adapts [voice_activity_detector::VoiceActivityDetector] to predict voice activity using Silero.
-/// NOTE: On Windows, this may include some telemetry as per: https://docs.rs/ort/latest/ort/#strategies
+/// NOTE: On Windows, this may include some telemetry as per: <https://docs.rs/ort/latest/ort/#strategies>
 /// Self-hosted ONNX runtime binaries have not yet been implemented and may not be.
 /// In the meantime, use [crate::transcriber::vad::WebRtc] or [crate::transcriber::vad::Earshot]
 /// if telemetry is a concern.
@@ -226,7 +226,7 @@ impl WebRtcSampleRate {
 
 /// Encapsulates available aggressiveness parameters for [crate::transcriber::vad::WebRtc] and [crate::transcriber::vad::Earshot]
 /// This parameter sets the "mode" from which predetermined speech threshold constants are selected for filtering out non-speech.
-/// See: https://chromium.googlesource.com/external/webrtc/+/refs/heads/master/common_audio/vad/vad_core.c#68
+/// See: <https://chromium.googlesource.com/external/webrtc/+/refs/heads/master/common_audio/vad/vad_core.c#68>
 /// Quality = low filtering, detects most speech and then some. May introduce some false positives
 /// VeryAggressive = high filtering, only clear speech passes. Might introduce false negatives
 ///
@@ -414,7 +414,7 @@ impl WebRtc {
 }
 
 /// WebRtc is Mutex-protected to adhere to the following thread-safety guarantees made by WebRtc Vad:
-/// https://chromium.googlesource.com/external/webrtc/+/0332c2db39d6f5c780ce9e92b850bcb57e24e7f8/webrtc/modules/audio_processing/include/audio_processing.h#197
+/// <https://chromium.googlesource.com/external/webrtc/+/0332c2db39d6f5c780ce9e92b850bcb57e24e7f8/webrtc/modules/audio_processing/include/audio_processing.h#197>
 unsafe impl Send for WebRtc {}
 unsafe impl Sync for WebRtc {}
 

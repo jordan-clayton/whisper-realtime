@@ -23,9 +23,9 @@ pub fn redirect_whisper_logging_to_hooks() {
 pub trait Transcriber {
     /// Loads a compatible whisper model, sets up the whisper state and runs the full model
     /// # Arguments
-    /// * run_transcription: Arc<AtomicBool>, a shared flag used to indicate when to stop transcribing
+    /// * run_transcription: `Arc<AtomicBool>`, a shared flag used to indicate when to stop transcribing
     /// # Returns
-    /// * Ok(String) on success, Err(WhisperRealtimeError) on failure
+    /// * Ok(String) on success, Err(RibbleWhisperError) on failure
     fn process_audio(
         &mut self,
         run_transcription: Arc<AtomicBool>,

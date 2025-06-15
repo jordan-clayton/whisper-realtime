@@ -177,7 +177,7 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
         }
     }
 
-    /// Reads min(len_ms, audio length) ms from the buffer and returns the output as Vec<T>
+    /// Reads min(len_ms, audio length) ms from the buffer and returns the output as `Vec<T>`
     /// NOTE: set len_ms to 0 to read the full buffer.
     pub fn read(&self, len_ms: usize) -> Vec<T> {
         let mut buf = vec![];

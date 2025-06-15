@@ -27,7 +27,7 @@ pub enum ResampleableAudio<'a> {
 /// * in_sample_rate: The original audio's sample rate
 /// * num_channels: The channel configurations (number of channels)
 /// # Returns:
-/// * Ok(WhisperAudioSample) on success, Err(WhisperRealtimeError) on failure to resample
+/// * Ok(WhisperAudioSample) on success, Err(RibbleWhisperError) on failure to resample
 pub fn resample(
     samples: &ResampleableAudio,
     out_sample_rate: f64,
@@ -116,7 +116,7 @@ fn resample_stereo(
 /// * in_sample_rate: the original sampling rate
 /// * num_channels: The channel configurations (number of channels)
 /// # Returns:
-/// * Ok(WhisperAudioSample) on success, Err(WhisperRealtimeError) on failure to resample
+/// * Ok(WhisperAudioSample) on success, Err(RibbleWhisperError) on failure to resample
 #[inline]
 pub fn normalize_audio(
     samples: &ResampleableAudio,
@@ -154,7 +154,7 @@ pub fn file_needs_normalizing<P: AsRef<Path>>(path: P) -> Result<bool, RibbleWhi
     needs_normalizing(track)
 }
 
-/// Uses a [symphonia_core::formats::Track] to determine if audio needs to be resampled to 16kHz
+/// Uses a [symphonia::core::formats::Track] to determine if audio needs to be resampled to 16kHz
 /// for use with whisper.
 #[inline]
 pub fn needs_normalizing(track: &Track) -> Result<bool, RibbleWhisperError> {

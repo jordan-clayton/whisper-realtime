@@ -43,11 +43,11 @@ impl AudioBackend {
         })
     }
 
-    /// To access the inner [sdl2::sdl] context
+    /// To access the inner [sdl2::Sdl] context
     pub fn sdl_ctx(&self) -> Arc<Sdl> {
         self.sdl_ctx.clone()
     }
-    /// To access the inner [sdl2::sdl::AudioSubsystem]
+    /// To access the inner [sdl2::AudioSubsystem]
     pub fn audio_subsystem(&self) -> AudioSubsystem {
         self.audio_subsystem.clone()
     }
@@ -60,7 +60,7 @@ impl AudioBackend {
     /// # Arguments:
     /// * audio_sender: a message sender to forward audio from the input device
     /// # Returns:
-    /// * Ok(AudioDevice) on success, Err(WhisperRealtimeError) on failure to build.
+    /// * Ok(AudioDevice) on success, Err(RibbleWhisperError) on failure to build.
     /// See: [crate::audio::microphone::MicCaptureBuilder] for error conditions.
     pub fn build_whisper_fanout_default<
         T: RecorderSample,
@@ -79,7 +79,7 @@ impl AudioBackend {
     /// # Arguments:
     /// * buffer: a ringbuffer for storing audio from the input device.
     /// # Returns:
-    /// * Ok(AudioDevice) on success, Err(WhisperRealtimeError) on failure to build.
+    /// * Ok(AudioDevice) on success, Err(RibbleWhisperError) on failure to build.
     /// See: [crate::audio::microphone::MicCaptureBuilder] for error conditions.
     pub fn build_whisper_closed_loop_default<T: RecorderSample>(
         &self,
@@ -122,7 +122,7 @@ impl<'a> MicCaptureBuilder<'a> {
             audio_spec_desired,
         }
     }
-    /// To change the [sdl2::sdl::AudioSubsystem]
+    /// To change the [sdl2::AudioSubsystem]
     pub fn with_audio_subsystem(mut self, audio_subsystem: &'a AudioSubsystem) -> Self {
         self.audio_subsystem = audio_subsystem;
         self
@@ -164,7 +164,7 @@ impl<'a> MicCaptureBuilder<'a> {
     /// # Arguments:
     /// * audio_sender: a message sender to forward audio from the input device
     /// # Returns:
-    /// * Ok(AudioDevice) on success, Err(WhisperRealtimeError) on an SDL failure.
+    /// * Ok(AudioDevice) on success, Err(RibbleWhisperError) on an SDL failure.
     pub fn build_fanout<T: RecorderSample, AC: AudioInputAdapter<T> + Send + Clone>(
         self,
         sender: Sender<AC::SenderOutput>,
@@ -188,7 +188,7 @@ impl<'a> MicCaptureBuilder<'a> {
     /// # Arguments:
     /// * buffer: a ringbuffer for storing audio from the input device.
     /// # Returns:
-    /// * Ok(AudioDevice) on success, Err(WhisperRealtimeError) on an SDL failure.
+    /// * Ok(AudioDevice) on success, Err(RibbleWhisperError) on an SDL failure.
     pub fn build_closed_loop<T: RecorderSample>(
         self,
         buffer: &AudioRingBuffer<T>,
