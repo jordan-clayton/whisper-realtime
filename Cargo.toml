@@ -40,7 +40,7 @@ ort = { version = "=2.0.0-rc.9", features = ["ndarray"] }
 voice_activity_detector = "0.2.0"
 earshot = "0.1.0"
 webrtc-vad = "0.4.0"
-parking_lot = "0.12.3"
+parking_lot = {version = "0.12.4", features = ["deadlock_detection"]
 strsim = "0.11.1"
 
 [dev-dependencies]
