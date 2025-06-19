@@ -14,6 +14,9 @@ use crate::audio::WhisperAudioSample;
 use crate::utils::callback::{Callback, Nop, ProgressCallback};
 use crate::utils::errors::RibbleWhisperError;
 
+// TODO: public function to check the number of audio frames a Track (file) has.
+// I forgot that this is probably very important information wrt the progress callback.
+
 fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, RibbleWhisperError> {
     let file = Box::new(File::open(path)?);
     let mss = MediaSourceStream::new(file, Default::default());

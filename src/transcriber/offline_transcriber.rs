@@ -1,15 +1,15 @@
-use std::ffi::{c_int, c_void};
+use std::ffi::{c_int, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use whisper_rs::WhisperProgressCallback;
+use whisper_rs::{WhisperNewSegmentCallback, WhisperProgressCallback};
 
 use crate::audio::{AudioChannelConfiguration, WhisperAudioSample};
 use crate::transcriber::vad::VAD;
 use crate::transcriber::{
-    CallbackTranscriber, OfflineWhisperProgressCallback, Transcriber, WhisperCallbacks,
-    WhisperOutput,
+    CallbackTranscriber, OfflineWhisperNewSegmentCallback, OfflineWhisperProgressCallback,
+    Transcriber, TranscriptionSnapshot, WhisperCallbacks, WhisperOutput,
 };
 use crate::utils::errors::RibbleWhisperError;
 use crate::utils::Sender;
@@ -24,6 +24,7 @@ where
 {
     configs: Option<Arc<WhisperConfigsV2>>,
     /// (Optional) Used for sending transcribed segments to a UI.
+    /// TODO: remove this and implement in the segment callback.
     sender: Option<Sender<WhisperOutput>>,
     audio: Option<Arc<WhisperAudioSample>>,
     channels: Option<AudioChannelConfiguration>,
@@ -189,18 +190,8 @@ impl<V: VAD<f32>> OfflineTranscriber<V> {
 
         // Transcribe segments and send through a channel to a UI.
         for i in 0..num_segments {
-            if let Ok(segment) = whisper_state.full_get_segment_text(i) {
+            if let Ok(segment) = whisper_state.full_get_segment_text_lossy(i) {
                 text.push(segment.clone());
-                // This function doesn't need to stop if the channel is closed, so just ignore.
-                let _ = self.sender.as_ref().and_then(|sender| {
-                    // Since all segments are guaranteed not to overlap (eg. as in realtime), these
-                    // can be sent as single segment strings to the receiver to handle.
-
-                    // NOTE: this is optional because by this time, the full inference has been run
-                    // Sending data out is a little redundant, but can be used in the UI to alert
-                    // the user that the transcription is nearly finished.
-                    Some(sender.send(WhisperOutput::ConfirmedTranscription(segment)))
-                });
             }
         }
 
@@ -240,19 +231,21 @@ impl<V: VAD<f32>> Transcriber for OfflineTranscriber<V> {
     }
 }
 
-impl<V, P> CallbackTranscriber<P> for OfflineTranscriber<V>
+impl<V, P, S> CallbackTranscriber<P, S> for OfflineTranscriber<V>
 where
     V: VAD<f32>,
     P: OfflineWhisperProgressCallback,
+    S: OfflineWhisperNewSegmentCallback,
 {
     fn process_with_callbacks(
         &mut self,
         run_transcription: Arc<AtomicBool>,
-        callbacks: WhisperCallbacks<P>,
+        callbacks: WhisperCallbacks<P, S>,
     ) -> Result<String, RibbleWhisperError> {
         // Decompose the callbacks struct
         let WhisperCallbacks {
             progress: maybe_progress_callback,
+            new_segment: maybe_new_segment_callback,
         } = callbacks;
 
         let confs = Arc::clone(&self.configs);
@@ -260,13 +253,15 @@ where
 
         // Named stack binding for the progress callback
         let mut p_callback;
+        // Named stack binding for the new_segment callback
+        let mut s_callback;
 
         // Abort callback
         let r_transcription = Arc::clone(&run_transcription);
         // Coerce to a void pointer
         let a_ptr = Arc::into_raw(r_transcription) as *mut c_void;
 
-        let (progress_callback, user_data): (WhisperProgressCallback, *mut c_void) =
+        let (progress_callback, progress_user_data): (WhisperProgressCallback, *mut c_void) =
             match maybe_progress_callback {
                 None => (None, std::ptr::null_mut::<c_void>()),
                 Some(cb) => {
@@ -277,9 +272,23 @@ where
                     )
                 }
             };
+
+        let (new_segment_callback, new_segment_user_data): (
+            WhisperNewSegmentCallback,
+            *mut c_void,
+        ) = match maybe_new_segment_callback {
+            None => (None, std::ptr::null_mut::<c_void>()),
+            Some(cb) => {
+                s_callback = cb;
+                (Some(new_segment_callback::<S>), std::ptr::null_mut())
+            }
+        };
+
         unsafe {
-            full_params.set_progress_callback_user_data(user_data);
+            full_params.set_progress_callback_user_data(progress_user_data);
             full_params.set_progress_callback(progress_callback);
+            full_params.set_new_segment_callback_user_data(new_segment_user_data);
+            full_params.set_new_segment_callback(new_segment_callback);
             full_params.set_abort_callback_user_data(a_ptr);
             full_params.set_abort_callback(Some(abort_callback))
         }
@@ -325,4 +334,35 @@ unsafe extern "C" fn progress_callback<PC: OfflineWhisperProgressCallback>(
 ) {
     let callback = unsafe { &mut *(user_data as *mut PC) };
     callback.call(progress);
+}
+
+/// TODO: document this
+/// NOTE: this is obviously not the most efficient--but whisper apparently does its own
+/// mutation/correction to previous segments as it receives more information.
+/// Thus, for this to be a truly accurate snapshot, it will have to collect the entire state of the
+/// transcription thus far. It is also going to be dwarfed by the time required for whisper to finish transcribing,
+/// so it doesn't necessarily matter
+///
+/// Bear in mind, this gets called whenever whisper finishes decoding, so do heavy computation
+/// outside of this callback whenever possible.
+/// At this time, there are not plans to include timestamps/associated metadata.
+unsafe extern "C" fn new_segment_callback<S: OfflineWhisperNewSegmentCallback>(
+    _: *mut whisper_rs_sys::whisper_context,
+    state: *mut whisper_rs_sys::whisper_state,
+    _n_next: c_int,
+    user_data: *mut c_void,
+) {
+    let callback = unsafe { &mut *(user_data as *mut S) };
+    let n_segments = whisper_rs_sys::whisper_full_n_segments_from_state(state);
+    let mut segments = vec![];
+    segments.reserve(n_segments as usize);
+    for i in 0..n_segments {
+        let text = whisper_rs_sys::whisper_full_n_segments_from_state(state, i);
+        let segment = CStr::from_ptr(text);
+        segments.push(segment.to_string_lossy().to_string())
+    }
+    callback.call(TranscriptionSnapshot {
+        confirmed: String::default(),
+        string_segments: segments.into_boxed_slice(),
+    })
 }

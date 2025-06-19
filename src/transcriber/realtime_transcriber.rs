@@ -7,7 +7,9 @@ use strsim::jaro_winkler;
 
 use crate::audio::audio_ring_buffer::AudioRingBuffer;
 use crate::transcriber::vad::VAD;
-use crate::transcriber::{Transcriber, WhisperControlPhrase, WhisperOutput, WhisperSegment};
+use crate::transcriber::{
+    Transcriber, TranscriptionSnapshot, WhisperControlPhrase, WhisperOutput, WhisperSegment,
+};
 use crate::utils::constants;
 use crate::utils::errors::RibbleWhisperError;
 use crate::utils::Sender;
@@ -381,20 +383,16 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
             }
 
             // Send the current transcription as it exists, so that the UI can update
-            if !output_string.is_empty() {
+            if !output_string.is_empty() || !working_set.is_empty() {
+                let snapshot = Arc::new(TranscriptionSnapshot::new(
+                    output_string.clone(),
+                    working_set
+                        .iter()
+                        .map(|segment| segment.text.clone())
+                        .collect(),
+                ));
                 self.output_sender
-                    .send(WhisperOutput::ConfirmedTranscription(output_string.clone()))
-                    .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?
-            }
-
-            // If there are segments, push them to the UI to update the display.
-            let send_out = working_set
-                .iter()
-                .map(|segment| segment.text.clone())
-                .collect();
-            if !working_set.is_empty() {
-                self.output_sender
-                    .send(WhisperOutput::CurrentSegments(send_out))
+                    .send(WhisperOutput::TranscriptionSnapshot(snapshot))
                     .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?
             }
 

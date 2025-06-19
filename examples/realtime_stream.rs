@@ -17,7 +17,9 @@ use ribble_whisper::downloader::SyncDownload;
 use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::{Silero, WebRtc};
-use ribble_whisper::transcriber::{redirect_whisper_logging_to_hooks, Transcriber};
+use ribble_whisper::transcriber::{
+    redirect_whisper_logging_to_hooks, Transcriber, TranscriptionSnapshot,
+};
 use ribble_whisper::transcriber::{
     CallbackTranscriber, WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
 };
@@ -136,16 +138,14 @@ fn main() {
         // Update the UI with the newly transcribed data
         let print_thread = s.spawn(move || {
             let mut latest_control_message = WhisperControlPhrase::GettingReady;
-            let mut latest_confirmed = String::default();
-            let mut latest_segments: Vec<String> = vec![];
+            let mut latest_snapshot = Arc::new(TranscriptionSnapshot::default());
             while p_thread_run_transcription.load(Ordering::Acquire) {
                 match text_receiver.recv() {
                     Ok(output) => match output {
                         // This is the most up-to-date full string transcription
-                        WhisperOutput::ConfirmedTranscription(text) => {
-                            latest_confirmed = text;
+                        WhisperOutput::TranscriptionSnapshot(snapshot) => {
+                            latest_snapshot = Arc::clone(&snapshot);
                         }
-                        WhisperOutput::CurrentSegments(segments) => latest_segments = segments,
 
                         WhisperOutput::ControlPhrase(message) => {
                             latest_control_message = message;
@@ -158,19 +158,18 @@ fn main() {
                 println!("Latest Control Message: {}\n", latest_control_message);
                 println!("Transcription:\n");
                 // Print the remaining current working set of segments.
-                print!("{}", latest_confirmed);
+                print!("{}", latest_snapshot.confirmed());
                 // Print the remaining current working set of segments.
-                for segment in latest_segments.iter() {
+                for segment in latest_snapshot.string_segments() {
                     print!("{}", segment);
                 }
 
                 stdout().flush().expect("Stdout should clear normally.");
             }
 
-            // Drain the last of the segments into the final string
-            let last_text = latest_segments.drain(..);
-            latest_confirmed.extend(last_text);
-            latest_confirmed
+            // Take the last received snapshot and bake it into a string.
+            // This is just to demonstrate idempotency between message passing and the returned string
+            latest_snapshot.to_string();
         });
 
         // Send both outputs for comparison in stdout.
@@ -232,6 +231,9 @@ fn main() {
 
         let callbacks = WhisperCallbacks {
             progress: Some(static_progress_callback),
+            // If you want to run a similar UI REPL like in the realtime example, the new segment callback
+            // will let you access a snapshot to send via a message queue or similar.
+            new_segment: None,
         };
 
         let transcription =

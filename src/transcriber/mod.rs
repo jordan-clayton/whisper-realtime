@@ -14,6 +14,16 @@ pub mod vad;
 pub trait OfflineWhisperProgressCallback: Callback<Argument = i32> + Send + Sync + 'static {}
 impl<T: Callback<Argument = i32> + Send + Sync + 'static> OfflineWhisperProgressCallback for T {}
 
+// Trait alias, used until the feature reaches stable
+pub trait OfflineWhisperNewSegmentCallback:
+    Callback<Argument = TranscriptionSnapshot> + Send + Sync + 'static
+{
+}
+impl<T: Callback<Argument = TranscriptionSnapshot> + Send + Sync + 'static>
+    OfflineWhisperNewSegmentCallback for T
+{
+}
+
 #[inline]
 pub fn redirect_whisper_logging_to_hooks() {
     whisper_rs::install_logging_hooks()
@@ -35,22 +45,31 @@ pub trait Transcriber {
 /// Handles running Whisper transcription, with support for optional callbacks
 /// These callbacks are called from whisper so their safety cannot be completely guaranteed.
 /// However, since these callbacks do not touch the whisper state, they should work as expected.
-pub trait CallbackTranscriber<P>: Transcriber
+pub trait CallbackTranscriber<P, S>: Transcriber
 where
     P: OfflineWhisperProgressCallback,
+    S: OfflineWhisperNewSegmentCallback,
 {
     fn process_with_callbacks(
         &mut self,
         run_transcription: Arc<AtomicBool>,
-        callbacks: WhisperCallbacks<P>,
+        callbacks: WhisperCallbacks<P, S>,
     ) -> Result<String, RibbleWhisperError>;
 }
 
 /// Encapsulates various whisper callbacks which can be set before running transcription
 /// Other callbacks will be added as needed.
-pub struct WhisperCallbacks<P: OfflineWhisperProgressCallback> {
+pub struct WhisperCallbacks<P, S>
+where
+    P: OfflineWhisperProgressCallback,
+    S: OfflineWhisperNewSegmentCallback,
+{
     /// Optional progress callback
     pub progress: Option<P>,
+    /// Optional new segment callback.
+    /// NOTE: this operates at a snapshot level and produces a full representation of the
+    /// transcription whenever a new segment is decoded.
+    pub new_segment: Option<S>,
 }
 
 /// Encapsulates a whisper segment with start and end timestamps
@@ -64,25 +83,66 @@ pub struct WhisperSegment {
     pub end_time: i64,
 }
 
+/// Encapsulates the state of whisper transcription (confirmed + working segments) at a given point in time
+#[derive(Clone)]
+pub struct TranscriptionSnapshot {
+    confirmed: String,
+    string_segments: Box<[String]>,
+}
+impl TranscriptionSnapshot {
+    pub fn new(confirmed: String, string_segments: Box<[String]>) -> Self {
+        Self {
+            confirmed,
+            string_segments,
+        }
+    }
+
+    pub fn confirmed(&self) -> &str {
+        &self.confirmed
+    }
+    pub fn string_segments(&self) -> &[String] {
+        &self.string_segments
+    }
+
+    pub fn to_string(&self) -> String {
+        let mut confirmed = self.confirmed.clone();
+        confirmed.extend(self.string_segments.iter());
+        confirmed
+    }
+
+    pub fn into_parts(self) -> (String, Box<[String]>) {
+        (self.confirmed, self.string_segments)
+    }
+    pub fn into_string(self) -> String {
+        let mut confirmed = self.confirmed;
+        confirmed.extend(self.string_segments.into_iter());
+        confirmed
+    }
+}
+impl Default for TranscriptionSnapshot {
+    fn default() -> Self {
+        Self {
+            confirmed: Default::default(),
+            string_segments: Default::default(),
+        }
+    }
+}
+
 /// Encapsulates possible types of output sent through a Transcriber channel
-/// NOTE: Outputs with accompanying timestamps are not yet implemented.
+/// NOTE: Outputs with accompanying timestamps are not yet implemented
+/// This may not be possible due to real-time implementation details.
+#[derive(Clone)]
 pub enum WhisperOutput {
-    /// Contains the most confident state of the transcription as a string
-    ConfirmedTranscription(String),
-    /// Contains a copy of the current working set of segments.
-    /// When word-boundaries are confirmed to be resolved, they become part of the output
-    /// and are removed from the working set
-    CurrentSegments(Vec<String>),
+    TranscriptionSnapshot(Arc<TranscriptionSnapshot>),
     /// For sending running state and control messages from the Transcriber
     ControlPhrase(WhisperControlPhrase),
 }
 
 impl WhisperOutput {
-    // Consumes and extracts the inner contents of a WhisperOUtput into a string
+    // Consumes and extracts the inner contents of a WhisperOutput into a string
     pub fn into_inner(self) -> String {
         match self {
-            WhisperOutput::ConfirmedTranscription(msg) => msg,
-            WhisperOutput::CurrentSegments(segments) => segments.join(""),
+            WhisperOutput::TranscriptionSnapshot(snapshot) => snapshot.to_string(),
             WhisperOutput::ControlPhrase(control_phrase) => control_phrase.to_string(),
         }
     }
@@ -90,7 +150,7 @@ impl WhisperOutput {
 
 /// A set of control phrases to pass information from the transcriber to a UI
 // These would benefit from some eventual localization
-#[derive(EnumString, IntoStaticStr, Display)]
+#[derive(Clone, EnumString, IntoStaticStr, Display)]
 pub enum WhisperControlPhrase {
     /// Preparing whisper for transcription
     #[strum(serialize = "[GETTING_READY]")]
