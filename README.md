@@ -11,7 +11,8 @@ better performance (see: [Features](#features)). Depending on your hardware, it 
 CPU using a smaller quantized model (e.g. base.en-q5, tiny.en-q5). These are likely to be less accurate, but
 your results may vary.
 
-***NOTE: This library is primarily intended for personal and research use, but is actively used
+***
+NOTE: This library is primarily intended for personal and research use, but is actively used
 in [Ribble](https://github.com/jordan-clayton/ribble) and has proven stable in that context.
 While it has not been tested in large-scale deployments, it is likely suitable for production--though this is not
 guaranteed.
