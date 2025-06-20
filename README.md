@@ -87,7 +87,7 @@ fn main() {
         .expect("Silero realtime VAD expected to build without issue when configured properly.");
 
     // Set up the RealtimeTranscriber + Ready handle.
-    let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<WebRtc>::new()
+    let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<Silero>::new()
         .with_configs(configs.clone())
         .with_audio_buffer(&audio_ring_buffer)
         .with_output_sender(text_sender)
