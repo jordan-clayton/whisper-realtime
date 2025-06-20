@@ -58,7 +58,7 @@ impl<T, CB: FnMut(T) + 'static> Callback for StaticRibbleWhisperCallback<T, CB> 
 /// Since all optional callbacks are unpacked before a hot loop to cut down on branching,
 /// this will get called repeatedly but expect this to be optimized out.
 ///
-/// This can also be used with Option<impl Callback> = None to satisfy type annotation requirements.
+/// This can also be used with `Option<impl Callback>` = None to satisfy type annotation requirements.
 #[repr(C)]
 pub struct Nop<T> {
     _marker: PhantomData<T>,

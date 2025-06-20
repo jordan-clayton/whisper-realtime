@@ -1,5 +1,5 @@
-// TODO: Copy information from README.md (ie. examples, feature flags) over here to generate proper
-// docs (USE MARKDOWN SYNTAX)
+#![doc = include_str!("../README.md")]
+// TODO: either re-export major structs/traits/etc. here, or write a prelude
 pub mod audio;
 #[cfg(feature = "downloader")]
 pub mod downloader;

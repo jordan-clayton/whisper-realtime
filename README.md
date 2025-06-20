@@ -147,16 +147,14 @@ fn main() {
         // Update the UI with the newly transcribed data
         let print_thread = s.spawn(move || {
             let mut latest_control_message = WhisperControlPhrase::GettingReady;
-            let mut latest_confirmed = String::default();
-            let mut latest_segments: Vec<String> = vec![];
+            let mut latest_snapshot = Arc::new(TranscriptionSnapshot::default());
             while p_thread_run_transcription.load(Ordering::Acquire) {
                 match text_receiver.recv() {
                     Ok(output) => match output {
                         // This is the most up-to-date full string transcription
-                        WhisperOutput::ConfirmedTranscription(text) => {
-                            latest_confirmed = text;
+                        WhisperOutput::TranscriptionSnapshot(snapshot) => {
+                            latest_snapshot = Arc::clone(&snapshot);
                         }
-                        WhisperOutput::CurrentSegments(segments) => latest_segments = segments,
 
                         WhisperOutput::ControlPhrase(message) => {
                             latest_control_message = message;
