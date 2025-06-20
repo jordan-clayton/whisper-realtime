@@ -6,13 +6,13 @@ pub trait Callback {
     fn call(&mut self, arg: Self::Argument);
 }
 
-/// Encapsulates progress-related callbacks
+/// Encapsulates a basic FnMut callback for functions that accept optional callbacks.
 #[repr(C)]
-pub struct ProgressCallback<T, CB: FnMut(T)> {
+pub struct RibbleWhisperCallback<T, CB: FnMut(T)> {
     callback: CB,
     _marker: PhantomData<T>,
 }
-impl<T, CB: FnMut(T)> ProgressCallback<T, CB> {
+impl<T, CB: FnMut(T)> RibbleWhisperCallback<T, CB> {
     pub fn new(callback: CB) -> Self {
         Self {
             callback,
@@ -21,24 +21,24 @@ impl<T, CB: FnMut(T)> ProgressCallback<T, CB> {
     }
 }
 
-impl<T, CB: FnMut(T)> Callback for ProgressCallback<T, CB> {
+impl<T, CB: FnMut(T)> Callback for RibbleWhisperCallback<T, CB> {
     type Argument = T;
     fn call(&mut self, arg: T) {
         (&mut self.callback)(arg);
     }
 }
 
-/// This is the static equivalent of  [crate::utils::callback::ProgressCallback]
-/// Encouraged for use when 'static lifetimes are required, (eg. OfflineWhisperProgressCallback).
+/// This is the static equivalent of  [RibbleWhisperCallback]
+/// Encouraged for use when `'static` lifetimes are required, (e.g. OfflineWhisperProgressCallback).
 /// It is not strictly necessary to use this over ProgressCallback, but it may help with
 /// locating and debugging lifetime errors.
 #[repr(C)]
-pub struct StaticProgressCallback<T, CB: FnMut(T) + 'static> {
+pub struct StaticRibbleWhisperCallback<T, CB: FnMut(T) + 'static> {
     callback: CB,
     _marker: PhantomData<T>,
 }
 
-impl<T, CB: FnMut(T) + 'static> StaticProgressCallback<T, CB> {
+impl<T, CB: FnMut(T) + 'static> StaticRibbleWhisperCallback<T, CB> {
     pub fn new(callback: CB) -> Self {
         Self {
             callback,
@@ -47,7 +47,7 @@ impl<T, CB: FnMut(T) + 'static> StaticProgressCallback<T, CB> {
     }
 }
 
-impl<T, CB: FnMut(T) + 'static> Callback for StaticProgressCallback<T, CB> {
+impl<T, CB: FnMut(T) + 'static> Callback for StaticRibbleWhisperCallback<T, CB> {
     type Argument = T;
     fn call(&mut self, arg: T) {
         (&mut self.callback)(arg);
@@ -55,7 +55,10 @@ impl<T, CB: FnMut(T) + 'static> Callback for StaticProgressCallback<T, CB> {
 }
 
 /// To indicate "None" in functions that expect a callback (eg. downloading, loading audio, etc.)
-/// Since all optional callbacks are called repeatedly
+/// Since all optional callbacks are unpacked before a hot loop to cut down on branching,
+/// this will get called repeatedly but expect this to be optimized out.
+///
+/// This can also be used with Option<impl Callback> = None to satisfy type annotation requirements.
 #[repr(C)]
 pub struct Nop<T> {
     _marker: PhantomData<T>,

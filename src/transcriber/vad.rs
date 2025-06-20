@@ -21,7 +21,7 @@ pub trait Resettable {
     fn reset_session(&mut self);
 }
 
-/// Builder for [crate::transcriber::vad::Silero] that adapts voice_activity_detector's builder
+/// Builder for [Silero] that adapts voice_activity_detector's builder
 /// and also includes a starting detection probability.
 /// The probability threshold can be swapped after building if needed.
 ///
@@ -35,7 +35,7 @@ pub trait Resettable {
 ///
 /// NOTE: On Windows, this may include some telemetry as per: <https://docs.rs/ort/latest/ort/#strategies>
 /// Self-hosted ONNX runtime binaries have not yet been implemented and may not be.
-/// In the meantime, use [crate::transcriber::vad::WebRtc] or [crate::transcriber::vad::Earshot]
+/// In the meantime, use [WebRtc] or [Earshot]
 /// if telemetry is a concern.
 #[derive(Copy, Clone)]
 pub struct SileroBuilder {
@@ -97,7 +97,7 @@ impl SileroBuilder {
 /// Adapts [voice_activity_detector::VoiceActivityDetector] to predict voice activity using Silero.
 /// NOTE: On Windows, this may include some telemetry as per: <https://docs.rs/ort/latest/ort/#strategies>
 /// Self-hosted ONNX runtime binaries have not yet been implemented and may not be.
-/// In the meantime, use [crate::transcriber::vad::WebRtc] or [crate::transcriber::vad::Earshot]
+/// In the meantime, use [WebRtc] or [Earshot]
 /// if telemetry is a concern.
 pub struct Silero {
     vad: voice_activity_detector::VoiceActivityDetector,
@@ -196,7 +196,7 @@ impl<T: voice_activity_detector::Sample> VAD<T> for Silero {
     }
 }
 
-/// Encapsulates available sample rates available for [crate::transcriber::vad::WebRtc] and [crate::transcriber::vad::Earshot].
+/// Encapsulates available sample rates available for [WebRtc] and [Earshot].
 #[derive(Copy, Clone, Debug)]
 pub enum WebRtcSampleRate {
     R8kHz,
@@ -224,7 +224,7 @@ impl WebRtcSampleRate {
     }
 }
 
-/// Encapsulates available aggressiveness parameters for [crate::transcriber::vad::WebRtc] and [crate::transcriber::vad::Earshot]
+/// Encapsulates available aggressiveness parameters for [WebRtc] and [Earshot]
 /// This parameter sets the "mode" from which predetermined speech threshold constants are selected for filtering out non-speech.
 /// See: <https://chromium.googlesource.com/external/webrtc/+/refs/heads/master/common_audio/vad/vad_core.c#68>
 /// Quality = low filtering, detects most speech and then some. May introduce some false positives
@@ -258,8 +258,8 @@ impl WebRtcFilterAggressiveness {
     }
 }
 
-/// Encapsulates available Frame lengths (in ms) for [crate::transcriber::vad::WebRtc]
-/// and [crate::transcriber::vad::Earshot].
+/// Encapsulates available Frame lengths (in ms) for [WebRtc]
+/// and [Earshot].
 /// Since WebRTC expects frames of specific fixed length, this enumeration captures the only possible
 /// valid lengths. It is not used directly in the implementation or the VAD backend; its purpose is
 /// to provide information required to compute the necessary sample padding/truncation to fit the
@@ -331,7 +331,7 @@ impl WebRtcBuilder {
         self
     }
 
-    /// Builds a [crate::transcriber::vad::WebRtc] VAD backend.
+    /// Builds a [WebRtc] VAD backend.
     /// Returns Err if there's an internal panic due to a memory allocation error.
     pub fn build_webrtc(self) -> Result<WebRtc, RibbleWhisperError> {
         std::panic::catch_unwind(|| {
@@ -355,7 +355,7 @@ impl WebRtcBuilder {
         })
     }
 
-    /// Builds a [crate::transcriber::vad::Earshot] VAD backend.
+    /// Builds a [Earshot] VAD backend.
     pub fn build_earshot(self) -> Result<Earshot, RibbleWhisperError> {
         let vad = earshot::VoiceActivityDetector::new(self.aggressiveness.to_earshot_vad_profile());
         let predicate = match self.sample_rate {

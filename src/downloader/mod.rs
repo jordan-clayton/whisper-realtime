@@ -21,7 +21,7 @@ pub trait AsyncDownload: Writable {
         &mut self,
         file_directory: &Path,
         file_name: &str,
-    ) -> impl std::future::Future<Output = Result<(), RibbleWhisperError>>;
+    ) -> impl Future<Output = Result<(), RibbleWhisperError>>;
 }
 
 /// To handle basic IO operations when downlading files

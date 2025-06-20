@@ -9,13 +9,12 @@ use crate::audio::{AudioChannelConfiguration, WhisperAudioSample};
 use crate::transcriber::vad::VAD;
 use crate::transcriber::{
     CallbackTranscriber, OfflineWhisperNewSegmentCallback, OfflineWhisperProgressCallback,
-    Transcriber, TranscriptionSnapshot, WhisperCallbacks, WhisperOutput,
+    Transcriber, TranscriptionSnapshot, WhisperCallbacks,
 };
 use crate::utils::errors::RibbleWhisperError;
-use crate::utils::Sender;
 use crate::whisper::configs::WhisperConfigsV2;
 
-/// Builder for [crate::transcriber::offline_transcriber::OfflineTranscriber]
+/// Builder for [OfflineTranscriber]
 /// Silero: [crate::transcriber::vad::Silero] is recommended for accuracy.
 #[derive(Clone)]
 pub struct OfflineTranscriberBuilder<V>
@@ -23,9 +22,6 @@ where
     V: VAD<f32>,
 {
     configs: Option<Arc<WhisperConfigsV2>>,
-    /// (Optional) Used for sending transcribed segments to a UI.
-    /// TODO: remove this and implement in the segment callback.
-    sender: Option<Sender<WhisperOutput>>,
     audio: Option<Arc<WhisperAudioSample>>,
     channels: Option<AudioChannelConfiguration>,
     /// (Optional) Used to extract voiced segments to reduce overall transcription time.
@@ -36,7 +32,6 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
     pub fn new() -> Self {
         Self {
             configs: None,
-            sender: None,
             audio: None,
             channels: None,
             voice_activity_detector: None,
@@ -45,11 +40,6 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
     /// Sets the whisper configurations
     pub fn with_configs(mut self, configs: WhisperConfigsV2) -> Self {
         self.configs = Some(Arc::new(configs));
-        self
-    }
-    /// Sets an (optional) channel through which to send transcribed segments to a UI
-    pub fn with_sender(mut self, sender: Sender<WhisperOutput>) -> Self {
-        self.sender = Some(sender);
         self
     }
 
@@ -74,7 +64,6 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
         let v = Arc::new(Mutex::new(vad));
         OfflineTranscriberBuilder {
             configs: self.configs,
-            sender: self.sender,
             audio: self.audio,
             channels: self.channels,
             voice_activity_detector: Some(v),
@@ -91,7 +80,6 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
         let configs = self.configs.ok_or(RibbleWhisperError::ParameterError(
             "Configs missing in OfflineTranscriberBuilder..".to_string(),
         ))?;
-        let sender = self.sender;
         let audio = self.audio.filter(|audio| audio.len() > 0).ok_or(
             RibbleWhisperError::ParameterError(
                 "Audio missing in OfflineTranscriberBuilder.".to_string(),
@@ -104,7 +92,6 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
         let vad = self.voice_activity_detector;
         Ok(OfflineTranscriber {
             configs,
-            sender,
             audio,
             channels,
             voice_activity_detector: vad,
@@ -118,9 +105,6 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
 pub struct OfflineTranscriber<V: VAD<f32>> {
     /// Whisper configurations
     configs: Arc<WhisperConfigsV2>,
-    /// (Optional) Used for sending transcribed segments to a UI.
-    /// Segments are sent as [crate::transcriber::WhisperOutput::ConfirmedTranscription]
-    sender: Option<Sender<WhisperOutput>>,
     /// The audio to transcribe.
     audio: Arc<WhisperAudioSample>,
     /// Mono or Stereo. Stereo will be converted to mono before transcription
@@ -204,6 +188,8 @@ impl<V: VAD<f32>> OfflineTranscriber<V> {
 }
 
 impl<V: VAD<f32>> Transcriber for OfflineTranscriber<V> {
+    // NOTE: this uses the unsafe API for whisper callbacks to have a little more control over the FFI.
+    // Expect this implementation to be safe, for all intents and purposes.
     fn process_audio(
         &mut self,
         run_transcription: Arc<AtomicBool>,
@@ -237,6 +223,12 @@ where
     P: OfflineWhisperProgressCallback,
     S: OfflineWhisperNewSegmentCallback,
 {
+    // NOTE: this uses the unsafe API for whisper callbacks to have a little more control over the FFI.
+    // Expect this implementation to be safe, for all intents and purposes.
+    // It should be impossible for the callback trait objects to go out of scope with the current implementation.
+    // If, however, it is the case that an invalid stack address is sent to whisper--
+    // then just take the performance hit and box the trait objects.
+    // As of testing thus far, this implementation is safe.
     fn process_with_callbacks(
         &mut self,
         run_transcription: Arc<AtomicBool>,
@@ -280,7 +272,10 @@ where
             None => (None, std::ptr::null_mut::<c_void>()),
             Some(cb) => {
                 s_callback = cb;
-                (Some(new_segment_callback::<S>), std::ptr::null_mut())
+                (
+                    Some(new_segment_callback::<S>),
+                    &mut s_callback as *mut S as *mut c_void,
+                )
             }
         };
 
@@ -305,13 +300,20 @@ where
 
 // C-Callbacks (until "safe" handles are working in whisper-rs)
 // More callbacks will be implemented and exposed as necessary.
+// NOTE: As of the most current version of this library, all callbacks have been tested and should
+// be considered safe. To date, there has not been an issue with the code called across the FFI boundary.
+// It is therefore assumed that the callback mechanisms are correct -- there should not be a need to
+// heap-allocate the trait objects due to the execution flow of OfflineTranscriber::process_with_callbacks.
 
-/// This function gets called at the beginning of each run of the decoder to determine whether to
-/// abort transcription. The function aborts on true.
-/// Since transcription is being controlled by a run_transcription boolean, the transcription
-/// is expected to stop when run_transcription is false.
-/// Internally, this peeks the Arc so that the refcount remains where it is.
-/// Thus, the calling scope must manually consume the arc after this callback is no longer called.
+// Any panics/segfaults that are encountered imply a bug exists within the closure/function
+// passed to a StaticRibbleWhisperCallback object rather than the trampolines.
+
+// This function gets called at the beginning of each run of the decoder to determine whether to
+// abort transcription. The function aborts on true.
+// Since transcription is being controlled by a run_transcription boolean, the transcription
+// is expected to stop when run_transcription is false.
+// Internally, this peeks the Arc so that the refcount remains where it is.
+// Thus, the calling scope must manually consume the arc after this callback is no longer called.
 unsafe extern "C" fn abort_callback(user_data: *mut c_void) -> bool {
     // Consume the pointer
     let ptr = unsafe { Arc::from_raw(user_data as *const AtomicBool) };
@@ -322,10 +324,10 @@ unsafe extern "C" fn abort_callback(user_data: *mut c_void) -> bool {
     !run_transcription
 }
 
-/// This callback gets called in order to forward progress updates from Whisper to a UI.
-/// To guarantee the safety of the C library, whisper_context and whisper_states should
-/// not be mutated.
-/// This function may or may not be called from a multithreaded context.
+// This callback gets called in order to forward progress updates from Whisper to a UI.
+// To guarantee the safety of the C library, whisper_context and whisper_states should
+// not be mutated.
+// This function may or may not be called from a multithreaded context.
 unsafe extern "C" fn progress_callback<PC: OfflineWhisperProgressCallback>(
     _: *mut whisper_rs_sys::whisper_context,
     _: *mut whisper_rs_sys::whisper_state,
@@ -336,16 +338,21 @@ unsafe extern "C" fn progress_callback<PC: OfflineWhisperProgressCallback>(
     callback.call(progress);
 }
 
-/// TODO: document this
-/// NOTE: this is obviously not the most efficient--but whisper apparently does its own
-/// mutation/correction to previous segments as it receives more information.
-/// Thus, for this to be a truly accurate snapshot, it will have to collect the entire state of the
-/// transcription thus far. It is also going to be dwarfed by the time required for whisper to finish transcribing,
-/// so it doesn't necessarily matter
-///
-/// Bear in mind, this gets called whenever whisper finishes decoding, so do heavy computation
-/// outside of this callback whenever possible.
-/// At this time, there are not plans to include timestamps/associated metadata.
+// This callback is used to forward the most up-to-date transcription snapshot from Whisper to a UI.
+
+// Since the state is used in this callback, it cannot be guaranteed that it will be safe.
+// There is no way to offer this feature without using the state, since the state is required for
+// grabbing segment text -- but this function follows whisper_rs conventions for trampolining, so it is most likely safe.
+
+// NOTE: this is obviously not the most efficient--but whisper apparently does its own
+// mutation/correction to previous segments as it receives more information.
+// Thus, for this to be a truly accurate snapshot, it will have to collect the entire state of the
+// transcription thus far. It is also going to be dwarfed by the time required for whisper to finish transcribing,
+// so it doesn't necessarily matter.
+//
+// Bear in mind, this gets called whenever whisper finishes decoding, so do heavy computation
+// outside of this callback whenever possible.
+// At this time, there are not plans to include timestamps/associated metadata.
 unsafe extern "C" fn new_segment_callback<S: OfflineWhisperNewSegmentCallback>(
     _: *mut whisper_rs_sys::whisper_context,
     state: *mut whisper_rs_sys::whisper_state,
@@ -353,12 +360,12 @@ unsafe extern "C" fn new_segment_callback<S: OfflineWhisperNewSegmentCallback>(
     user_data: *mut c_void,
 ) {
     let callback = unsafe { &mut *(user_data as *mut S) };
-    let n_segments = whisper_rs_sys::whisper_full_n_segments_from_state(state);
+    let n_segments = unsafe { whisper_rs_sys::whisper_full_n_segments_from_state(state) };
     let mut segments = vec![];
     segments.reserve(n_segments as usize);
     for i in 0..n_segments {
-        let text = whisper_rs_sys::whisper_full_n_segments_from_state(state, i);
-        let segment = CStr::from_ptr(text);
+        let text = unsafe { whisper_rs_sys::whisper_full_get_segment_text_from_state(state, i) };
+        let segment = unsafe { CStr::from_ptr(text) };
         segments.push(segment.to_string_lossy().to_string())
     }
     callback.call(TranscriptionSnapshot {

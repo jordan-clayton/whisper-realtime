@@ -5,15 +5,18 @@ mod transcriber_tests {
 
     use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
     use ribble_whisper::audio::loading::load_normalized_audio_file;
-    use ribble_whisper::audio::WhisperAudioSample;
+    use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
+    use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
     use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
     use ribble_whisper::transcriber::vad::{Silero, VAD};
     use ribble_whisper::transcriber::{
-        redirect_whisper_logging_to_hooks, Transcriber, WhisperOutput,
+        redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
+        WhisperOutput,
     };
     use ribble_whisper::utils;
+    use ribble_whisper::utils::callback::{Nop, StaticRibbleWhisperCallback};
     use ribble_whisper::utils::constants;
-    use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
+    use ribble_whisper::whisper::configs::{WhisperConfigsV2, WhisperRealtimeConfigs};
     use ribble_whisper::whisper::model::DefaultModelType;
 
     // Prepare an audio sample with a known output to try and make conditions as replicable as
@@ -115,8 +118,7 @@ mod transcriber_tests {
                 // exit condition
                 while let Ok(out) = text_receiver.recv() {
                     let message = match out {
-                        WhisperOutput::ConfirmedTranscription(message) => message,
-                        WhisperOutput::CurrentSegments(segments) => segments.join("").to_string(),
+                        WhisperOutput::TranscriptionSnapshot(message) => message.to_string(),
                         WhisperOutput::ControlPhrase(_) => "".to_string(),
                     };
                     let current_len = message.len();
@@ -144,11 +146,117 @@ mod transcriber_tests {
         let transcription = transcription.unwrap();
 
         // At most, there should only be around 2 edits (inserted punctuation)
-        // Anymore and there's something up with the transcription, or the model is hallucinating
+        // More than that indicates an error with transcription.
         let max_edit_distance = 2usize;
 
         let edit_distance = strsim::levenshtein(&transcription, expected_offline_transcription);
 
+        assert!(
+            edit_distance <= max_edit_distance,
+            "Failed to output reasonable match.\nEdit distance: {}, Max distance: {}\n, Output: {}, Expected: {}",
+            edit_distance,
+            max_edit_distance,
+            transcription,
+            expected_offline_transcription
+        )
+    }
+
+    #[test]
+    fn test_offline_segments_callback() {
+        let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
+        let model_type = DefaultModelType::Medium;
+
+        let model = model_type.to_model_with_path_prefix(proj_dir.as_path());
+
+        assert!(
+            model.exists_in_directory(),
+            "Whisper medium has not been downloaded."
+        );
+
+        let configs = WhisperConfigsV2::default()
+            .with_n_threads(8)
+            .with_model(model.clone())
+            .set_flash_attention(true);
+
+        // For receiving data in the print loop.
+        let (text_sender, text_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
+        // Since audio is pre-processed (silence removed), it needs to be cloned back into a
+        // WhisperAudioSample.
+        let audio = WhisperAudioSample::F32(AUDIO_SAMPLE.clone());
+
+        let mut transcriber = OfflineTranscriberBuilder::<Silero>::new()
+            .with_configs(configs.clone())
+            .with_audio(audio)
+            .with_channel_configurations(AudioChannelConfiguration::Mono)
+            .build()
+            .expect("Offline transcriber expected to build without issues.");
+
+        // Since the snapshot is being sent to an owned context (1 spot), it's easiest to just move
+        // the memory around using a message queue.
+        let segment_closure = move |snapshot| {
+            text_sender
+                .send(snapshot)
+                .expect("Receiver should not be deallocated.");
+        };
+
+        let segment_callback = StaticRibbleWhisperCallback::new(segment_closure);
+
+        let callbacks = WhisperCallbacks {
+            progress: None::<Nop<i32>>,
+            new_segment: Some(segment_callback),
+        };
+
+        let run_offline_transcription = Arc::new(AtomicBool::new(true));
+
+        // The print string should resemble this one with fewer than roughly 2-3 edits.
+        let expected_offline_transcription =
+            "Mary has many dreams but can't touch Tennessee by way of flight";
+
+        let t_thread = scope(|s| {
+            redirect_whisper_logging_to_hooks();
+            let transcription_thread = s.spawn(move || {
+                transcriber.process_with_callbacks(run_offline_transcription, callbacks)
+            });
+            let print_thread = s.spawn(move || {
+                let mut latest_snapshot = TranscriptionSnapshot::default();
+                while let Ok(out) = text_receiver.recv() {
+                    latest_snapshot = out;
+                }
+                latest_snapshot.to_string()
+            });
+
+            (transcription_thread.join(), print_thread.join())
+        });
+
+        let (transcription, printed) = t_thread;
+
+        // Check the threads running to completion.
+        assert!(
+            transcription.is_ok(),
+            "Transcription thread panicked: {:?}.",
+            transcription.unwrap_err()
+        );
+
+        assert!(
+            printed.is_ok(),
+            "Print thread panicked: {:?}.",
+            printed.unwrap_err()
+        );
+
+        let transcription = transcription.unwrap();
+        assert!(
+            transcription.is_ok(),
+            "Transcription returned an error: {}",
+            transcription.unwrap_err()
+        );
+
+        // Unwrap the data for comparison
+        let transcription = transcription.unwrap();
+        let printed = printed.unwrap();
+        // At most, expect there to be around 2 edits (punctuation).
+        // More than that indicates an error with transcription.
+        let max_edit_distance = 2usize;
+        let edit_distance = strsim::levenshtein(&transcription, &printed);
         assert!(
             edit_distance <= max_edit_distance,
             "Failed to output reasonable match.\nEdit distance: {}, Max distance: {}\n, Output: {}, Expected: {}",

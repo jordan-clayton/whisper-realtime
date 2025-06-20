@@ -90,7 +90,7 @@ impl Model {
         self.path_prefix.as_path()
     }
 
-    /// Canonicalizes the model's full path as a [std::path::PathBuf]
+    /// Canonicalizes the model's full path as a [PathBuf]
     pub fn file_path(&self) -> PathBuf {
         self.path_prefix.join(&self.file_name)
     }
@@ -118,10 +118,10 @@ impl Model {
     /// Canonicalizes the file path and checks the directory for an existing file.
     /// It does not verify file integrity
     pub fn exists_in_directory(&self) -> bool {
-        return match fs::metadata(self.file_path().as_path()) {
+        match fs::metadata(self.file_path().as_path()) {
             Ok(m) => m.is_file(),
             Err(_) => false,
-        };
+        }
     }
 
     #[allow(dead_code)]

@@ -24,7 +24,7 @@ use ribble_whisper::transcriber::{
     CallbackTranscriber, WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
 };
 use ribble_whisper::utils;
-use ribble_whisper::utils::callback::{ProgressCallback, StaticProgressCallback};
+use ribble_whisper::utils::callback::{Nop, RibbleWhisperCallback, StaticRibbleWhisperCallback};
 use ribble_whisper::utils::constants;
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model;
@@ -169,7 +169,7 @@ fn main() {
 
             // Take the last received snapshot and bake it into a string.
             // This is just to demonstrate idempotency between message passing and the returned string
-            latest_snapshot.to_string();
+            latest_snapshot.to_string()
         });
 
         // Send both outputs for comparison in stdout.
@@ -227,13 +227,13 @@ fn main() {
         let progress_closure = move |p| {
             pb_c.set_position(p as u64);
         };
-        let static_progress_callback = StaticProgressCallback::new(progress_closure);
+        let static_progress_callback = StaticRibbleWhisperCallback::new(progress_closure);
 
         let callbacks = WhisperCallbacks {
             progress: Some(static_progress_callback),
-            // If you want to run a similar UI REPL like in the realtime example, the new segment callback
+            // If you want to run a similar UI RPL like in the realtime example, the new segment callback
             // will let you access a snapshot to send via a message queue or similar.
-            new_segment: None,
+            new_segment: None::<Nop<TranscriptionSnapshot>>,
         };
 
         let transcription =
@@ -291,7 +291,7 @@ fn prepare_model() -> Model {
             pb_c.set_position(n as u64);
         };
 
-        let progress_callback = ProgressCallback::new(progress_callback_closure);
+        let progress_callback = RibbleWhisperCallback::new(progress_callback_closure);
         let mut sync_downloader = sync_downloader.with_progress_callback(progress_callback);
 
         let download = sync_downloader.download(model.file_path().as_path(), model.file_name());

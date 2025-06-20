@@ -341,7 +341,7 @@ impl Default for RealtimeConfigs {
 }
 
 /// A Serializable enumeration that maps to ISO-639-1 format.
-/// For use in [crate::whisper::configs::WhisperConfigsV2]
+/// For use in [WhisperConfigsV2]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(
     Copy,

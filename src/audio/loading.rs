@@ -11,11 +11,8 @@ use symphonia::core::probe::{Hint, ProbeResult};
 #[cfg(feature = "resampler")]
 use crate::audio::resampler::{needs_normalizing, normalize_audio, ResampleableAudio};
 use crate::audio::WhisperAudioSample;
-use crate::utils::callback::{Callback, Nop, ProgressCallback};
+use crate::utils::callback::{Callback, Nop, RibbleWhisperCallback};
 use crate::utils::errors::RibbleWhisperError;
-
-// TODO: public function to check the number of audio frames a Track (file) has.
-// I forgot that this is probably very important information wrt the progress callback.
 
 fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, RibbleWhisperError> {
     let file = Box::new(File::open(path)?);
@@ -27,9 +24,31 @@ fn get_audio_probe<P: AsRef<Path> + Sized>(path: P) -> Result<ProbeResult, Ribbl
     Ok(probe)
 }
 
-/// Loads a WhisperRealtime-compatible (ie. Can be converted into whisper-compatible) audio file
+/// Probes an audio file to try and get the total number of audio frames.
+/// NOTE: When using this to get a total size for measuring progress in percent, do not try to
+/// manually perform the channel arithmetic in the progress_callback.
+/// Both [load_audio_file] and [load_normalized_audio_file]
+/// already handle Stereo/Mono and will return the correct number of frames decoded **measured in frames.**
+pub fn audio_file_num_frames<P: AsRef<Path> + Sized>(path: P) -> Result<u64, RibbleWhisperError> {
+    let probe = get_audio_probe(path)?;
+    let format = probe.format;
+    let track = format
+        .default_track()
+        .ok_or(RibbleWhisperError::ParameterError(
+            "Failed to get default audio track".to_string(),
+        ))?;
+    let codec_params = &track.codec_params;
+    codec_params
+        .n_frames
+        .ok_or(RibbleWhisperError::ParameterError(
+            "Failed to get the number of frames".to_string(),
+        ))
+}
+
+/// Loads a RibbleWhisper-compatible (i.e. Can be converted into whisper-compatible) audio file
 /// for transcription.
-/// NOTE: this expects the audio to be sampled at 16kHz. Either resample the audio beforehand, or use: [crate::audio::loading::load_normalized_audio_file]
+/// To receive the number of frames copied per each decode iteration, use the optional progress_callback.
+/// NOTE: this expects the audio to be sampled at 16kHz. Either resample the audio beforehand, or use: [load_normalized_audio_file]
 pub fn load_audio_file<P: AsRef<Path>>(
     path: P,
     progress_callback: Option<impl FnMut(usize)>,
@@ -41,20 +60,21 @@ pub fn load_audio_file<P: AsRef<Path>>(
     let track = format
         .default_track()
         .ok_or(RibbleWhisperError::ParameterError(
-            "Failed to get default audio track".to_owned(),
+            "Failed to get default audio track".to_string(),
         ))?;
 
     let decoder = symphonia::default::get_codecs().make(&track.codec_params, &decoder_opts)?;
     // Decode loop
     let samples = match progress_callback {
-        Some(p) => decode_loop(track.id, decoder, format, ProgressCallback::new(p)),
+        Some(p) => decode_loop(track.id, decoder, format, RibbleWhisperCallback::new(p)),
         None => decode_loop(track.id, decoder, format, Nop::new()),
     };
     Ok(WhisperAudioSample::F32(samples.into_boxed_slice()))
 }
 
 /// Loads a WhisperRealtime-compatible (ie. Can be converted into whisper-compatible) audio file,
-/// and resamples to 16 kHz as necessary
+/// and resamples to 16 kHz as necessary.
+/// To receive the number of frames copied per each decode iteration, use the optional progress_callback.
 /// NOTE: requires the resampler feature flag to be set
 #[cfg(feature = "resampler")]
 pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
@@ -67,7 +87,7 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     let track = format
         .default_track()
         .ok_or(RibbleWhisperError::ParameterError(
-            "Failed to get default track".to_owned(),
+            "Failed to get default track".to_string(),
         ))?;
 
     // Get the codec parameters before passing ownership to the decode loop.
@@ -75,13 +95,13 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     let sample_rate = codec_params
         .sample_rate
         .ok_or(RibbleWhisperError::ParameterError(
-            "Failed to grab sample rate".to_owned(),
+            "Failed to grab sample rate".to_string(),
         ))? as f64;
 
     let num_channels = codec_params
         .channels
         .ok_or(RibbleWhisperError::ParameterError(
-            "Failed to grab number of channels".to_owned(),
+            "Failed to grab number of channels".to_string(),
         ))?
         .count();
 
@@ -90,7 +110,7 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     // Decode loop
 
     let samples = match progress_callback {
-        Some(p) => decode_loop(track.id, decoder, format, ProgressCallback::new(p)),
+        Some(p) => decode_loop(track.id, decoder, format, RibbleWhisperCallback::new(p)),
         None => decode_loop(track.id, decoder, format, Nop::new()),
     };
 
@@ -103,7 +123,8 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     }
 }
 
-// The progress callback returns the number of bytes read: Samples * sizeOf f32
+// Note: the progress_callback returns the total number of frames decoded per iteration in the
+// decode loop.
 fn decode_loop(
     track_id: u32,
     mut decoder: Box<dyn Decoder>,
@@ -148,14 +169,16 @@ fn decode_loop(
                 let in_mono = audio_buffer.spec().channels.iter().count() == 1;
 
                 if let Some(buf) = sample_buf.as_mut() {
-                    if in_mono {
+                    let channels = if in_mono {
                         buf.copy_planar_ref(audio_buffer);
+                        1
                     } else {
                         buf.copy_interleaved_ref(audio_buffer);
-                    }
+                        2
+                    };
 
                     samples.extend_from_slice(buf.samples());
-                    progress_callback.call(buf.samples().len() * size_of::<f32>())
+                    progress_callback.call(buf.samples().len() / channels)
                 }
             }
             // Skip malformed data

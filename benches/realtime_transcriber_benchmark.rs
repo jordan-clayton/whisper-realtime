@@ -150,10 +150,7 @@ pub fn realtime_bencher<V: VAD<f32> + Send + Sync>(
                 match receiver.lock().recv() {
                     Ok(out) => {
                         let message = match out {
-                            WhisperOutput::ConfirmedTranscription(message) => message,
-                            WhisperOutput::CurrentSegments(segments) => {
-                                segments.join("").to_string()
-                            }
+                            WhisperOutput::TranscriptionSnapshot(snapshot) => snapshot.to_string(),
                             WhisperOutput::ControlPhrase(_) => "".to_string(),
                         };
                         let current_len = message.len();
@@ -226,7 +223,7 @@ fn build_transcriber<V: VAD<f32> + Send + Sync>(
 ) {
     let (text_sender, text_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
 
-    let mut vad = (build_method)().expect("realtime VAD expected to build without issue");
+    let mut vad = build_method().expect("realtime VAD expected to build without issue");
 
     // Prime the VAD to prevent false negatives.
     let sample = audio_buffer.read(constants::VAD_SAMPLE_MS);

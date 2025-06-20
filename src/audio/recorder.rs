@@ -10,16 +10,16 @@ pub trait RecorderSample: Default + Clone + Copy + AudioFormatNum + Send + Sync 
 impl<T: Default + Clone + Copy + AudioFormatNum + Send + Sync + 'static> RecorderSample for T {}
 
 /// Trait object to manage converting recorded audio into a sendable form across a message channel
-/// For use with [crate::audio::recorder::FanoutRecorder]
+/// For use with [FanoutRecorder]
 pub trait AudioInputAdapter<T: RecorderSample> {
     type SenderOutput: Send + Clone + 'static;
     fn convert(input: &[T]) -> Self::SenderOutput;
 }
 
-/// ZST type object that implements [crate::audio::recorder::AudioInputAdapter] using `Vec<T>`
+/// ZST type object that implements [AudioInputAdapter] using `Vec<T>`
 #[derive(Copy, Clone)]
 pub struct UseVec;
-/// ZST type object that implements [crate::audio::recorder::AudioInputAdapter] using `Arc<[T]>`
+/// ZST type object that implements [AudioInputAdapter] using `Arc<[T]>`
 #[derive(Copy, Clone)]
 pub struct UseArc;
 
@@ -37,8 +37,8 @@ impl<T: RecorderSample> AudioInputAdapter<T> for UseArc {
     }
 }
 
-/// Implements [sdl2::audio::AudioCallback] to handle passing audio samples across a message channel.
-/// This does not write directly into a [crate::audio::audio_ring_buffer::AudioRingBuffer]
+/// Implements [AudioCallback] to handle passing audio samples across a message channel.
+/// This does not write directly into a [AudioRingBuffer]
 /// to allow flexibility in the implementation and additional processing
 /// (e.g. write to a temporary file, etc.).
 /// You will need to explicitly write to the audio_ring_buffer used by a
@@ -86,7 +86,7 @@ impl<T: RecorderSample> FanoutRecorder<T, UseArc> {
     }
 }
 
-/// Implements [sdl2::audio::AudioCallback] to write audio samples directly into a ringbuffer
+/// Implements [AudioCallback] to write audio samples directly into a ringbuffer
 /// that can be read by a [crate::transcriber::realtime_transcriber::RealtimeTranscriber]
 pub struct ClosedLoopRecorder<T: RecorderSample> {
     buffer: AudioRingBuffer<T>,

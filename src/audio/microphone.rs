@@ -43,16 +43,16 @@ impl AudioBackend {
         })
     }
 
-    /// To access the inner [sdl2::Sdl] context
+    /// To access the inner [Sdl] context
     pub fn sdl_ctx(&self) -> Arc<Sdl> {
         self.sdl_ctx.clone()
     }
-    /// To access the inner [sdl2::AudioSubsystem]
+    /// To access the inner [AudioSubsystem]
     pub fn audio_subsystem(&self) -> AudioSubsystem {
         self.audio_subsystem.clone()
     }
 
-    /// A convenience method that prepares [sdl2::audio::AudioDevice] for use
+    /// A convenience method that prepares [AudioDevice] for use
     /// with [crate::transcriber::realtime_transcriber::RealtimeTranscriber] to transcribe
     /// audio realtime. Use the fanout capture when doing other audio processing concurrently
     /// with transcription.
@@ -61,7 +61,7 @@ impl AudioBackend {
     /// * audio_sender: a message sender to forward audio from the input device
     /// # Returns:
     /// * Ok(AudioDevice) on success, Err(RibbleWhisperError) on failure to build.
-    /// See: [crate::audio::microphone::MicCaptureBuilder] for error conditions.
+    /// See: [MicCaptureBuilder] for error conditions.
     pub fn build_whisper_fanout_default<
         T: RecorderSample,
         AC: AudioInputAdapter<T> + Send + Clone,
@@ -72,7 +72,7 @@ impl AudioBackend {
         self.build_whisper_default().build_fanout(audio_sender)
     }
 
-    /// A convenience method that prepares [sdl2::audio::AudioDevice] for use
+    /// A convenience method that prepares [AudioDevice] for use
     /// with [crate::transcriber::realtime_transcriber::RealtimeTranscriber] to transcribe
     /// audio realtime. Use the closed loop capture when only transcription processing is required.
     ///
@@ -80,7 +80,7 @@ impl AudioBackend {
     /// * buffer: a ringbuffer for storing audio from the input device.
     /// # Returns:
     /// * Ok(AudioDevice) on success, Err(RibbleWhisperError) on failure to build.
-    /// See: [crate::audio::microphone::MicCaptureBuilder] for error conditions.
+    /// See: [MicCaptureBuilder] for error conditions.
     pub fn build_whisper_closed_loop_default<T: RecorderSample>(
         &self,
         buffer: &AudioRingBuffer<T>,
@@ -122,7 +122,7 @@ impl<'a> MicCaptureBuilder<'a> {
             audio_spec_desired,
         }
     }
-    /// To change the [sdl2::AudioSubsystem]
+    /// To change the [AudioSubsystem]
     pub fn with_audio_subsystem(mut self, audio_subsystem: &'a AudioSubsystem) -> Self {
         self.audio_subsystem = audio_subsystem;
         self
@@ -158,7 +158,7 @@ impl<'a> MicCaptureBuilder<'a> {
         self
     }
 
-    /// Builds [sdl2::audio::AudioDevice] to open audio capture (eg. for use in realtime transcription).
+    /// Builds [AudioDevice] to open audio capture (eg. for use in realtime transcription).
     /// Fans out data via message passing for use when doing additional audio processing concurrently
     /// with transcription.
     /// # Arguments:
@@ -180,7 +180,7 @@ impl<'a> MicCaptureBuilder<'a> {
         Ok(FanoutMicCapture { device })
     }
 
-    /// Builds [sdl2::audio::AudioDevice] to open audio capture (eg. for use in realtime transcription).
+    /// Builds [AudioDevice] to open audio capture (eg. for use in realtime transcription).
     /// Writes directly into the ringbuffer, for when only transcription is required.
     /// Prefer the fanout implementation when doing additional processing during transcription
     /// to guarantee data coherence.
@@ -211,7 +211,7 @@ pub trait MicCapture {
     fn pause(&self);
 }
 
-/// Encapsulates [sdl2::audio::AudioDevice] and sends audio samples out via message channels.
+/// Encapsulates [AudioDevice] and sends audio samples out via message channels.
 /// Use when performing other audio processing concurrently with transcription
 /// (see: examples/realtime_stream.rs).
 /// Due to the use of SDL, this cannot be shared across threads.
@@ -236,7 +236,7 @@ where
     }
 }
 
-/// Encapsulates [sdl2::audio::AudioDevice] and writes directly into [crate::audio::audio_ring_buffer::AudioRingBuffer].
+/// Encapsulates [AudioDevice] and writes directly into [AudioRingBuffer].
 /// Use when only transcription processing is required.
 /// Due to the use of SDL, this cannot be shared across threads.
 pub struct ClosedLoopMicCapture<T: RecorderSample> {
@@ -256,7 +256,7 @@ impl<T: RecorderSample> MicCapture for ClosedLoopMicCapture<T> {
 // The following functions are exposed but their use is not encouraged unless required.
 
 /// This is deprecated and will be removed at a later date.
-/// Prefer [crate::audio::microphone::MicCaptureBuilder].
+/// Prefer [MicCaptureBuilder].
 #[inline]
 pub fn get_desired_audio_spec(
     freq: Option<i32>,
@@ -272,7 +272,7 @@ pub fn get_desired_audio_spec(
 
 /// Visibility is currently exposed due to legacy implementations.
 /// Do not rely on this function, as it will be marked private in the future.
-/// Prefer [crate::audio::microphone::MicCaptureBuilder]
+/// Prefer [MicCaptureBuilder]
 #[inline]
 pub fn build_audio_stream<T: RecorderSample, AC: AudioInputAdapter<T> + Send>(
     audio_subsystem: &AudioSubsystem,
@@ -295,7 +295,7 @@ pub fn build_audio_stream<T: RecorderSample, AC: AudioInputAdapter<T> + Send>(
 
 /// Visibility is currently exposed due to legacy implementations.
 /// Do not rely on this function, as it will be marked private in the future.
-/// Prefer [crate::audio::microphone::MicCaptureBuilder]
+/// Prefer [MicCaptureBuilder]
 #[inline]
 pub fn build_audio_stream_vec_sender<T: RecorderSample>(
     audio_subsystem: &AudioSubsystem,
@@ -319,7 +319,7 @@ pub fn build_audio_stream_vec_sender<T: RecorderSample>(
 
 /// Visibility is currently exposed due to legacy implementations.
 /// Do not rely on this function, as it will be marked private in the future.
-/// Prefer [crate::audio::microphone::MicCaptureBuilder]
+/// Prefer [MicCaptureBuilder]
 #[inline]
 pub fn build_audio_stream_slice_sender<T: RecorderSample>(
     audio_subsystem: &AudioSubsystem,

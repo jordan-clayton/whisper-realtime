@@ -119,6 +119,10 @@ required-features = ["integrity"]
 name = "vad_tests"
 required-features = ["resampler"]
 
+[[test]]
+name = "loader_tests"
+required-features = ["resampler"]
+
 
 
 

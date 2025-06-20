@@ -15,7 +15,7 @@ use crate::utils::errors::RibbleWhisperError;
 use crate::utils::Sender;
 use crate::whisper::configs::WhisperRealtimeConfigs;
 
-/// Builder for [crate::transcriber::realtime_transcriber::RealtimeTranscriber]
+/// Builder for [RealtimeTranscriber]
 /// All fields are necessary and thus required to successfully build a RealtimeTranscriber.
 /// Multiple VAD implementations have been provided, see: [crate::transcriber::vad]
 /// Silero: [crate::transcriber::vad::Silero] is recommended for accuracy.
@@ -108,7 +108,7 @@ impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
 
 /// A realtime whisper transcription runner. See: examples/realtime_stream.rs for suggested use
 /// RealtimeTranscriber cannot be shared across threads because it has a singular ready state.
-/// It is also infeasible to call [crate::transcriber::Transcriber::process_audio] in parallel due
+/// It is also infeasible to call [Transcriber::process_audio] in parallel due
 /// to the cost of running whisper.
 pub struct RealtimeTranscriber<V: VAD<f32>> {
     configs: WhisperRealtimeConfigs,
@@ -120,7 +120,7 @@ pub struct RealtimeTranscriber<V: VAD<f32>> {
     /// A RealtimeTranscriber is considered to be ready when all of its whisper initialization has completed,
     /// and it is about to enter its transcription loop.
     /// NOTE: This cannot be accessed directly, because RealtimeTranscriber is not Sync.
-    /// Use a [crate::transcriber::realtime_transcriber::RealtimeTranscriberHandle] to check the ready state.
+    /// Use a [RealtimeTranscriberHandle] to check the ready state.
     ready: Arc<AtomicBool>,
     /// For voice detection
     vad: V,

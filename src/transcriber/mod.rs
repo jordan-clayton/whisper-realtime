@@ -106,7 +106,7 @@ impl TranscriptionSnapshot {
 
     pub fn to_string(&self) -> String {
         let mut confirmed = self.confirmed.clone();
-        confirmed.extend(self.string_segments.iter());
+        confirmed.extend(self.string_segments.iter().cloned());
         confirmed
     }
 

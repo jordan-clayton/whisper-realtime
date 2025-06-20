@@ -75,7 +75,7 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argum
         )
     }
     /// Sets an optional progress callback.
-    /// To un-set a callback, supply [crate::utils::callback::Nop]
+    /// To un-set a callback, supply [Nop]
     pub fn with_progress_callback<C: Callback<Argument = usize>>(
         self,
         progress_callback: C,
@@ -180,7 +180,7 @@ impl<R: Read, CB: Callback<Argument = usize>> SyncDownloader<R, CB> {
         )
     }
     /// Sets the (optional) progress callback.
-    /// To un-set the callback, supply a [crate::utils::callback::Nop]
+    /// To un-set the callback, supply a [Nop]
     pub fn with_progress_callback<C: Callback<Argument = usize>>(
         self,
         progress_callback: C,
@@ -238,7 +238,7 @@ impl<R: Read, CB: Callback<Argument = usize>> SyncDownload for SyncDownloader<R,
 
 /// Returns a StreamDownloader that encapsulates the request bytestream, progress,
 /// and total response size.
-/// Call [crate::downloader::downloaders::StreamDownloader::with_progress_callback] to set an optional callback to receive
+/// Call [StreamDownloader::with_progress_callback] to set an optional callback to receive
 /// updates on the number of bytes downloaded.
 ///
 /// NOTE: This function must be awaited and should not be called on a UI thread.
@@ -277,7 +277,7 @@ pub async fn async_download_request(
 
 /// Creates a SyncDownloader that encapsulates the request bytestream, progress,
 /// and total response size.
-/// Call [crate::downloader::downloaders::SyncDownloader::with_progress_callback] to set an optional callback to receive
+/// Call [SyncDownloader::with_progress_callback] to set an optional callback to receive
 /// updates on the number of bytes downloaded.
 ///
 /// NOTE: SyncDownloaders are blocking and thus will block the calling thread.

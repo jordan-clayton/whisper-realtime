@@ -154,7 +154,7 @@ pub fn file_needs_normalizing<P: AsRef<Path>>(path: P) -> Result<bool, RibbleWhi
     needs_normalizing(track)
 }
 
-/// Uses a [symphonia::core::formats::Track] to determine if audio needs to be resampled to 16kHz
+/// Uses a [Track] to determine if audio needs to be resampled to 16kHz
 /// for use with whisper.
 #[inline]
 pub fn needs_normalizing(track: &Track) -> Result<bool, RibbleWhisperError> {

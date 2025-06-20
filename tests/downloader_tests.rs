@@ -2,13 +2,12 @@
 #[cfg(feature = "downloader-async")]
 mod downloader_tests {
     use indicatif::{ProgressBar, ProgressStyle};
-    use reqwest;
     use tokio::runtime::Runtime;
 
     use ribble_whisper::downloader;
     use ribble_whisper::downloader::AsyncDownload;
     use ribble_whisper::downloader::SyncDownload;
-    use ribble_whisper::utils::callback::ProgressCallback;
+    use ribble_whisper::utils::callback::RibbleWhisperCallback;
     use ribble_whisper::utils::errors::RibbleWhisperError;
     use ribble_whisper::whisper::model::DefaultModelType;
 
@@ -19,7 +18,8 @@ mod downloader_tests {
     #[test]
     fn test_async_download() {
         let path = std::env::current_dir().unwrap().join("data").join("models");
-        let model_type = DefaultModelType::default();
+        // NOTE: When running tests in parallel, these need to be different
+        let model_type = DefaultModelType::Tiny;
         let model = model_type.to_model().with_path_prefix(path.as_path());
         let file_path = model.file_path();
         let file_name = model.file_name();
@@ -29,8 +29,9 @@ mod downloader_tests {
             let deleted = delete_model(file_path.as_path());
             assert!(
                 deleted.is_ok(),
-                "Failed to delete model: {}",
-                deleted.unwrap_err()
+                "Failed to delete model. Error: {}, Path: {:?}",
+                deleted.unwrap_err(),
+                model.file_path().as_path(),
             )
         }
 
@@ -71,7 +72,7 @@ mod downloader_tests {
         let progress_callback_function = move |n: usize| {
             pb_c.set_position(n as u64);
         };
-        let progress_callback = ProgressCallback::new(progress_callback_function);
+        let progress_callback = RibbleWhisperCallback::new(progress_callback_function);
 
         let mut stream_downloader = stream_downloader.with_progress_callback(progress_callback);
 
@@ -94,7 +95,7 @@ mod downloader_tests {
     #[test]
     fn test_sync_download() {
         let path = std::env::current_dir().unwrap().join("data").join("models");
-        let model_type = DefaultModelType::default();
+        let model_type = DefaultModelType::TinyEn;
         let model = model_type.to_model().with_path_prefix(path.as_path());
         let file_path = model.file_path();
         let file_name = model.file_name();
@@ -139,7 +140,7 @@ mod downloader_tests {
         let progress_callback_function = move |n: usize| {
             pb_c.set_position(n as u64);
         };
-        let progress_callback = ProgressCallback::new(progress_callback_function);
+        let progress_callback = RibbleWhisperCallback::new(progress_callback_function);
 
         let mut sync_downloader = sync_downloader.with_progress_callback(progress_callback);
 
