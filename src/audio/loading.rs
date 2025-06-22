@@ -112,14 +112,14 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
     let samples = match progress_callback {
         Some(p) => decode_loop(track.id, decoder, format, RibbleWhisperCallback::new(p)),
         None => decode_loop(track.id, decoder, format, Nop::new()),
-    };
+    }?;
 
     // Normalize
     if needs_normalizing? {
-        let audio = ResampleableAudio::F32(&samples?);
+        let audio = ResampleableAudio::F32(&samples);
         normalize_audio(&audio, sample_rate, num_channels)
     } else {
-        Ok(WhisperAudioSample::F32(samples?.into_boxed_slice()))
+        Ok(WhisperAudioSample::F32(samples.into_boxed_slice()))
     }
 }
 

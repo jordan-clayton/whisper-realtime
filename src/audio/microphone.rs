@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use crate::audio::audio_ring_buffer::AudioRingBuffer;
 use crate::audio::recorder::{
-    AudioInputAdapter, ClosedLoopRecorder, FanoutRecorder, RecorderSample, UseArc, UseVec,
+    AudioInputAdapter, ClosedLoopRecorder, FallbackClosedLoopRecorder, FallbackFanoutRecorder,
+    FanoutRecorder, RecorderSample, StereoMonoConverter, StereoMonoConvertible, UseArc, UseVec,
 };
 use crate::utils::errors::RibbleWhisperError;
 use crate::utils::{constants, Sender};
-use sdl2::audio::{AudioDevice, AudioSpecDesired};
+use sdl2::audio::{AudioCallback, AudioDevice, AudioFormat, AudioSpecDesired};
 use sdl2::{AudioSubsystem, Sdl};
 
 /// A Basic Audio Backend that uses SDL to gain access to the default audio input
@@ -62,13 +63,10 @@ impl AudioBackend {
     /// # Returns:
     /// * Ok(AudioDevice) on success, Err(RibbleWhisperError) on failure to build.
     /// See: [MicCaptureBuilder] for error conditions.
-    pub fn build_whisper_fanout_default<
-        T: RecorderSample,
-        AC: AudioInputAdapter<T> + Send + Clone,
-    >(
+    pub fn build_whisper_fanout_default<AC: AudioInputAdapter + Send + Clone>(
         &self,
         audio_sender: Sender<AC::SenderOutput>,
-    ) -> Result<FanoutMicCapture<T, AC>, RibbleWhisperError> {
+    ) -> Result<FanoutMicCapture<AC>, RibbleWhisperError> {
         self.build_whisper_default().build_fanout(audio_sender)
     }
 
@@ -134,7 +132,7 @@ impl<'a> MicCaptureBuilder<'a> {
         self
     }
 
-    /// To change the desired number of channels (eg. 1 = mono, 2 = stereo)
+    /// To change the desired number of channels (e.g. 1 = mono, 2 = stereo)
     /// NOTE: Realtime transcription requires audio to be in/converted to mono
     /// [crate::transcriber::realtime_transcriber::RealtimeTranscriber] does not handle conversion.
     pub fn with_num_channels(mut self, num_channels: Option<u8>) -> Self {
@@ -158,17 +156,17 @@ impl<'a> MicCaptureBuilder<'a> {
         self
     }
 
-    /// Builds [AudioDevice] to open audio capture (eg. for use in realtime transcription).
+    /// Builds [AudioDevice] to open audio capture (e.g. for use in realtime transcription).
     /// Fans out data via message passing for use when doing additional audio processing concurrently
     /// with transcription.
     /// # Arguments:
     /// * audio_sender: a message sender to forward audio from the input device
     /// # Returns:
     /// * Ok(AudioDevice) on success, Err(RibbleWhisperError) on an SDL failure.
-    pub fn build_fanout<T: RecorderSample, AC: AudioInputAdapter<T> + Send + Clone>(
+    pub fn build_fanout<AC: AudioInputAdapter + Send + Clone>(
         self,
         sender: Sender<AC::SenderOutput>,
-    ) -> Result<FanoutMicCapture<T, AC>, RibbleWhisperError> {
+    ) -> Result<FanoutMicCapture<AC>, RibbleWhisperError> {
         let device = self
             .audio_subsystem
             .open_capture(None, &self.audio_spec_desired, |_| {
@@ -180,7 +178,28 @@ impl<'a> MicCaptureBuilder<'a> {
         Ok(FanoutMicCapture { device })
     }
 
-    /// Builds [AudioDevice] to open audio capture (eg. for use in realtime transcription).
+    pub fn try_build_fanout<T: RecorderSample, AC: AudioInputAdapter + Send + Clone>() {
+        todo!(
+            "Implement a probing build that returns Err(DeviceError) if device parameters aren't supported"
+        );
+
+        // Device Error needs to hold an information struct that returns which parameters are
+        // not supported.
+        // This should proooobably take in at least the type of audio (S16/F32)
+    }
+    pub fn build_fanout_fallback<AC: AudioInputAdapter + Send + Clone>(
+        self,
+        sender: Sender<AC::SenderOutput>,
+    ) -> Result<
+        FallbackFanoutMicCapture<AC, StereoMonoConverter<AC::SenderInput>>,
+        RibbleWhisperError,
+    > {
+        todo!("Implement a fallback Fanout struct that holds a bitmask for operations")
+        // This should take a sender<T> + a struct of "need to haves"
+        // If this cannot be granted, return an error.
+    }
+
+    /// Builds [AudioDevice] to open audio capture (e.g. for use in realtime transcription).
     /// Writes directly into the ringbuffer, for when only transcription is required.
     /// Prefer the fanout implementation when doing additional processing during transcription
     /// to guarantee data coherence.
@@ -209,30 +228,81 @@ impl<'a> MicCaptureBuilder<'a> {
 pub trait MicCapture {
     fn play(&self);
     fn pause(&self);
+    fn sample_rate(&self) -> i32; // TODO: wrapper struct to encapsulate SDL formats
+    fn format(&self) -> AudioFormat;
+    fn channels(&self) -> u8;
+    fn buffer_size(&self) -> u16;
+    // TODO: methods for getting sample rate/buffer size
 }
 
 /// Encapsulates [AudioDevice] and sends audio samples out via message channels.
 /// Use when performing other audio processing concurrently with transcription
 /// (see: examples/realtime_stream.rs).
 /// Due to the use of SDL, this cannot be shared across threads.
-pub struct FanoutMicCapture<T, AC>
+pub struct FanoutMicCapture<AC>
 where
-    T: RecorderSample,
-    AC: AudioInputAdapter<T> + Clone + Send,
+    AC: AudioInputAdapter + Clone + Send,
 {
-    device: AudioDevice<FanoutRecorder<T, AC>>,
+    device: AudioDevice<FanoutRecorder<AC>>,
 }
 
-impl<T, AC> MicCapture for FanoutMicCapture<T, AC>
+impl<AC> MicCapture for FanoutMicCapture<AC>
 where
-    T: RecorderSample,
-    AC: AudioInputAdapter<T> + Clone + Send,
+    AC: AudioInputAdapter + Clone + Send,
 {
     fn play(&self) {
         self.device.resume()
     }
     fn pause(&self) {
         self.device.pause()
+    }
+    fn sample_rate(&self) -> i32 {
+        self.device.spec().freq
+    }
+    // TODO: wrapper struct to encapsulate SDL formats
+    fn format(&self) -> AudioFormat {
+        self.device.spec().format
+    }
+    fn channels(&self) -> u8 {
+        self.device.spec().channels
+    }
+    fn buffer_size(&self) -> u16 {
+        self.device.spec().samples
+    }
+}
+pub struct FallbackFanoutMicCapture<AC, S>
+where
+    AC: AudioInputAdapter + Clone + Send,
+    S: StereoMonoConvertible<AC::SenderInput> + Send,
+{
+    device: AudioDevice<FallbackFanoutRecorder<AC, S>>,
+}
+
+impl<AC: AudioInputAdapter + Clone + Send, S: StereoMonoConvertible<AC::SenderInput> + Send>
+    MicCapture for FallbackFanoutMicCapture<AC, S>
+{
+    fn play(&self) {
+        self.device.resume()
+    }
+
+    fn pause(&self) {
+        self.device.pause()
+    }
+
+    fn sample_rate(&self) -> i32 {
+        self.device.spec().freq
+    }
+
+    fn format(&self) -> AudioFormat {
+        self.device.spec().format
+    }
+
+    fn channels(&self) -> u8 {
+        self.device.spec().channels
+    }
+
+    fn buffer_size(&self) -> u16 {
+        self.device.spec().samples
     }
 }
 
@@ -250,6 +320,63 @@ impl<T: RecorderSample> MicCapture for ClosedLoopMicCapture<T> {
 
     fn pause(&self) {
         self.device.pause()
+    }
+
+    fn sample_rate(&self) -> i32 {
+        self.device.spec().freq
+    }
+
+    fn format(&self) -> AudioFormat {
+        self.device.spec().format
+    }
+
+    fn channels(&self) -> u8 {
+        self.device.spec().channels
+    }
+
+    fn buffer_size(&self) -> u16 {
+        self.device.spec().samples
+    }
+}
+pub struct FallbackClosedLoopMicCapture<T1, T2, S>
+where
+    T1: RecorderSample,
+    T2: RecorderSample,
+    S: StereoMonoConvertible<T1>,
+    FallbackClosedLoopRecorder<T1, T2, S>: AudioCallback,
+{
+    device: AudioDevice<FallbackClosedLoopRecorder<T1, T2, S>>,
+}
+
+impl<T1, T2, S> MicCapture for FallbackClosedLoopMicCapture<T1, T2, S>
+where
+    T1: RecorderSample,
+    T2: RecorderSample,
+    S: StereoMonoConvertible<T1>,
+    FallbackClosedLoopRecorder<T1, T2, S>: AudioCallback,
+{
+    fn play(&self) {
+        self.device.resume()
+    }
+
+    fn pause(&self) {
+        self.device.pause()
+    }
+
+    fn sample_rate(&self) -> i32 {
+        self.device.spec().freq
+    }
+
+    fn format(&self) -> AudioFormat {
+        self.device.spec().format
+    }
+
+    fn channels(&self) -> u8 {
+        self.device.spec().channels
+    }
+
+    fn buffer_size(&self) -> u16 {
+        self.device.spec().samples
     }
 }
 
@@ -274,11 +401,11 @@ pub fn get_desired_audio_spec(
 /// Do not rely on this function, as it will be marked private in the future.
 /// Prefer [MicCaptureBuilder]
 #[inline]
-pub fn build_audio_stream<T: RecorderSample, AC: AudioInputAdapter<T> + Send>(
+pub fn build_audio_stream<AC: AudioInputAdapter + Send>(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: Sender<AC::SenderOutput>,
-) -> Result<AudioDevice<FanoutRecorder<T, AC>>, RibbleWhisperError> {
+) -> Result<AudioDevice<FanoutRecorder<AC>>, RibbleWhisperError> {
     let audio_stream = audio_subsystem
         .open_capture(
             // Device - should be default, SDL should change if the user changes devices in their sysprefs.
@@ -301,7 +428,7 @@ pub fn build_audio_stream_vec_sender<T: RecorderSample>(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: Sender<Vec<T>>,
-) -> Result<AudioDevice<FanoutRecorder<T, UseVec>>, RibbleWhisperError> {
+) -> Result<AudioDevice<FanoutRecorder<UseVec<T>>>, RibbleWhisperError> {
     let audio_stream = audio_subsystem.open_capture(
         // Device - should be default, SDL should change if the user changes devices in their sysprefs.
         None,
@@ -325,7 +452,7 @@ pub fn build_audio_stream_slice_sender<T: RecorderSample>(
     audio_subsystem: &AudioSubsystem,
     desired_spec: &AudioSpecDesired,
     audio_sender: Sender<Arc<[T]>>,
-) -> Result<AudioDevice<FanoutRecorder<T, UseArc>>, RibbleWhisperError> {
+) -> Result<AudioDevice<FanoutRecorder<UseArc<T>>>, RibbleWhisperError> {
     let audio_stream = audio_subsystem
         .open_capture(
             // Device - should be default, SDL should change if the user changes devices in their sysprefs.

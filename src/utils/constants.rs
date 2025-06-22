@@ -49,3 +49,6 @@ pub const OFFLINE_VOICE_PROBABILITY_THRESHOLD: f32 = 0.75;
 
 // This is currently only used for testing purposes.
 pub const SAMPLE_DURATION: usize = 10000;
+
+pub const CONVERT_STEREO_TO_MONO: u8 = 0b01;
+pub const CONVERT_MONO_TO_STEREO: u8 = 0b10;
