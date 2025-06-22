@@ -45,7 +45,7 @@ pub fn audio_file_num_frames<P: AsRef<Path> + Sized>(path: P) -> Result<u64, Rib
         ))
 }
 
-/// Loads a RibbleWhisper-compatible (i.e. Can be converted into whisper-compatible) audio file
+/// Loads a RibbleWhisper-compatible (i.e. Stereo/mono, can be converted into whisper-compatible) audio file
 /// for transcription.
 /// To receive the number of frames copied per each decode iteration, use the optional progress_callback.
 /// NOTE: this expects the audio to be sampled at 16kHz. Either resample the audio beforehand, or use: [load_normalized_audio_file]
@@ -69,10 +69,10 @@ pub fn load_audio_file<P: AsRef<Path>>(
         Some(p) => decode_loop(track.id, decoder, format, RibbleWhisperCallback::new(p)),
         None => decode_loop(track.id, decoder, format, Nop::new()),
     };
-    Ok(WhisperAudioSample::F32(samples.into_boxed_slice()))
+    Ok(WhisperAudioSample::F32(samples?.into_boxed_slice()))
 }
 
-/// Loads a WhisperRealtime-compatible (ie. Can be converted into whisper-compatible) audio file,
+/// Loads a WhisperRealtime-compatible (i.e. Can be converted into whisper-compatible) audio file,
 /// and resamples to 16 kHz as necessary.
 /// To receive the number of frames copied per each decode iteration, use the optional progress_callback.
 /// NOTE: requires the resampler feature flag to be set
@@ -116,10 +116,10 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
 
     // Normalize
     if needs_normalizing? {
-        let audio = ResampleableAudio::F32(&samples);
+        let audio = ResampleableAudio::F32(&samples?);
         normalize_audio(&audio, sample_rate, num_channels)
     } else {
-        Ok(WhisperAudioSample::F32(samples.into_boxed_slice()))
+        Ok(WhisperAudioSample::F32(samples?.into_boxed_slice()))
     }
 }
 
@@ -130,7 +130,7 @@ fn decode_loop(
     mut decoder: Box<dyn Decoder>,
     mut reader: Box<dyn FormatReader>,
     mut progress_callback: impl Callback<Argument = usize>,
-) -> Vec<f32> {
+) -> Result<Vec<f32>, RibbleWhisperError> {
     let mut samples = vec![];
     let mut sample_buf = None;
 
@@ -146,7 +146,7 @@ fn decode_loop(
             break;
         }
         // Otherwise, unpack the packet and let the error bubble up
-        let packet = next_packet.unwrap();
+        let packet = next_packet?;
 
         // Consume metadata; not really sure what to do with this.
         while !reader.metadata().is_latest() {
@@ -165,17 +165,22 @@ fn decode_loop(
                     let duration = audio_buffer.capacity() as u64;
                     sample_buf = Some(SampleBuffer::<f32>::new(duration, spec));
                 }
+                let channels = audio_buffer.spec().channels.iter().count();
+                if channels > 2 {
+                    return Err(RibbleWhisperError::ParameterError(format!(
+                        "Only Stereo/Mono audio supported. Number of channels: {}",
+                        channels
+                    )));
+                }
 
-                let in_mono = audio_buffer.spec().channels.iter().count() == 1;
+                let in_mono = channels == 1;
 
                 if let Some(buf) = sample_buf.as_mut() {
-                    let channels = if in_mono {
+                    if in_mono {
                         buf.copy_planar_ref(audio_buffer);
-                        1
                     } else {
                         buf.copy_interleaved_ref(audio_buffer);
-                        2
-                    };
+                    }
 
                     samples.extend_from_slice(buf.samples());
                     progress_callback.call(buf.samples().len() / channels)
@@ -188,5 +193,5 @@ fn decode_loop(
         };
     }
     // Return all decoded samples
-    samples
+    Ok(samples)
 }
