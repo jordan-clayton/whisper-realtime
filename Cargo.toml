@@ -42,6 +42,7 @@ earshot = "0.1.0"
 webrtc-vad = "0.4.0"
 parking_lot = { version = "0.12.4", features = ["deadlock_detection"] }
 strsim = "0.11.1"
+enum_dispatch = "0.3.13"
 
 [dev-dependencies]
 criterion = "0.6.0"

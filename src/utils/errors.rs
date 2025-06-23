@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+// TODO: implement a DeviceCompatibilityError
 #[derive(Debug, Error)]
 pub enum RibbleWhisperError {
     /// Called on a data-channel failure
@@ -47,4 +48,6 @@ pub enum RibbleWhisperError {
     #[error("JSON Parse Error {0}")]
     #[cfg(feature = "integrity")]
     JsonParseError(#[from] serde_json::Error),
+    #[error("Device Compatibility Error {0}")]
+    DeviceCompatibilityError(String),
 }

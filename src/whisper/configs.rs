@@ -7,6 +7,9 @@ use whisper_rs;
 use crate::utils::constants;
 use crate::whisper::model::{DefaultModelType, Model};
 
+// TODO: make cloning cheaper for WhisperConfigsV2/WhisperRealtimeConfigs
+// Store an ID instead of the actual model -- come back to implement this once Model is refactored.
+
 /// Versioned wrapper for supported whisper-realtime configuration types.
 /// Can be serialized (using serde or otherwise) to persist settings.
 /// V1: Legacy, whisper and realtime configurations.

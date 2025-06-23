@@ -20,6 +20,9 @@ use crate::whisper::integrity_utils::{
     write_latest_repo_checksum_to_disk, ChecksumStatus,
 };
 
+// TODO: remove path_prefix, use Arc<str> for name/filename (add rc feature to serde)
+// TODO: Add ID, model bank trait + implementation
+
 /// Encapsulates a compatible whisper model
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Debug)]
