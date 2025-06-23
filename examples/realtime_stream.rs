@@ -8,9 +8,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use parking_lot::Mutex;
 
 use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
-use ribble_whisper::audio::microphone::{
-    AudioBackend, FanoutMicCapture, MicCapture, MicHandle, RibbleAudioFormat,
-};
+use ribble_whisper::audio::microphone::{AudioBackend, FanoutMicCapture, MicCapture};
 use ribble_whisper::audio::recorder::UseArc;
 use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
 use ribble_whisper::downloader::downloaders::sync_download_request;
@@ -28,7 +26,6 @@ use ribble_whisper::transcriber::{
 use ribble_whisper::utils;
 use ribble_whisper::utils::callback::{Nop, RibbleWhisperCallback, StaticRibbleWhisperCallback};
 use ribble_whisper::utils::constants;
-use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model;
 use ribble_whisper::whisper::model::Model;
@@ -94,54 +91,12 @@ fn main() {
 
     // Set up the Audio Backend.
     let audio_backend = AudioBackend::new().expect("Audio backend should build without issue");
-    // Since SDL doesn't make guarantees RE: Audio formats, channels, etc., use a probe to
-    // at least ensure that the datatype is consistent.
-    // If it's not call one of the appropriate functions To build with a converting AudioCallback
-    // that handles Datatype and Stereo-Mono conversions.
-    // It cannot support real-time resampling due to overhead.
-    // NOTE: this is most likely going to be a weird edge-case for most people; it is unlikely for
-    // the fallback mechanisms to kick in.
-    let mic_builder = audio_backend.build_whisper_default();
-    let probe = mic_builder
-        .probe_audio_device(RibbleAudioFormat::F32)
-        .expect("Probe should return without issue");
 
-    // MicHandle encapsulates all respected + fallback audio devices
-    // A small subset of concrete implementations exist to try and cover all use-cases,
-    // but any implementer of the MicCapture trait should work.
-    let mic: MicHandle<FanoutMicCapture<UseArc<f32>>> = if probe.matches() {
-        MicHandle::Requested(
-            mic_builder
-                .build_fanout(audio_sender)
-                .expect("Mic is expected to build without issue"),
-        )
-    } else {
-        let (convert_to, convert_from) = probe.format().unpack();
-        // Depending on your use case, you might need to match on different arms.
-        // Implementations exist for all permutations of F32/I16 audio + Senders
-        match (convert_to, convert_from) {
-            (RibbleAudioFormat::F32, RibbleAudioFormat::F32) => MicHandle::Fallback(
-                mic_builder
-                    .build_fanout_fallback_arc_float(audio_sender, probe)
-                    .expect("Fallback mic handle is expected to build without issue."),
-            ),
-            (RibbleAudioFormat::F32, RibbleAudioFormat::I16) => MicHandle::Fallback(
-                mic_builder
-                    .build_fanout_fallback_arc_float(audio_sender, probe)
-                    .expect("Fallback mic handle is expected to build without issue."),
-            ),
-            (_, _) => Err(RibbleWhisperError::DeviceCompatibilityError(
-                "Real-time audio is not supported".to_string(),
-            ))
-            .unwrap(),
-        }
-    };
-
-    // If you're confident that your system/target will support floating point audio @ 16 kHz,
-    // it is perfectly fine and much simpler to just call the following:
-    // let mic: FanoutMicCapture<UseArc<f32>> = audio_backend
-    //     .build_whisper_fanout_default(audio_sender)
-    //     .expect("Mic handle expected to build without issue.");
+    // For all intents and purposes, the backend should be able to handle most if not all devices,
+    // Expect this to always work until it doesn't
+    let mic: FanoutMicCapture<UseArc<f32>> = audio_backend
+        .build_whisper_fanout_default(audio_sender)
+        .expect("Mic handle expected to build without issue.");
 
     let transcriber_thread = scope(|s| {
         let a_thread_run_transcription = Arc::clone(&run_transcription);
