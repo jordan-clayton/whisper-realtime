@@ -1,8 +1,8 @@
+use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-
 use strsim::jaro_winkler;
 
 use crate::audio::audio_ring_buffer::AudioRingBuffer;
@@ -14,32 +14,43 @@ use crate::utils::constants;
 use crate::utils::errors::RibbleWhisperError;
 use crate::utils::Sender;
 use crate::whisper::configs::WhisperRealtimeConfigs;
+use crate::whisper::model::ModelRetriever;
 
 /// Builder for [RealtimeTranscriber]
 /// All fields are necessary and thus required to successfully build a RealtimeTranscriber.
 /// Multiple VAD implementations have been provided, see: [crate::transcriber::vad]
 /// Silero: [crate::transcriber::vad::Silero] is recommended for accuracy.
 /// See: examples/realtime_transcriber.rs for example usage.
-pub struct RealtimeTranscriberBuilder<V: VAD<f32>> {
-    configs: Option<WhisperRealtimeConfigs>,
+pub struct RealtimeTranscriberBuilder<V, M>
+where
+    V: VAD<f32>,
+    M: ModelRetriever,
+{
+    configs: Option<Arc<WhisperRealtimeConfigs>>,
     audio_buffer: Option<AudioRingBuffer<f32>>,
     output_sender: Option<Sender<WhisperOutput>>,
-    voice_activity_detector: Option<V>,
+    model_retriever: Option<Arc<M>>,
+    voice_activity_detector: Option<Arc<Mutex<V>>>,
 }
 
-impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
+impl<V, M> RealtimeTranscriberBuilder<V, M>
+where
+    V: VAD<f32>,
+    M: ModelRetriever,
+{
     pub fn new() -> Self {
         Self {
             configs: None,
             audio_buffer: None,
             output_sender: None,
+            model_retriever: None,
             voice_activity_detector: None,
         }
     }
 
     /// Set configurations.
     pub fn with_configs(mut self, configs: WhisperRealtimeConfigs) -> Self {
-        self.configs = Some(configs);
+        self.configs = Some(Arc::new(configs));
         self
     }
     /// Set the (shared) AudioRingBuffer.
@@ -54,17 +65,63 @@ impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
         self
     }
 
-    /// Set the voice activity detector.
-    pub fn with_voice_activity_detector<U: VAD<f32> + Sync + Send>(
+    // For setting the model retriever; for handling grabbing the model path
+    // (e.g. from a shared bank)
+    pub fn with_model_retriever<M2: ModelRetriever>(
         self,
-        vad: U,
-    ) -> RealtimeTranscriberBuilder<U> {
-        let voice_activity_detector = Some(vad);
+        model_retriever: M2,
+    ) -> RealtimeTranscriberBuilder<V, M2> {
         RealtimeTranscriberBuilder {
             configs: self.configs,
             audio_buffer: self.audio_buffer,
             output_sender: self.output_sender,
+            model_retriever: Some(Arc::new(model_retriever)),
+            voice_activity_detector: self.voice_activity_detector,
+        }
+    }
+
+    // For setting a shared model retriever; for handling grabbing the model path
+    // (e.g. from a shared bank)
+    pub fn with_shared_model_retriever<M2: ModelRetriever>(
+        self,
+        model_retriever: Arc<M2>,
+    ) -> RealtimeTranscriberBuilder<V, M2> {
+        RealtimeTranscriberBuilder {
+            configs: self.configs,
+            audio_buffer: self.audio_buffer,
+            output_sender: self.output_sender,
+            model_retriever: Some(Arc::clone(&model_retriever)),
+            voice_activity_detector: self.voice_activity_detector,
+        }
+    }
+
+    /// Set the voice activity detector.
+    pub fn with_voice_activity_detector<V2: VAD<f32> + Sync + Send>(
+        self,
+        vad: V2,
+    ) -> RealtimeTranscriberBuilder<V2, M> {
+        let voice_activity_detector = Some(Arc::new(Mutex::new(vad)));
+        RealtimeTranscriberBuilder {
+            configs: self.configs,
+            audio_buffer: self.audio_buffer,
+            output_sender: self.output_sender,
+            model_retriever: self.model_retriever,
             voice_activity_detector,
+        }
+    }
+    /// Set the voice activity detector to a shared VAD, (e.g. pre-allocated).
+    /// **NOTE: Trying to use this VAD in 2 places simultaneously will result in significant lock contention.**
+    /// **NOTE: VADs must be reset before being used in a different context**
+    pub fn with_shared_voice_activity_detector<V2: VAD<f32> + Sync + Send>(
+        self,
+        vad: Arc<Mutex<V2>>,
+    ) -> RealtimeTranscriberBuilder<V2, M> {
+        RealtimeTranscriberBuilder {
+            configs: self.configs,
+            audio_buffer: self.audio_buffer,
+            output_sender: self.output_sender,
+            model_retriever: self.model_retriever,
+            voice_activity_detector: Some(Arc::clone(&vad)),
         }
     }
 
@@ -73,10 +130,23 @@ impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
     /// Returns Err when a parameter is missing.
     pub fn build(
         self,
-    ) -> Result<(RealtimeTranscriber<V>, RealtimeTranscriberHandle), RibbleWhisperError> {
+    ) -> Result<(RealtimeTranscriber<V, M>, RealtimeTranscriberHandle), RibbleWhisperError> {
         let configs = self.configs.ok_or(RibbleWhisperError::ParameterError(
             "Configs missing in RealtimeTranscriberBuilder.".to_string(),
         ))?;
+
+        let model_retriever = self
+            .model_retriever
+            .ok_or(RibbleWhisperError::ParameterError(
+                "Model retriever missing in RealtimeTranscriberBuilder.".to_string(),
+            ))?;
+
+        let _model_id = configs
+            .model_id()
+            .ok_or(RibbleWhisperError::ParameterError(
+                "Configs are missing model ID in RealtimeTranscriberBuilder.".to_string(),
+            ))?;
+
         let audio_feed = self.audio_buffer.ok_or(RibbleWhisperError::ParameterError(
             "Audio feed missing in RealtimeTranscriberBuilder".to_string(),
         ))?;
@@ -100,6 +170,7 @@ impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
             audio_feed,
             output_sender,
             ready,
+            model_retriever,
             vad,
         };
         Ok((transcriber, handle))
@@ -110,8 +181,12 @@ impl<V: VAD<f32>> RealtimeTranscriberBuilder<V> {
 /// RealtimeTranscriber cannot be shared across threads because it has a singular ready state.
 /// It is also infeasible to call [Transcriber::process_audio] in parallel due
 /// to the cost of running whisper.
-pub struct RealtimeTranscriber<V: VAD<f32>> {
-    configs: WhisperRealtimeConfigs,
+pub struct RealtimeTranscriber<V, M>
+where
+    V: VAD<f32>,
+    M: ModelRetriever,
+{
+    configs: Arc<WhisperRealtimeConfigs>,
     /// The shared input buffer from which samples are pulled for transcription
     audio_feed: AudioRingBuffer<f32>,
     /// For sending output to a UI
@@ -122,11 +197,17 @@ pub struct RealtimeTranscriber<V: VAD<f32>> {
     /// NOTE: This cannot be accessed directly, because RealtimeTranscriber is not Sync.
     /// Use a [RealtimeTranscriberHandle] to check the ready state.
     ready: Arc<AtomicBool>,
+    /// For obtaining a model's file path based on an ID stored in [WhisperRealtimeConfigs].
+    model_retriever: Arc<M>,
     /// For voice detection
-    vad: V,
+    vad: Arc<Mutex<V>>,
 }
 
-impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
+impl<V, M> Transcriber for RealtimeTranscriber<V, M>
+where
+    V: VAD<f32>,
+    M: ModelRetriever,
+{
     // This streaming implementation uses a sliding window + VAD + diffing approach to approximate
     // a continuous audio file. This will only start transcribing segments when voice is detected.
     // Its accuracy isn't bulletproof (and highly depends on the model), but it's reasonably fast
@@ -138,9 +219,9 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
     //
     // Argument:
     // - run_transcription: an atomic state flag so that the transcriber can be terminated from another location
-    // eg. UI
+    // e.g. UI
     fn process_audio(
-        &mut self,
+        &self,
         run_transcription: Arc<AtomicBool>,
     ) -> Result<String, RibbleWhisperError> {
         // Alert the UI
@@ -165,10 +246,18 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
         // Set up whisper
         let full_params = self.configs.to_whisper_full_params();
         let whisper_context_params = self.configs.to_whisper_context_params();
-        let file_path_string = self.configs.model().file_path_string()?;
 
-        let ctx =
-            whisper_rs::WhisperContext::new_with_params(&file_path_string, whisper_context_params)?;
+        // Since it's not possible to build a realtime transcriber, there must be an ID; it's fine to unwrap.
+        let model_id = self.configs.model_id().unwrap();
+
+        let model_path = self.model_retriever.retrieve_model_path(model_id).ok_or(
+            RibbleWhisperError::ParameterError(format!("Failed to find model: {}", model_id)),
+        )?;
+
+        let ctx = whisper_rs::WhisperContext::new_with_params(
+            &model_path.to_string_lossy(),
+            whisper_context_params,
+        )?;
 
         let mut whisper_state = ctx.create_state()?;
         self.ready.store(true, Ordering::Release);
@@ -206,7 +295,7 @@ impl<V: VAD<f32>> Transcriber for RealtimeTranscriber<V> {
             }
 
             // Check for voice activity
-            let voice_detected = self.vad.voice_detected(&audio_samples);
+            let voice_detected = self.vad.lock().voice_detected(&audio_samples);
             if !voice_detected {
                 // Drain the dequeue and push to the confirmed output_string
                 let next_output = working_set.drain(..).map(|output| output.text);

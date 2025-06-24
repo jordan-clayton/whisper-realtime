@@ -14,7 +14,7 @@ your results may vary.
 ***
 NOTE: This library is primarily intended for personal and research use, but is actively used
 in [Ribble](https://github.com/jordan-clayton/ribble) and has proven stable in that context.
-While it has not been tested in large-scale deployments, it is likely suitable for production--though this is not
+While it has not been tested in large-scale deployments, it is likely suitable for general use--though this is not
 guaranteed.
 ***
 
@@ -60,6 +60,7 @@ see [examples/realtime_stream](https://github.com/jordan-clayton/whisper-realtim
 // Imports are omitted here for brevity; refer to examples/realtime_stream.
 use ribble_whisper::*;
 fn main() {
+    // TODO: refactor this RE: ModelBank
     // Handle this how you see fit and pass a model to the configs builder.
     // See: realtime_stream::prepare_model() for an example of how to use the downloading API to retrieve a model from huggingface.
     let model = prepare_model();

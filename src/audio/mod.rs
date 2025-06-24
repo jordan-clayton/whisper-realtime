@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 pub mod audio_ring_buffer;
 pub mod loading;
 pub mod microphone;
@@ -7,9 +9,10 @@ pub mod recorder;
 pub mod resampler;
 
 /// Encapsulates a slice of (supported-format) audio for whisper transcription.
+#[derive(Clone)]
 pub enum WhisperAudioSample {
-    I16(Box<[i16]>),
-    F32(Box<[f32]>),
+    I16(Arc<[i16]>),
+    F32(Arc<[f32]>),
 }
 impl WhisperAudioSample {
     pub fn len(&self) -> usize {

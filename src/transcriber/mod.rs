@@ -37,7 +37,7 @@ pub trait Transcriber {
     /// # Returns
     /// * Ok(String) on success, Err(RibbleWhisperError) on failure
     fn process_audio(
-        &mut self,
+        &self,
         run_transcription: Arc<AtomicBool>,
     ) -> Result<String, RibbleWhisperError>;
 }
@@ -51,7 +51,7 @@ where
     S: OfflineWhisperNewSegmentCallback,
 {
     fn process_with_callbacks(
-        &mut self,
+        &self,
         run_transcription: Arc<AtomicBool>,
         callbacks: WhisperCallbacks<P, S>,
     ) -> Result<String, RibbleWhisperError>;

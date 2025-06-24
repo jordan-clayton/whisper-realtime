@@ -1,3 +1,4 @@
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 
@@ -5,7 +6,7 @@ use strum::{AsRefStr, Display, EnumString, FromRepr, IntoStaticStr};
 use whisper_rs;
 
 use crate::utils::constants;
-use crate::whisper::model::{DefaultModelType, Model};
+use crate::whisper::model::{DefaultModelType, Model, ModelId};
 
 // TODO: make cloning cheaper for WhisperConfigsV2/WhisperRealtimeConfigs
 // Store an ID instead of the actual model -- come back to implement this once Model is refactored.
@@ -30,16 +31,18 @@ pub enum Configs {
 }
 
 impl Configs {
-    /// Used to migrate (older) V1 configs to RealtimeV1 configs with the original model data
-    /// path preserved. Individual paths are now stored in Model.
-    /// This only affects V1; V2 and RealtimeV1 will just return the same object.
+    /// Used to migrate (older) V1 configs to RealtimeV1 configs when using a different hasher to
+    /// compute the ModelId. This is to preserve as much information as possible from the legacy
+    /// implementation. You are not restricted to using hashes for the ModelId and can set
+    /// the value in your configs as you see fit.
     ///
-    /// If only V2 configurations are needed, chain with .into_v2()
-    pub fn migrate_v1_preserve_model_path(self, model_path: &std::path::Path) -> Self {
+    /// This method only affects V1; V2 and RealtimeV1 will just return the same object, as they already
+    /// have ways to change the stored model ID for key-value lookup.
+    ///
+    /// If only V2 configurations are needed, chain with .into_v2() after calling this function.
+    pub fn migrate_v1_with_hasher<H: Hasher>(self, hasher: &mut H) -> Self {
         match self {
-            Configs::V1(v1) => {
-                Self::RealtimeV1(v1.into_realtime_v1_with_models_directory(model_path))
-            }
+            Configs::V1(v1) => Self::RealtimeV1(v1.into_realtime_v1_with_hasher(hasher)),
             Configs::V2(_) => self,
             Configs::RealtimeV1(_) => self,
         }
@@ -71,7 +74,7 @@ impl Configs {
 /// A configurations type that holds a subset of useful configurations for whisper-rs::FullParams and whisper-rs::WhisperContextParams,
 /// a transcription model, and a flag to indicate whether the GPU should be used to run the transcription.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct WhisperConfigsV2 {
     // Whisper FullParams data
     /// The number of threads to use during whisper transcription. Defaults follow [whisper_rs::FullParams::set_n_threads]
@@ -87,8 +90,8 @@ pub struct WhisperConfigsV2 {
     /// Prevent using previous context as an initial prompt for the decoder.
     use_no_context: bool,
     // Whisper Context data
-    /// The model to use for transcription
-    model: Model,
+    /// An id for grabbing the model before transcription.
+    model_id: Option<ModelId>,
     /// Use the gpu during transcription
     use_gpu: bool,
     /// Use flash attention
@@ -106,7 +109,7 @@ impl WhisperConfigsV2 {
             use_gpu: false,
             flash_attention: false,
             use_no_context: false,
-            model: Default::default(),
+            model_id: None,
         }
     }
 
@@ -161,9 +164,9 @@ impl WhisperConfigsV2 {
         self
     }
 
-    /// Sets the model.
-    pub fn with_model(mut self, model: Model) -> Self {
-        self.model = model;
+    /// Sets the handle to a model.
+    pub fn with_model_id(mut self, model_id: Option<ModelId>) -> Self {
+        self.model_id = model_id;
         self
     }
 
@@ -200,9 +203,9 @@ impl WhisperConfigsV2 {
         self.flash_attention
     }
 
-    /// Gets a reference to the model being used for transcription
-    pub fn model(&self) -> &Model {
-        &self.model
+    /// Borrows the handle to a retrievable model.
+    pub fn model_id(&self) -> &Option<ModelId> {
+        &self.model_id
     }
 
     /// Consumes the configurations to convert to WhisperRealtime configs
@@ -544,8 +547,8 @@ impl WhisperRealtimeConfigs {
     }
 
     /// Sets the model.
-    pub fn with_model(mut self, model: Model) -> Self {
-        self.whisper.model = model;
+    pub fn with_model_id(mut self, model: Option<ModelId>) -> Self {
+        self.whisper.model_id = model;
         self
     }
 
@@ -601,8 +604,8 @@ impl WhisperRealtimeConfigs {
     }
 
     /// Gets a reference to the model being used for transcription
-    pub fn model(&self) -> &Model {
-        &self.whisper.model
+    pub fn model_id(&self) -> &Option<ModelId> {
+        &self.whisper.model_id
     }
 
     // Realtime Accessors
@@ -713,21 +716,26 @@ pub struct WhisperConfigsV1 {
 
 impl WhisperConfigsV1 {
     /// Consumes and converts into WhisperConfigsV2.
+    /// Since the new model implementation assumes some sort of id-value mapping infrastructure
+    /// will be used, a ModelId hash is computed to store in the configs for quick data retrieval.
+    /// See: [ModelBank] and [DiskModelBank]
     pub fn into_v2(self) -> WhisperConfigsV2 {
         let model = self.model.to_model();
-        self.into_v2_with_model(model)
+        let mut hasher = DefaultHasher::new();
+        self.into_v2_with_model(model, &mut hasher)
     }
 
-    /// Consumes and converts into WhisperConfigsV2, while also setting the model's
-    /// path prefix (data directory).
-    pub fn into_v2_with_models_directory(
-        self,
-        models_directory: &std::path::Path,
-    ) -> WhisperConfigsV2 {
-        let model = self.model.to_model_with_path_prefix(models_directory);
-        self.into_v2_with_model(model)
+    /// Consumes and converts into WhisperConfigsV2 with the given hasher.
+    /// Since the new model implementation assumes some sort of id-value mapping infrastructure
+    /// will be used, a ModelId hash is computed to store in the configs for quick data retrieval.
+    /// See: [ModelBank] and [DiskModelBank]
+    pub fn into_v2_with_hasher(self, hasher: &mut impl Hasher) -> WhisperConfigsV2 {
+        let model = self.model.to_model();
+        self.into_v2_with_model(model, hasher)
     }
-    /// Consumes and converts into WhisperRealtimeConfigs.
+
+    /// Consumes and converts into WhisperRealtimeConfigs, uses a default hasher to compute the
+    /// ModelId.
     pub fn into_realtime_v1(self) -> WhisperRealtimeConfigs {
         let realtime_configs = self.to_realtime_configs();
         let whisper_configs = self.into_v2();
@@ -736,33 +744,29 @@ impl WhisperConfigsV1 {
             .with_whisper_configs(whisper_configs)
     }
 
-    /// Consumes and converts into WhisperRealtimeConfigs, while also setting the model's
-    /// path prefix (data directory).
-    pub fn into_realtime_v1_with_models_directory(
-        self,
-        models_directory: &std::path::Path,
-    ) -> WhisperRealtimeConfigs {
+    /// Consumes and converts into WhisperRealtimeConfigs using the provided hasher to compute the
+    /// ModelId
+    pub fn into_realtime_v1_with_hasher<H: Hasher>(self, hasher: &mut H) -> WhisperRealtimeConfigs {
         let realtime_configs = self.to_realtime_configs();
-        let whisper_configs = self.into_v2_with_models_directory(models_directory);
+        let whisper_configs = self.into_v2_with_hasher(hasher);
         WhisperRealtimeConfigs::new()
             .with_realtime_configs(realtime_configs)
             .with_whisper_configs(whisper_configs)
     }
 
-    fn into_v2_with_model(self, model: Model) -> WhisperConfigsV2 {
+    fn into_v2_with_model<H: Hasher>(self, model: Model, hasher: &mut H) -> WhisperConfigsV2 {
         let language = self
             .language
             .as_ref()
             .map(|lang| Language::from_str(lang).unwrap());
+        model.file_name().hash(hasher);
+        let model_id = hasher.finish();
         WhisperConfigsV2::default()
             .with_n_threads(self.n_threads as usize)
             .set_translate(self.set_translate)
             .with_language(language)
             .set_gpu(self.use_gpu)
-            // To avoid losing the stored model type
-            // Note: this does not preserve the data directory and will need to be handled.
-            // Use into_v2_with_models_directory() to supply a model path.
-            .with_model(model)
+            .with_model_id(Some(model_id))
     }
 
     // Extracts the realtime-related information from WhisperConfigsV1 without consuming self,

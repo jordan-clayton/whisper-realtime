@@ -28,16 +28,16 @@ use ribble_whisper::utils::callback::{Nop, RibbleWhisperCallback, StaticRibbleWh
 use ribble_whisper::utils::constants;
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model;
-use ribble_whisper::whisper::model::Model;
+use ribble_whisper::whisper::model::{DefaultModelBank, ModelBank, ModelId};
 
 fn main() {
-    // Get a model. If not already downloaded, this will also download the model.
-    let model = prepare_model();
+    let (model_bank, model_id) = prepare_model_bank();
+    let model_bank = Arc::new(model_bank);
     // Set the number of threads according to your hardware.
     // If you can allocate around 7-8, do so as this tends to be more performant.
     let configs = WhisperRealtimeConfigs::default()
         .with_n_threads(8)
-        .with_model(model)
+        .with_model_id(Some(model_id))
         // Also, optionally set flash attention.
         // (Generally keep this on for a performance gain with gpu processing).
         .set_flash_attention(true);
@@ -52,13 +52,17 @@ fn main() {
         .expect("Silero realtime VAD expected to build without issue when configured properly.");
 
     // Transcriber
-    let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<Silero>::new()
-        .with_configs(configs.clone())
-        .with_audio_buffer(&audio_ring_buffer)
-        .with_output_sender(text_sender)
-        .with_voice_activity_detector(vad)
-        .build()
-        .expect("RealtimeTranscriber expected to build without issues when configured properly.");
+    let (transcriber, transcriber_handle) =
+        RealtimeTranscriberBuilder::<Silero, DefaultModelBank>::new()
+            .with_configs(configs.clone())
+            .with_audio_buffer(&audio_ring_buffer)
+            .with_output_sender(text_sender)
+            .with_voice_activity_detector(vad)
+            .with_shared_model_retriever(Arc::clone(&model_bank))
+            .build()
+            .expect(
+                "RealtimeTranscriber expected to build without issues when configured properly.",
+            );
 
     // Optional store + re-transcription.
     // Get input for stdin.
@@ -206,11 +210,12 @@ fn main() {
             .expect("Silero expected to build with whisper defaults");
         // Consume the configs into whisper v2 (or reuse)
         let s_configs = configs.into_whisper_v2_configs();
-        let mut offline_transcriber = OfflineTranscriberBuilder::<Silero>::new()
+        let offline_transcriber = OfflineTranscriberBuilder::<Silero, DefaultModelBank>::new()
             .with_configs(s_configs)
-            .with_audio(WhisperAudioSample::F32(buffer.into_boxed_slice()))
+            .with_audio(WhisperAudioSample::F32(Arc::from(buffer)))
             .with_channel_configurations(AudioChannelConfiguration::Mono)
             .with_voice_activity_detector(vad)
+            .with_shared_model_retriever(Arc::clone(&model_bank))
             .build()
             .expect("OfflineTranscriber expected to build with no issues.");
 
@@ -253,8 +258,8 @@ fn main() {
 
 // Downloads the model if it doesn't exist within CWD/data/models.
 // If the path does not exist already, this will create the full path upon downloading the model.
-fn prepare_model() -> Model {
-    let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
+fn prepare_model_bank() -> (DefaultModelBank, ModelId) {
+    let bank = DefaultModelBank::new();
 
     // GPU acceleration is currently required to run larger models in realtime.
     let model_type = if cfg!(feature = "_gpu") {
@@ -263,9 +268,12 @@ fn prepare_model() -> Model {
         model::DefaultModelType::Small
     };
 
-    let model = model_type.to_model_with_path_prefix(proj_dir.as_path());
+    let model_id = bank.get_model_id(model_type);
+    let exists_in_storage = bank
+        .model_exists_in_storage(model_id)
+        .expect("Model should be retrieved by key without issue.");
 
-    if !model.exists_in_directory() {
+    if !exists_in_storage {
         println!("Downloading model:");
         stdout().flush().unwrap();
 
@@ -297,11 +305,20 @@ fn prepare_model() -> Model {
         let progress_callback = RibbleWhisperCallback::new(progress_callback_closure);
         let mut sync_downloader = sync_downloader.with_progress_callback(progress_callback);
 
-        let download = sync_downloader.download(model.file_path().as_path(), model.file_name());
+        let model = bank
+            .retrieve_model(model_id)
+            .expect("Model is expected to exist in default storage.");
+
+        let download = sync_downloader.download(bank.model_directory(), model.file_name());
         assert!(download.is_ok());
-        assert!(model.exists_in_directory());
+        let model_in_directory = bank.model_exists_in_storage(model_id);
+        assert!(
+            model_in_directory.is_ok(),
+            "Failed to probe directory for model"
+        );
+        assert!(model_in_directory.unwrap(), "Model failed to download");
     }
-    model
+    (bank, model_id)
 }
 
 fn clear_stdout() {

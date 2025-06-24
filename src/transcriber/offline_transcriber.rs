@@ -1,7 +1,7 @@
+use parking_lot::Mutex;
 use std::ffi::{c_int, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use whisper_rs::{WhisperNewSegmentCallback, WhisperProgressCallback};
 
@@ -13,27 +13,34 @@ use crate::transcriber::{
 };
 use crate::utils::errors::RibbleWhisperError;
 use crate::whisper::configs::WhisperConfigsV2;
+use crate::whisper::model::ModelRetriever;
 
 /// Builder for [OfflineTranscriber]
 /// Silero: [crate::transcriber::vad::Silero] is recommended for accuracy.
-#[derive(Clone)]
-pub struct OfflineTranscriberBuilder<V>
+pub struct OfflineTranscriberBuilder<V, M>
 where
     V: VAD<f32>,
+    M: ModelRetriever,
 {
     configs: Option<Arc<WhisperConfigsV2>>,
-    audio: Option<Arc<WhisperAudioSample>>,
+    audio: Option<WhisperAudioSample>,
     channels: Option<AudioChannelConfiguration>,
+    model_retriever: Option<Arc<M>>,
     /// (Optional) Used to extract voiced segments to reduce overall transcription time.
     voice_activity_detector: Option<Arc<Mutex<V>>>,
 }
 
-impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
+impl<V, M> OfflineTranscriberBuilder<V, M>
+where
+    V: VAD<f32>,
+    M: ModelRetriever,
+{
     pub fn new() -> Self {
         Self {
             configs: None,
             audio: None,
             channels: None,
+            model_retriever: None,
             voice_activity_detector: None,
         }
     }
@@ -44,8 +51,9 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
     }
 
     /// Sets the audio to be transcribed
+    /// WhisperAudioSamples are cheap to clone (and share audio).
     pub fn with_audio(mut self, audio: WhisperAudioSample) -> Self {
-        self.audio = Some(Arc::new(audio));
+        self.audio = Some(audio.clone());
         self
     }
 
@@ -60,13 +68,60 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
     pub fn with_voice_activity_detector<V2: VAD<f32>>(
         self,
         vad: V2,
-    ) -> OfflineTranscriberBuilder<V2> {
+    ) -> OfflineTranscriberBuilder<V2, M> {
         let v = Arc::new(Mutex::new(vad));
         OfflineTranscriberBuilder {
             configs: self.configs,
             audio: self.audio,
             channels: self.channels,
+            model_retriever: self.model_retriever,
             voice_activity_detector: Some(v),
+        }
+    }
+    /// Sets an optional voice activity detector to optimize transcription by pruning out unvoiced audio frames.
+    /// This method is for when using a shared (e.g. pre-allocated VAD)
+    /// **NOTE: Trying to use this VAD in 2 places simultaneously will result in significant lock contention.**
+    /// **NOTE: VADs must be reset before being used in a different context**
+    pub fn with_shared_voice_activity_detector<V2: VAD<f32>>(
+        self,
+        vad: Arc<Mutex<V2>>,
+    ) -> OfflineTranscriberBuilder<V2, M> {
+        OfflineTranscriberBuilder {
+            configs: self.configs,
+            audio: self.audio,
+            channels: self.channels,
+            model_retriever: self.model_retriever,
+            voice_activity_detector: Some(Arc::clone(&vad)),
+        }
+    }
+
+    /// Sets the model retriever to allow OfflineTranscriber to access models to set up a Whisper state.
+    /// See: [ModelRetriever]
+    pub fn with_model_retriever<M2: ModelRetriever>(
+        self,
+        model_retriever: M2,
+    ) -> OfflineTranscriberBuilder<V, M2> {
+        OfflineTranscriberBuilder {
+            configs: self.configs,
+            audio: self.audio,
+            channels: self.channels,
+            model_retriever: Some(Arc::new(model_retriever)),
+            voice_activity_detector: None,
+        }
+    }
+
+    /// Sets a shared model retriever to allow OfflineTranscriber to access models to set up a Whisper state.
+    /// See: [ModelRetriever]
+    pub fn with_shared_model_retriever<M2: ModelRetriever>(
+        self,
+        model_retriever: Arc<M2>,
+    ) -> OfflineTranscriberBuilder<V, M2> {
+        OfflineTranscriberBuilder {
+            configs: self.configs,
+            audio: self.audio,
+            channels: self.channels,
+            model_retriever: Some(Arc::clone(&model_retriever)),
+            voice_activity_detector: None,
         }
     }
     /// Builds an `OfflineTranscriber<V>` according to the given parameters
@@ -76,10 +131,16 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
     /// ** missing whisper configurations,
     /// ** missing channel configurations,
     /// ** missing audio
-    pub fn build(self) -> Result<OfflineTranscriber<V>, RibbleWhisperError> {
+    /// ** Model ID is not set in configs.
+    pub fn build(self) -> Result<OfflineTranscriber<V, M>, RibbleWhisperError> {
         let configs = self.configs.ok_or(RibbleWhisperError::ParameterError(
             "Configs missing in OfflineTranscriberBuilder..".to_string(),
         ))?;
+
+        let _model_id = configs.model_id().ok_or(RibbleWhisperError::ParameterError(
+            "Model ID missing from configs in OfflineTranscriberBuilder".to_string(),
+        ));
+
         let audio = self.audio.filter(|audio| audio.len() > 0).ok_or(
             RibbleWhisperError::ParameterError(
                 "Audio missing in OfflineTranscriberBuilder.".to_string(),
@@ -88,6 +149,12 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
         let channels = self.channels.ok_or(RibbleWhisperError::ParameterError(
             "Channel configurations missing in OfflineTranscriberBuilder.".to_string(),
         ))?;
+        let model_retriever = self
+            .model_retriever
+            .ok_or(RibbleWhisperError::ParameterError(
+                "Model retriever missing in OfflineTranscriberBuilder.".to_string(),
+            ))?;
+
         // Vad can be None; if there is no VAD provided, the full speech will be processed.
         let vad = self.voice_activity_detector;
         Ok(OfflineTranscriber {
@@ -95,59 +162,71 @@ impl<V: VAD<f32>> OfflineTranscriberBuilder<V> {
             audio,
             channels,
             voice_activity_detector: vad,
+            model_retriever,
         })
     }
 }
 
 /// For running offline (non-realtime) transcription using whisper.
 /// NOTE: timestamps have not yet been implemented.
-#[derive(Clone)]
-pub struct OfflineTranscriber<V: VAD<f32>> {
+pub struct OfflineTranscriber<V, M>
+where
+    V: VAD<f32>,
+    M: ModelRetriever,
+{
     /// Whisper configurations
     configs: Arc<WhisperConfigsV2>,
     /// The audio to transcribe.
-    audio: Arc<WhisperAudioSample>,
+    audio: WhisperAudioSample,
     /// Mono or Stereo. Stereo will be converted to mono before transcription
     channels: AudioChannelConfiguration,
     /// (Optional) Used to extract voiced segments to reduce overall transcription time.
     voice_activity_detector: Option<Arc<Mutex<V>>>,
+    model_retriever: Arc<M>,
 }
 
-impl<V: VAD<f32>> OfflineTranscriber<V> {
+impl<V, M> OfflineTranscriber<V, M>
+where
+    V: VAD<f32>,
+    M: ModelRetriever,
+{
+    //  TODO: I don't actually think this needs to borrow self mutably anymore
     fn run_transcription(
-        &mut self,
+        &self,
         full_params: whisper_rs::FullParams,
         run_transcription: Arc<AtomicBool>,
     ) -> Result<String, RibbleWhisperError> {
         let whisper_context_params = self.configs.to_whisper_context_params();
-        let file_path_string = self.configs.model().file_path_string()?;
+        // Since it's not possible to build an OfflineTranscriber without the ID set, this can be
+        // safely unwrapped.
+        let model_id = self.configs.model_id().unwrap();
+
+        let model_path = self.model_retriever.retrieve_model_path(model_id).ok_or(
+            RibbleWhisperError::ParameterError(format!("Failed to find model: {}", model_id)),
+        )?;
+
         // Set up a whisper context
-        let ctx =
-            whisper_rs::WhisperContext::new_with_params(&file_path_string, whisper_context_params)?;
+        let ctx = whisper_rs::WhisperContext::new_with_params(
+            &model_path.to_string_lossy(),
+            whisper_context_params,
+        )?;
 
         let mut whisper_state = ctx.create_state()?;
 
         // Prepare audio
-        let mut audio_samples = match self.audio.as_ref() {
+        let mut audio_samples = match &self.audio {
             WhisperAudioSample::I16(audio) => {
                 let len = audio.len();
                 let mut float_samples = vec![0.0; len];
-                whisper_rs::convert_integer_to_float_audio(audio, &mut float_samples)?;
-                float_samples.into_boxed_slice()
+                whisper_rs::convert_integer_to_float_audio(&audio, &mut float_samples)?;
+                Arc::from(float_samples)
             }
-            WhisperAudioSample::F32(audio) => audio.clone(),
+            WhisperAudioSample::F32(audio) => Arc::clone(&audio),
         };
 
         // Extract speech frames if there's a VAD
-        if let Some(try_vad) = self.voice_activity_detector.as_ref() {
-            let mut vad = match try_vad.lock() {
-                Ok(vad) => vad,
-                Err(e) => {
-                    try_vad.clear_poison();
-                    e.into_inner()
-                }
-            };
-            audio_samples = vad.extract_voiced_frames(&audio_samples);
+        if let Some(vad) = self.voice_activity_detector.as_ref() {
+            audio_samples = Arc::from(vad.lock().extract_voiced_frames(&audio_samples))
         }
 
         let mono_audio = match self.channels {
@@ -187,11 +266,12 @@ impl<V: VAD<f32>> OfflineTranscriber<V> {
     }
 }
 
-impl<V: VAD<f32>> Transcriber for OfflineTranscriber<V> {
+impl<V: VAD<f32>, M: ModelRetriever> Transcriber for OfflineTranscriber<V, M> {
     // NOTE: this uses the unsafe API for whisper callbacks to have a little more control over the FFI.
     // Expect this implementation to be safe, for all intents and purposes.
     fn process_audio(
-        &mut self,
+        // TODO: I don't this needs a mut ref.
+        &self,
         run_transcription: Arc<AtomicBool>,
     ) -> Result<String, RibbleWhisperError> {
         let confs = Arc::clone(&self.configs);
@@ -217,9 +297,10 @@ impl<V: VAD<f32>> Transcriber for OfflineTranscriber<V> {
     }
 }
 
-impl<V, P, S> CallbackTranscriber<P, S> for OfflineTranscriber<V>
+impl<V, M, P, S> CallbackTranscriber<P, S> for OfflineTranscriber<V, M>
 where
     V: VAD<f32>,
+    M: ModelRetriever,
     P: OfflineWhisperProgressCallback,
     S: OfflineWhisperNewSegmentCallback,
 {
@@ -230,7 +311,8 @@ where
     // then just take the performance hit and box the trait objects.
     // As of testing thus far, this implementation is safe.
     fn process_with_callbacks(
-        &mut self,
+        // TODO: I don't think mut is required here.
+        &self,
         run_transcription: Arc<AtomicBool>,
         callbacks: WhisperCallbacks<P, S>,
     ) -> Result<String, RibbleWhisperError> {
@@ -352,7 +434,7 @@ unsafe extern "C" fn progress_callback<PC: OfflineWhisperProgressCallback>(
 //
 // Bear in mind, this gets called whenever whisper finishes decoding, so do heavy computation
 // outside of this callback whenever possible.
-// At this time, there are not plans to include timestamps/associated metadata.
+// At this time, there are no plans to include timestamps/associated metadata.
 unsafe extern "C" fn new_segment_callback<S: OfflineWhisperNewSegmentCallback>(
     _: *mut whisper_rs_sys::whisper_context,
     state: *mut whisper_rs_sys::whisper_state,

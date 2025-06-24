@@ -1,35 +1,229 @@
-use std::convert::AsRef;
-use std::fs;
-use std::path::{Path, PathBuf};
-
-#[cfg(feature = "integrity")]
-use reqwest::blocking;
-#[cfg(feature = "integrity")]
-use sha1::Sha1;
-#[cfg(feature = "integrity")]
-use sha2::{Digest, Sha256};
-use strum::{
-    AsRefStr, Display, EnumCount, EnumIs, EnumIter, EnumString, FromRepr, IntoStaticStr,
-    VariantArray, VariantNames,
-};
-
 use crate::utils::errors::RibbleWhisperError;
 #[cfg(feature = "integrity")]
 use crate::whisper::integrity_utils::{
     checksums_need_updating, get_model_checksum, get_new_checksums, serialize_new_checksums,
     write_latest_repo_checksum_to_disk, ChecksumStatus,
 };
+#[cfg(feature = "integrity")]
+use reqwest::blocking;
+#[cfg(feature = "integrity")]
+use sha1::Sha1;
+#[cfg(feature = "integrity")]
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::{Path, PathBuf};
+use strum::{
+    AsRefStr, Display, EnumCount, EnumIs, EnumIter, EnumString, FromRepr, IntoStaticStr,
+    VariantArray, VariantNames,
+};
 
-// TODO: remove path_prefix, use Arc<str> for name/filename (add rc feature to serde)
-// TODO: Add ID, model bank trait + implementation
+/// A Type alias representing a model's ID, (e.g. based on a hash)
+pub type ModelId = u64;
+
+// TODO: document -> non-concurrent trait impl.
+pub trait ModelBank {
+    fn model_directory(&self) -> &Path;
+    fn insert_model(&mut self, model: Model) -> Result<ModelId, RibbleWhisperError>;
+    // TODO: document
+    // Depending on the ways in which a model is stored/replaced, it's ModelId may change.
+    // Thus, the ModelId should be returned upon a successful update.
+    fn replace_model(
+        &mut self,
+        model_id: ModelId,
+        model: Model,
+    ) -> Result<ModelId, RibbleWhisperError>;
+
+    // Depending on the ways in which a model is stored/mutated, it's ModelId may change.
+    // Thus, the ModelId should be returned upon a successful update.
+    fn update_model_parameters(
+        &mut self,
+        model_id: ModelId,
+        name: Option<String>,
+        file_name: Option<String>,
+    ) -> Result<ModelId, RibbleWhisperError>;
+
+    #[cfg(feature = "integrity")]
+    fn verify_checksum(
+        &mut self,
+        model_id: ModelId,
+        checksum: &Checksum,
+    ) -> Result<bool, RibbleWhisperError>;
+    fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
+    fn retrieve_model(&self, id: ModelId) -> Option<&Model>;
+    fn remove_model(&mut self, id: ModelId) -> Result<ModelId, RibbleWhisperError>;
+}
+
+// TODO: document. Same as ModelBank but imposes interior mutability + concurrency
+pub trait ConcurrentModelBank: Send + Sync {
+    fn data_directory(&self) -> &Path;
+    fn insert_model(&self, model: Model) -> Result<ModelId, RibbleWhisperError>;
+    // TODO: document
+    // Depending on the ways in which a model is stored/replaced, it's ModelId may change.
+    // Thus, the ModelId should be returned upon a successful update.
+    fn replace_model(&self, model_id: ModelId, model: Model)
+    -> Result<ModelId, RibbleWhisperError>;
+
+    // Depending on the ways in which a model is stored/replaced, it's ModelId may change.
+    // Thus, the ModelId should be returned upon a successful update.
+    fn update_model_parameters(
+        &self,
+        model_id: ModelId,
+        name: Option<String>,
+        file_name: Option<String>,
+    ) -> Result<ModelId, RibbleWhisperError>;
+
+    #[cfg(feature = "integrity")]
+    fn verify_checksum(
+        &self,
+        model_id: ModelId,
+        checksum: &Checksum,
+    ) -> Result<bool, RibbleWhisperError>;
+    fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
+    fn retrieve_model(&self, id: ModelId) -> Option<&Model>;
+    fn remove_model(&self, id: ModelId) -> Result<ModelId, RibbleWhisperError>;
+}
+
+// TODO: document -> limited scope API for things that require getting paths for whisper models.
+// i.e. the transcribers so that the path doesn't need to be explicitly passed around.
+pub trait ModelRetriever {
+    fn retrieve_model_path(&self, id: ModelId) -> Option<PathBuf>;
+}
+
+// TODO: document - this is a very bare-bones implementation, but it's sufficient for getting things running
+// This is mainly used for testing, but it can be exposed for use.
+pub struct DefaultModelBank {
+    model_directory: PathBuf,
+    models: HashMap<ModelId, Model>,
+}
+
+impl DefaultModelBank {
+    pub fn new() -> Self {
+        let path = std::env::current_dir().unwrap().join("data").join("models");
+        let default_models = [
+            DefaultModelType::TinyEn,
+            DefaultModelType::Small,
+            DefaultModelType::SmallEn,
+            DefaultModelType::Medium,
+            DefaultModelType::MediumEn,
+        ];
+
+        let models = default_models
+            .iter()
+            .map(|model_type| {
+                let mut hasher = DefaultHasher::new();
+                model_type.hash(&mut hasher);
+                (hasher.finish(), model_type.to_model())
+            })
+            .collect::<HashMap<ModelId, Model>>();
+
+        Self {
+            model_directory: path,
+            models,
+        }
+    }
+    pub fn get_model_id(&self, model_type: DefaultModelType) -> ModelId {
+        let mut hasher = DefaultHasher::new();
+        model_type.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+impl ModelBank for DefaultModelBank {
+    fn model_directory(&self) -> &Path {
+        self.model_directory.as_path()
+    }
+
+    fn insert_model(&mut self, model: Model) -> Result<ModelId, RibbleWhisperError> {
+        let mut hasher = DefaultHasher::new();
+        model.file_name().hash(&mut hasher);
+        let model_id = hasher.finish();
+        self.models
+            .insert(model_id, model)
+            .ok_or(RibbleWhisperError::ModelError(
+                "Failed to store new model.".to_string(),
+            ))?;
+        Ok(model_id)
+    }
+
+    fn replace_model(
+        &mut self,
+        model_id: ModelId,
+        model: Model,
+    ) -> Result<ModelId, RibbleWhisperError> {
+        self.remove_model(model_id)?;
+        self.insert_model(model)
+    }
+
+    fn update_model_parameters(
+        &mut self,
+        _model_id: ModelId,
+        _name: Option<String>,
+        _file_name: Option<String>,
+    ) -> Result<ModelId, RibbleWhisperError> {
+        todo!("Implement this for testing purposes if needed.")
+    }
+
+    #[cfg(feature = "integrity")]
+    fn verify_checksum(
+        &mut self,
+        model_id: ModelId,
+        checksum: &Checksum,
+    ) -> Result<bool, RibbleWhisperError> {
+        let model = self
+            .models
+            .get_mut(&model_id)
+            .ok_or(RibbleWhisperError::ParameterError(
+                "Invalid model key supplied to test bank.".to_string(),
+            ))?;
+        model.verify_checksum(self.model_directory.as_path(), checksum)
+    }
+
+    fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError> {
+        let model = self
+            .models
+            .get(&model_id)
+            .ok_or(RibbleWhisperError::ParameterError(
+                "Invalid model key supplied to test bank.".to_string(),
+            ))?;
+        let file_path = self.model_directory.join(model.file_name());
+        Ok(fs::metadata(&file_path)?.is_file())
+    }
+
+    fn retrieve_model(&self, model_id: ModelId) -> Option<&Model> {
+        self.models.get(&model_id)
+    }
+
+    fn remove_model(&mut self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError> {
+        let model = self
+            .models
+            .get(&model_id)
+            .ok_or(RibbleWhisperError::ParameterError(
+                "Invalid model id supplied to test bank".to_string(),
+            ))?;
+
+        if self.model_exists_in_storage(model_id)? {
+            let file_path = self.model_directory.join(model.file_name());
+            fs::remove_file(&file_path)?;
+        }
+        self.models.remove(&model_id);
+        Ok(model_id)
+    }
+}
+
+impl ModelRetriever for DefaultModelBank {
+    fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf> {
+        self.models
+            .get(&model_id)
+            .and_then(|model| Some(self.model_directory.join(model.file_name())))
+    }
+}
 
 /// Encapsulates a compatible whisper model
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Clone, Debug)]
 pub struct Model {
     name: String,
     file_name: String,
-    path_prefix: PathBuf,
     #[cfg(feature = "integrity")]
     checksum_verified: bool,
 }
@@ -39,39 +233,28 @@ impl Model {
         Self {
             name: Default::default(),
             file_name: Default::default(),
-            path_prefix: Default::default(),
             #[cfg(feature = "integrity")]
             checksum_verified: false,
         }
     }
 
     /// Constructs a model with the provided (user-facing) name, filename, and path prefix (model directory).
-    pub fn new_with_parameters(name: &str, file_name: &str, path_prefix: &Path) -> Self {
-        Self::new()
-            .with_name(name)
-            .with_file_name(file_name)
-            .with_path_prefix(path_prefix)
+    pub fn new_with_parameters(name: String, file_name: String) -> Self {
+        Self::new().with_name(name).with_file_name(file_name)
     }
 
     /// Sets the model's user-facing name
-    pub fn with_name(mut self, name: &str) -> Self {
-        self.name = name.to_owned();
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = name;
         self
     }
 
     /// Sets the model's filename.
-    pub fn with_file_name(mut self, file_name: &str) -> Self {
-        self.file_name = file_name.to_owned();
-        #[cfg(feature = "integrity")]
-        {
-            self.checksum_verified = false;
-        }
-        self
-    }
-
-    /// Sets the path prefix (model directory)
-    pub fn with_path_prefix(mut self, path_prefix: &Path) -> Self {
-        self.path_prefix = path_prefix.to_path_buf();
+    /// NOTE: if this file_name gets changed (to point to a different file), it can no longer be
+    /// verified.
+    /// NOTE: depending on
+    pub fn with_file_name(mut self, file_name: String) -> Self {
+        self.file_name = file_name;
         #[cfg(feature = "integrity")]
         {
             self.checksum_verified = false;
@@ -81,34 +264,11 @@ impl Model {
 
     /// Gets the model's user-friendly name
     pub fn name(&self) -> &str {
-        self.name.as_str()
+        &self.name
     }
     /// Gets the model's filename
     pub fn file_name(&self) -> &str {
         &self.file_name
-    }
-
-    /// Gets the path prefix (model-directory)
-    pub fn path_prefix(&self) -> &Path {
-        self.path_prefix.as_path()
-    }
-
-    /// Canonicalizes the model's full path as a [PathBuf]
-    pub fn file_path(&self) -> PathBuf {
-        self.path_prefix.join(&self.file_name)
-    }
-
-    /// Canonicalizes the model's full path as a String
-    /// Returns Err if the file path is not valid UTF-8
-    pub fn file_path_string(&self) -> Result<String, RibbleWhisperError> {
-        let file_path = self.file_path();
-        Ok(file_path
-            .to_str()
-            .ok_or(RibbleWhisperError::ParameterError(format!(
-                "File Path: {:?} is not a valid utf-8 str",
-                file_path
-            )))?
-            .to_string())
     }
 
     /// Gets the model's (checksum) verified status.
@@ -118,20 +278,14 @@ impl Model {
         self.checksum_verified
     }
 
-    /// Canonicalizes the file path and checks the directory for an existing file.
-    /// It does not verify file integrity
-    pub fn exists_in_directory(&self) -> bool {
-        match fs::metadata(self.file_path().as_path()) {
-            Ok(m) => m.is_file(),
-            Err(_) => false,
-        }
-    }
-
-    #[allow(dead_code)]
     #[cfg(feature = "integrity")]
-    fn compare_sha256(&self, checksum: &str) -> Result<bool, RibbleWhisperError> {
+    fn compare_sha256(
+        &self,
+        checksum: &str,
+        model_directory: &Path,
+    ) -> Result<bool, RibbleWhisperError> {
         // Compute the checksum on the file
-        let mut file = fs::File::open(self.file_path())?;
+        let mut file = fs::File::open(model_directory.join(self.file_name()))?;
         let mut hasher = Sha256::new();
         std::io::copy(&mut file, &mut hasher)?;
         let hash = hasher.finalize();
@@ -142,10 +296,16 @@ impl Model {
         Ok(checksum.to_lowercase() == byte_str)
     }
 
+    // TODO: -> move to model bank, args: id + checksum
     #[cfg(feature = "integrity")]
-    fn compare_sha1(&self, checksum: &str) -> Result<bool, RibbleWhisperError> {
+    fn compare_sha1(
+        &self,
+        checksum: &str,
+        model_directory: &Path,
+    ) -> Result<bool, RibbleWhisperError> {
+        // TODO: -> move to model bank
         // Compute the checksum on the file
-        let mut file = fs::File::open(self.file_path())?;
+        let mut file = fs::File::open(model_directory.join(self.file_name()))?;
         let mut hasher = Sha1::new();
         std::io::copy(&mut file, &mut hasher)?;
         let hash = hasher.finalize();
@@ -163,15 +323,16 @@ impl Model {
     /// * checksum (Sha1/2)
     /// # Returns
     /// * Ok(matches) on success, Err on I/O error, or failure to compute the checksum.
+    // TODO: -> move to model bank, args: id + checksum
     #[cfg(feature = "integrity")]
-    pub fn verify_checksum(&mut self, checksum: &Checksum) -> Result<bool, RibbleWhisperError> {
-        if !self.exists_in_directory() {
-            self.checksum_verified = false;
-            return Ok(false);
-        }
+    pub fn verify_checksum(
+        &mut self,
+        model_directory: &Path,
+        checksum: &Checksum,
+    ) -> Result<bool, RibbleWhisperError> {
         let is_equal = match checksum {
-            Checksum::Sha1(c) => self.compare_sha1(c),
-            Checksum::Sha256(c) => self.compare_sha256(c),
+            Checksum::Sha1(c) => self.compare_sha1(c, model_directory),
+            Checksum::Sha256(c) => self.compare_sha256(c, model_directory),
         };
 
         match is_equal {
@@ -187,12 +348,6 @@ impl Model {
     }
 }
 
-impl Default for Model {
-    fn default() -> Self {
-        Model::new()
-    }
-}
-
 /// Encapsulates a series of base models available for download and use with WhisperRealtime
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(
@@ -203,6 +358,7 @@ impl Default for Model {
     PartialEq,
     Ord,
     Eq,
+    Hash,
     AsRefStr,
     EnumCount,
     EnumIter,
@@ -228,6 +384,7 @@ pub enum DefaultModelType {
     LargeV3,
 }
 
+// TODO: rethink this.
 impl DefaultModelType {
     pub fn to_file_name(&self) -> &'static str {
         match self {
@@ -264,14 +421,8 @@ impl DefaultModelType {
     /// Constructs a model object and sets the path prefix to the current working directory
     pub fn to_model(&self) -> Model {
         Model::new()
-            .with_name(self.as_ref())
-            .with_file_name(self.to_file_name())
-    }
-
-    /// Constructs a model and sets the path prefix.
-    pub fn to_model_with_path_prefix(&self, prefix: &Path) -> Model {
-        let file_name = self.to_file_name();
-        Model::new_with_parameters(self.as_ref(), file_name, prefix)
+            .with_name(self.to_string())
+            .with_file_name(self.to_file_name().to_string())
     }
 
     /// Canonicalizes a download url to retrieve the model from huggingface.

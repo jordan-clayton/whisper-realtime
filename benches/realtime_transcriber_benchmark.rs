@@ -17,19 +17,20 @@ use ribble_whisper::utils;
 use ribble_whisper::utils::errors::RibbleWhisperError;
 use ribble_whisper::utils::{constants, Receiver};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
-use ribble_whisper::whisper::model::DefaultModelType;
+use ribble_whisper::whisper::model::{DefaultModelBank, DefaultModelType, ModelBank};
 
 // Bear in mind, this benchmark is a little fragile given the test structure and the difficulty of
 // simulating the realtime loop. It is highly unlikely to fail at a point where the bench will
 // get stuck in the loop, but not impossible due to the nondeterminism involved.
 
 // Early benching suggests that the choice of VAD, from what is currently implemented, is irrelevant for realtime.
-// The bottleneck will always be whisper.
+// The bottleneck will always be Whisper.
 
 pub fn realtime_vad_benchmark(c: &mut Criterion) {
     // To prevent excess memory allocations from clouding the benchmark, pre-allocate as many
     // resources as feasible. Pass and share where appropriate.
-    let configs = prep_configs();
+    let (configs, model_bank) = prep_configs();
+    let model_bank = Arc::new(model_bank);
     let audio_sample = prep_audio();
     let audio_ring_buffer = AudioRingBuffer::default();
     // Pre-fill the audio buffer to warm up the VAD - it can sometimes fail on first read.
@@ -46,12 +47,14 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
     let (mut s_transcriber, s_handle, s_channel) = build_transcriber(
         &configs,
         &audio_ring_buffer,
+        Arc::clone(&model_bank),
         Silero::try_new_whisper_realtime_default,
     );
     eprintln!("SILERO BUILT");
     let (mut w_transcriber, w_handle, w_channel) = build_transcriber(
         &configs,
         &audio_ring_buffer,
+        Arc::clone(&model_bank),
         WebRtc::try_new_whisper_realtime_default,
     );
 
@@ -59,6 +62,7 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
     let (mut e_transcriber, e_handle, e_channel) = build_transcriber(
         &configs,
         &audio_ring_buffer,
+        Arc::clone(&model_bank),
         Earshot::try_new_whisper_realtime_default,
     );
     eprintln!("EARSHOT BUILT");
@@ -105,7 +109,7 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
 }
 
 pub fn realtime_bencher<V: VAD<f32> + Send + Sync>(
-    transcriber: &mut RealtimeTranscriber<V>,
+    transcriber: &mut RealtimeTranscriber<V, DefaultModelBank>,
     handle: RealtimeTranscriberHandle,
     receiver: Arc<Mutex<Receiver<WhisperOutput>>>,
     audio_ring_buffer: &AudioRingBuffer<f32>,
@@ -193,31 +197,32 @@ fn prep_audio() -> Box<[f32]> {
     out
 }
 
-fn prep_configs() -> WhisperRealtimeConfigs {
-    let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
+fn prep_configs() -> (WhisperRealtimeConfigs, DefaultModelBank) {
+    let model_bank = DefaultModelBank::new();
     let model_type = DefaultModelType::Medium;
+    let model_id = model_bank.get_model_id(model_type);
+    let exists = model_bank.model_exists_in_storage(model_id);
+    assert!(exists.is_ok(), "Error checking model file.");
+    assert!(exists.unwrap(), "Whisper medium has not been downloaded.");
 
-    let model = model_type.to_model_with_path_prefix(proj_dir.as_path());
-
-    assert!(
-        model.exists_in_directory(),
-        "Whisper medium has not been downloaded."
-    );
-
-    WhisperRealtimeConfigs::default()
-        .with_n_threads(8)
-        .with_model(model.clone())
-        // Also, optionally set flash attention.
-        // Generally keep this on for a performance gain.
-        .set_flash_attention(true)
+    (
+        WhisperRealtimeConfigs::default()
+            .with_n_threads(8)
+            .with_model_id(Some(model_id))
+            // Also, optionally set flash attention.
+            // Generally keep this on for a performance gain.
+            .set_flash_attention(true),
+        model_bank,
+    )
 }
 
 fn build_transcriber<V: VAD<f32> + Send + Sync>(
     configs: &WhisperRealtimeConfigs,
     audio_buffer: &AudioRingBuffer<f32>,
+    model_bank: Arc<DefaultModelBank>,
     build_method: fn() -> Result<V, RibbleWhisperError>,
 ) -> (
-    RealtimeTranscriber<V>,
+    RealtimeTranscriber<V, DefaultModelBank>,
     RealtimeTranscriberHandle,
     Receiver<WhisperOutput>,
 ) {
@@ -239,12 +244,14 @@ fn build_transcriber<V: VAD<f32> + Send + Sync>(
     }
 
     // Transcriber
-    let (transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<V>::new()
-        .with_configs(configs.clone())
-        .with_audio_buffer(&audio_buffer)
-        .with_output_sender(text_sender)
-        .with_voice_activity_detector(vad)
-        .build()
-        .expect("RealtimeTranscriber expected to build without issues.");
+    let (transcriber, transcriber_handle) =
+        RealtimeTranscriberBuilder::<V, DefaultModelBank>::new()
+            .with_configs(configs.clone())
+            .with_audio_buffer(&audio_buffer)
+            .with_output_sender(text_sender)
+            .with_shared_model_retriever(model_bank)
+            .with_voice_activity_detector(vad)
+            .build()
+            .expect("RealtimeTranscriber expected to build without issues.");
     (transcriber, transcriber_handle, text_receiver)
 }

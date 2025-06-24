@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::path::Path;
-
+use std::sync::Arc;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::Decoder;
 use symphonia::core::errors::Error;
@@ -69,7 +69,7 @@ pub fn load_audio_file<P: AsRef<Path>>(
         Some(p) => decode_loop(track.id, decoder, format, RibbleWhisperCallback::new(p)),
         None => decode_loop(track.id, decoder, format, Nop::new()),
     };
-    Ok(WhisperAudioSample::F32(samples?.into_boxed_slice()))
+    Ok(WhisperAudioSample::F32(Arc::from(samples?)))
 }
 
 /// Loads a WhisperRealtime-compatible (i.e. Can be converted into whisper-compatible) audio file,
@@ -119,7 +119,7 @@ pub fn load_normalized_audio_file<P: AsRef<Path> + Sized>(
         let audio = ResampleableAudio::F32(&samples);
         normalize_audio(&audio, sample_rate, num_channels)
     } else {
-        Ok(WhisperAudioSample::F32(samples.into_boxed_slice()))
+        Ok(WhisperAudioSample::F32(Arc::from(samples)))
     }
 }
 

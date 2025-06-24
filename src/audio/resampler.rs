@@ -1,9 +1,9 @@
-use std::fs::File;
-use std::path::Path;
-
 use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
+use std::fs::File;
+use std::path::Path;
+use std::sync::Arc;
 use symphonia::core::formats::Track;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::Hint;
@@ -81,9 +81,7 @@ fn resample_mono(
 ) -> Result<WhisperAudioSample, RibbleWhisperError> {
     let waves_in = vec![samples];
     let waves_out = resampler.process(&waves_in, None)?;
-    Ok(WhisperAudioSample::F32(
-        waves_out[0].to_vec().into_boxed_slice(),
-    ))
+    Ok(WhisperAudioSample::F32(Arc::from(waves_out[0].clone())))
 }
 
 #[inline]
@@ -107,7 +105,7 @@ fn resample_stereo(
         .flatten()
         .collect();
 
-    Ok(WhisperAudioSample::F32(interleaved.into_boxed_slice()))
+    Ok(WhisperAudioSample::F32(Arc::from(interleaved)))
 }
 
 /// Normalizes audio to sample at 16kHz. For use with whisper.
@@ -126,7 +124,7 @@ pub fn normalize_audio(
     let resampled = resample(samples, 16000., in_sample_rate, num_channels)?;
     if let WhisperAudioSample::F32(stereo) = resampled {
         let mono = whisper_rs::convert_stereo_to_mono_audio(&stereo)?;
-        Ok(WhisperAudioSample::F32(mono.into_boxed_slice()))
+        Ok(WhisperAudioSample::F32(Arc::from(mono)))
     } else {
         // This should never, ever happen
         Err(RibbleWhisperError::ParameterError(
