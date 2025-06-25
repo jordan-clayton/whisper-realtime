@@ -4,13 +4,17 @@
 // - implement proper unit testing using mocked directories to avoid relying on integration tests
 //   and encountering filesystem instability.
 // - fuzz-testing the regex.
+mod common;
 #[cfg(test)]
 #[cfg(feature = "integrity")]
 mod model_integrity_tests {
+    // NOTE: These tests look a little gnarly due to a late refactoring decision that introduces a
+    // "Model Bank" abstraction. See: [crate::whisper::model:::ModelBank] for details
     use std::collections::HashMap;
 
+    use crate::common::prep_model_bank;
     use ribble_whisper::whisper::integrity_utils::CHECKSUM_RE;
-    use ribble_whisper::whisper::model::{Checksum, DefaultModelType};
+    use ribble_whisper::whisper::model::{Checksum, DefaultModelType, ModelBank, ModelRetriever};
 
     fn delete_model(file_path: &std::path::Path) -> std::io::Result<()> {
         std::fs::remove_file(file_path)
@@ -82,13 +86,32 @@ mod model_integrity_tests {
     }
     #[test]
     fn test_integrity_check_not_downloaded() {
-        let model_path = std::env::current_dir().unwrap().join("data").join("models");
+        // LargeV1 is not included in the default implementation and needs to be added to the model bank, or prep_model_bank will crash.
         let model_type = DefaultModelType::LargeV1;
-        let mut model = model_type.to_model().with_path_prefix(model_path.as_path());
-        let file_path = model.file_path();
+        let init_model_type = DefaultModelType::Medium;
 
-        if model.exists_in_directory() {
-            let deleted = delete_model(file_path.as_path());
+        let (mut model_bank, _) = prep_model_bank(init_model_type);
+        let model_id = model_bank.insert_model(model_type.to_model());
+        assert!(
+            model_id.is_ok(),
+            "Failed to insert large model entry in DefaultModelBank"
+        );
+        let model_id = model_id.unwrap();
+
+        let exists = model_bank.model_exists_in_storage(model_id);
+        assert!(
+            exists.is_ok(),
+            "File IO in integrity test with large model."
+        );
+
+        if exists.unwrap() {
+            let file_path = model_bank.retrieve_model_path(model_id);
+            assert!(
+                file_path.is_some(),
+                "Failed to retrieve model path from default model bank."
+            );
+
+            let deleted = delete_model(file_path.unwrap().as_path());
             assert!(
                 deleted.is_ok(),
                 "Failed to delete model: {}",
@@ -96,17 +119,20 @@ mod model_integrity_tests {
             )
         }
 
+        let exists = model_bank.model_exists_in_storage(model_id);
         assert!(
-            !model.exists_in_directory(),
-            "Model still exists in the directory"
+            exists.is_ok(),
+            "File IO in integrity test with large model."
         );
 
+        assert!(!exists.unwrap(), "Model still exists in the directory");
+
         // Get the checksum.
-        let checksum = model_type.get_checksum(model_path.as_path(), None);
+        let checksum = model_type.get_checksum(model_bank.model_directory(), None);
         assert!(checksum.is_ok(), "{}", checksum.unwrap_err());
         let checksum = checksum.unwrap();
         let c = Checksum::Sha1(checksum.as_str());
-        let verified = model.verify_checksum(&c);
+        let verified = model_bank.verify_checksum(model_id, &c);
         assert!(verified.is_ok(), "File error: {}", verified.unwrap_err());
 
         assert!(
@@ -117,22 +143,27 @@ mod model_integrity_tests {
     }
     #[test]
     fn test_integrity_check_downloaded() {
-        let model_path = std::env::current_dir().unwrap().join("data").join("models");
         let model_type = DefaultModelType::default();
-        let mut model = model_type.to_model().with_path_prefix(model_path.as_path());
+        let (mut model_bank, model_id) = prep_model_bank(model_type);
+
+        let exists = model_bank.model_exists_in_storage(model_id);
+        assert!(
+            exists.is_ok(),
+            "File IO in integrity test with default model."
+        );
 
         assert!(
-            model.exists_in_directory(),
-            "Failed to find model in data directory"
+            exists.unwrap(),
+            "Failed to find default model in data directory"
         );
 
         // Get the checksum.
-        let checksum = model_type.get_checksum(model_path.as_path(), None);
+        let checksum = model_type.get_checksum(model_bank.model_directory(), None);
         assert!(checksum.is_ok(), "{}", checksum.unwrap_err());
         let checksum = checksum.unwrap();
         let c = Checksum::Sha1(checksum.as_str());
 
-        let verified = model.verify_checksum(&c);
+        let verified = model_bank.verify_checksum(model_id, &c);
         assert!(verified.is_ok(), "File error: {}", verified.unwrap_err());
 
         assert!(

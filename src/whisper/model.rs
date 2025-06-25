@@ -102,6 +102,7 @@ impl DefaultModelBank {
     pub fn new() -> Self {
         let path = std::env::current_dir().unwrap().join("data").join("models");
         let default_models = [
+            DefaultModelType::Tiny,
             DefaultModelType::TinyEn,
             DefaultModelType::Small,
             DefaultModelType::SmallEn,
@@ -139,11 +140,9 @@ impl ModelBank for DefaultModelBank {
         let mut hasher = DefaultHasher::new();
         model.file_name().hash(&mut hasher);
         let model_id = hasher.finish();
-        self.models
-            .insert(model_id, model)
-            .ok_or(RibbleWhisperError::ModelError(
-                "Failed to store new model.".to_string(),
-            ))?;
+        // This returns None if the previous bucket was not occupied, otherwise
+        // it returns the previous value.
+        self.models.insert(model_id, model);
         Ok(model_id)
     }
 
@@ -171,24 +170,38 @@ impl ModelBank for DefaultModelBank {
         model_id: ModelId,
         checksum: &Checksum,
     ) -> Result<bool, RibbleWhisperError> {
+        let exists = self.model_exists_in_storage(model_id)?;
+
         let model = self
             .models
             .get_mut(&model_id)
             .ok_or(RibbleWhisperError::ParameterError(
                 "Invalid model key supplied to test bank.".to_string(),
             ))?;
-        model.verify_checksum(self.model_directory.as_path(), checksum)
+
+        if !exists {
+            model.checksum_verified = false;
+            Ok(false)
+        } else {
+            model.verify_checksum(self.model_directory.as_path(), checksum)
+        }
     }
 
+    // Fails on an IO permissions error
     fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError> {
-        let model = self
-            .models
-            .get(&model_id)
-            .ok_or(RibbleWhisperError::ParameterError(
-                "Invalid model key supplied to test bank.".to_string(),
-            ))?;
+        let model = self.models.get(&model_id);
+        if model.is_none() {
+            return Ok(false);
+        }
+        let model = model.unwrap();
         let file_path = self.model_directory.join(model.file_name());
-        Ok(fs::metadata(&file_path)?.is_file())
+        match fs::metadata(&file_path) {
+            Ok(m) => Ok(m.is_file()),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => Ok(false),
+                _ => Err(e.into()),
+            },
+        }
     }
 
     fn retrieve_model(&self, model_id: ModelId) -> Option<&Model> {
@@ -221,6 +234,7 @@ impl ModelRetriever for DefaultModelBank {
 }
 
 /// Encapsulates a compatible whisper model
+#[derive(Clone)]
 pub struct Model {
     name: String,
     file_name: String,
@@ -278,6 +292,13 @@ impl Model {
         self.checksum_verified
     }
 
+    // NOTE:
+    // It should be the responsibility of the Model Bank to handle and mediate all changes to models.
+    // This is reflected in the interface of ModelBank.
+
+    // However, it is the case that all prior self-contained model integrity mechanisms still work,
+    // they are still exposed and can be used for the interim.
+
     #[cfg(feature = "integrity")]
     fn compare_sha256(
         &self,
@@ -316,6 +337,7 @@ impl Model {
         Ok(checksum.to_lowercase() == byte_str)
     }
 
+    /// # Deprecated: These will eventually become utility functions which can be used in a [ModelBank] or similar to handle checksums.
     /// For verifying file integrity against a user-provided checksum.
     /// Since a Model file can come from anywhere, responsibility falls upon the user to ensure
     /// integrity. This method provides a mechanism to carry out that responsibility.
@@ -323,7 +345,6 @@ impl Model {
     /// * checksum (Sha1/2)
     /// # Returns
     /// * Ok(matches) on success, Err on I/O error, or failure to compute the checksum.
-    // TODO: -> move to model bank, args: id + checksum
     #[cfg(feature = "integrity")]
     pub fn verify_checksum(
         &mut self,

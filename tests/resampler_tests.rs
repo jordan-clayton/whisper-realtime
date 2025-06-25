@@ -1,13 +1,14 @@
+mod common;
 #[cfg(test)]
 #[cfg(feature = "resampler")]
 mod resampler_test {
-    // NOTE: You will need to supply your own audio file and modify the tests accordingly.
-
     use std::sync::atomic::AtomicBool;
+    // NOTE: You will need to supply your own audio file and modify the tests accordingly.
     use std::sync::Arc;
 
     use hound::{SampleFormat, WavSpec, WavWriter};
 
+    use crate::common::prep_model_bank;
     use ribble_whisper::audio::loading::load_normalized_audio_file;
     use ribble_whisper::audio::resampler::file_needs_normalizing;
     use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
@@ -16,7 +17,7 @@ mod resampler_test {
     use ribble_whisper::transcriber::Transcriber;
     use ribble_whisper::utils::constants;
     use ribble_whisper::whisper::configs::WhisperConfigsV2;
-    use ribble_whisper::whisper::model::DefaultModelType;
+    use ribble_whisper::whisper::model::{DefaultModelBank, DefaultModelType};
 
     // Tests the resampling from a file path, which will also implicitly using the track handle
     #[test]
@@ -80,12 +81,11 @@ mod resampler_test {
         .unwrap();
 
         // This presumes a model is already downloaded. Handle accordingly.
-        let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
         let model_type = DefaultModelType::MediumEn;
-        let model = model_type.to_model_with_path_prefix(proj_dir.as_path());
+        let (bank, model_id) = prep_model_bank(model_type);
 
         let configs = WhisperConfigsV2::default()
-            .with_model(model)
+            .with_model_id(Some(model_id))
             .with_n_threads(8)
             .set_flash_attention(true);
 
@@ -93,11 +93,12 @@ mod resampler_test {
         let vad = Silero::try_new_whisper_offline_default()
             .expect("Silero expected to build with whisper-defaults.");
 
-        let mut offline_transcriber = OfflineTranscriberBuilder::<Silero>::new()
+        let offline_transcriber = OfflineTranscriberBuilder::<Silero, DefaultModelBank>::new()
             .with_configs(configs)
             .with_audio(audio)
             .with_channel_configurations(AudioChannelConfiguration::Mono)
             .with_voice_activity_detector(vad)
+            .with_model_retriever(bank)
             .build()
             .expect("Offline transcriber expected to build without issue.");
 
@@ -125,12 +126,11 @@ mod resampler_test {
         let audio = load_normalized_audio_file("tests/audio_files/test_mp3.mp3", None::<fn(usize)>)
             .unwrap();
         // This presumes a model is already downloaded. Handle accordingly.
-        let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
         let model_type = DefaultModelType::MediumEn;
-        let model = model_type.to_model_with_path_prefix(proj_dir.as_path());
+        let (bank, model_id) = prep_model_bank(model_type);
 
         let configs = WhisperConfigsV2::default()
-            .with_model(model)
+            .with_model_id(Some(model_id))
             .with_n_threads(8)
             .set_flash_attention(true);
 
@@ -138,11 +138,12 @@ mod resampler_test {
         let vad = Silero::try_new_whisper_offline_default()
             .expect("Silero expected to build with whisper-defaults");
 
-        let mut offline_transcriber = OfflineTranscriberBuilder::<Silero>::new()
+        let offline_transcriber = OfflineTranscriberBuilder::<Silero, DefaultModelBank>::new()
             .with_configs(configs)
             .with_audio(audio)
             .with_channel_configurations(AudioChannelConfiguration::Mono)
             .with_voice_activity_detector(vad)
+            .with_model_retriever(bank)
             .build()
             .expect("Offline transcriber expected to build without issue.");
 

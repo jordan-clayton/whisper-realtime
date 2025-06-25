@@ -1,15 +1,16 @@
+mod common;
 #[cfg(test)]
 #[cfg(feature = "downloader-async")]
 mod downloader_tests {
     use indicatif::{ProgressBar, ProgressStyle};
     use tokio::runtime::Runtime;
 
+    use crate::common::prep_model_bank;
     use ribble_whisper::downloader;
     use ribble_whisper::downloader::AsyncDownload;
     use ribble_whisper::downloader::SyncDownload;
     use ribble_whisper::utils::callback::RibbleWhisperCallback;
-    use ribble_whisper::utils::errors::RibbleWhisperError;
-    use ribble_whisper::whisper::model::DefaultModelType;
+    use ribble_whisper::whisper::model::{DefaultModelType, ModelBank, ModelRetriever};
 
     fn delete_model(file_path: &std::path::Path) -> std::io::Result<()> {
         std::fs::remove_file(file_path)
@@ -17,28 +18,35 @@ mod downloader_tests {
 
     #[test]
     fn test_async_download() {
-        let path = std::env::current_dir().unwrap().join("data").join("models");
         // NOTE: When running tests in parallel, these need to be different
         let model_type = DefaultModelType::Tiny;
-        let model = model_type.to_model().with_path_prefix(path.as_path());
-        let file_path = model.file_path();
-        let file_name = model.file_name();
-        let file_directory = model.path_prefix();
+        let (model_bank, model_id) = prep_model_bank(model_type);
+        let exists = model_bank.model_exists_in_storage(model_id);
+        assert!(
+            exists.is_ok(),
+            "IO error in model bank in async download test."
+        );
 
-        if model.exists_in_directory() {
+        if exists.unwrap() {
+            let file_path = model_bank.retrieve_model_path(model_id);
+            assert!(file_path.is_some(), "Model bank not returning file path.");
+            let file_path = file_path.unwrap();
             let deleted = delete_model(file_path.as_path());
             assert!(
                 deleted.is_ok(),
                 "Failed to delete model. Error: {}, Path: {:?}",
                 deleted.unwrap_err(),
-                model.file_path().as_path(),
+                file_path,
             )
         }
 
+        let exists = model_bank.model_exists_in_storage(model_id);
         assert!(
-            !model.exists_in_directory(),
-            "File still exists in directory."
+            exists.is_ok(),
+            "IO error in model bank in async download test after deletion."
         );
+
+        assert!(!exists.unwrap(), "File still exists in directory.");
 
         let url = model_type.url();
 
@@ -75,8 +83,17 @@ mod downloader_tests {
         let progress_callback = RibbleWhisperCallback::new(progress_callback_function);
 
         let mut stream_downloader = stream_downloader.with_progress_callback(progress_callback);
+        let file_path = model_bank.model_directory();
+        let file_name = model_bank
+            .retrieve_model(model_id)
+            .and_then(|model| Some(model.file_name()));
+        assert!(
+            file_name.is_some(),
+            "Model bank failed to return a model via ID in async download test"
+        );
+        let file_name = file_name.unwrap();
 
-        let download = stream_downloader.download(file_directory, file_name);
+        let download = stream_downloader.download(file_path, file_name);
 
         let download = handle.block_on(download);
 
@@ -86,34 +103,49 @@ mod downloader_tests {
             format!("{}", download.err().unwrap())
         );
 
+        let exists = model_bank.model_exists_in_storage(model_id);
         assert!(
-            model.exists_in_directory(),
-            "Model not successfully downloaded or file path incorrect."
+            exists.is_ok(),
+            "File IO error when checking model in folder after downloading async."
+        );
+
+        assert!(
+            exists.unwrap(),
+            "Model not successfully downloaded or implementation is busted."
         );
     }
 
     #[test]
     fn test_sync_download() {
-        let path = std::env::current_dir().unwrap().join("data").join("models");
         let model_type = DefaultModelType::TinyEn;
-        let model = model_type.to_model().with_path_prefix(path.as_path());
-        let file_path = model.file_path();
-        let file_name = model.file_name();
-        let file_directory = model.path_prefix();
+        let (model_bank, model_id) = prep_model_bank(model_type);
 
-        if model.exists_in_directory() {
+        let exists = model_bank.model_exists_in_storage(model_id);
+        assert!(
+            exists.is_ok(),
+            "IO error in model bank in sync download test."
+        );
+
+        if exists.unwrap() {
+            let file_path = model_bank.retrieve_model_path(model_id);
+            assert!(file_path.is_some(), "Model bank not returning file path.");
+            let file_path = file_path.unwrap();
             let deleted = delete_model(file_path.as_path());
             assert!(
                 deleted.is_ok(),
-                "Failed to delete model: {}",
-                deleted.unwrap_err()
+                "Failed to delete model. Error: {}, Path: {:?}",
+                deleted.unwrap_err(),
+                file_path,
             )
         }
 
+        let exists = model_bank.model_exists_in_storage(model_id);
         assert!(
-            !model.exists_in_directory(),
-            "File still exists in directory."
+            exists.is_ok(),
+            "IO error in model bank in sync download test."
         );
+
+        assert!(!exists.unwrap(), "File still exists in directory.");
 
         let url = model_type.url();
 
@@ -144,14 +176,30 @@ mod downloader_tests {
 
         let mut sync_downloader = sync_downloader.with_progress_callback(progress_callback);
 
+        let file_path = model_bank.model_directory();
+        let file_name = model_bank
+            .retrieve_model(model_id)
+            .and_then(|model| Some(model.file_name()));
+        assert!(
+            file_name.is_some(),
+            "Model bank failed to return a model via ID in async download test"
+        );
+
+        let file_name = file_name.unwrap();
+
         // File copy:
-        let download: Result<(), RibbleWhisperError> =
-            sync_downloader.download(file_directory, file_name);
+        let download = sync_downloader.download(file_path, file_name);
 
         assert!(download.is_ok(), "{}", format!("{}", download.unwrap_err()));
 
+        let exists = model_bank.model_exists_in_storage(model_id);
         assert!(
-            model.exists_in_directory(),
+            exists.is_ok(),
+            "IO error in model bank in sync download test after downloading."
+        );
+
+        assert!(
+            exists.unwrap(),
             "Model not successfully copied or file path incorrect."
         );
     }

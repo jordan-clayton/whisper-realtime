@@ -1,3 +1,5 @@
+mod common;
+#[cfg(test)]
 mod loader_tests {
     use ribble_whisper::audio::loading::{
         audio_file_num_frames, load_audio_file, load_normalized_audio_file,

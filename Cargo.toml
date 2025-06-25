@@ -9,6 +9,9 @@ repository = "https://github.com/jordan-clayton/whisper-realtime"
 keywords = ["whisper", "realtime", "speech-to-text", "transcription", "audio"]
 categories = ["accessibility", "multimedia::audio"]
 
+[lib]
+doctest = false
+
 [package.metadata]
 license-notes = "Includes third-party code under MPL-2.0 and BSD-3-Clause. See LICENSE-MPL-2.0 and LICENSE-BSD-3."
 

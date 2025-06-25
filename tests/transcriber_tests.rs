@@ -1,8 +1,11 @@
+mod common;
+#[cfg(test)]
 mod transcriber_tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, LazyLock};
     use std::thread::scope;
 
+    use crate::common::prep_model_bank;
     use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
     use ribble_whisper::audio::loading::load_normalized_audio_file;
     use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
@@ -17,11 +20,11 @@ mod transcriber_tests {
     use ribble_whisper::utils::callback::{Nop, StaticRibbleWhisperCallback};
     use ribble_whisper::utils::constants;
     use ribble_whisper::whisper::configs::{WhisperConfigsV2, WhisperRealtimeConfigs};
-    use ribble_whisper::whisper::model::DefaultModelType;
+    use ribble_whisper::whisper::model::{DefaultModelBank, DefaultModelType};
 
     // Prepare an audio sample with a known output to try and make conditions as replicable as
     // possible
-    static AUDIO_SAMPLE: LazyLock<Box<[f32]>> = LazyLock::new(|| {
+    static AUDIO_SAMPLE: LazyLock<Arc<[f32]>> = LazyLock::new(|| {
         let sample = load_normalized_audio_file(
             "tests/audio_files/128896__joshenanigans__sentence-recitation.wav",
             None::<fn(usize)>,
@@ -38,24 +41,17 @@ mod transcriber_tests {
             Silero::try_new_whisper_offline_default().expect("Silero should build without issues");
         let out = vad.extract_voiced_frames(&audio);
         assert!(!out.is_empty());
-        out
+        Arc::from(out)
     });
 
     #[test]
     fn test_realtime_transcriber() {
-        let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
         let model_type = DefaultModelType::Medium;
-
-        let model = model_type.to_model_with_path_prefix(proj_dir.as_path());
-
-        assert!(
-            model.exists_in_directory(),
-            "Whisper medium has not been downloaded."
-        );
+        let (model_bank, model_id) = prep_model_bank(model_type);
 
         let configs = WhisperRealtimeConfigs::default()
             .with_n_threads(8)
-            .with_model(model.clone())
+            .with_model_id(Some(model_id))
             // Also, optionally set flash attention.
             // Generally keep this on for a performance gain.
             .set_flash_attention(true);
@@ -74,11 +70,12 @@ mod transcriber_tests {
         assert!(detected_audio, "Failed to detect audio after warming up");
 
         let audio_ring_buffer = AudioRingBuffer::default();
-        let (mut transcriber, handle) = RealtimeTranscriberBuilder::<Silero>::new()
+        let (transcriber, handle) = RealtimeTranscriberBuilder::<Silero, DefaultModelBank>::new()
             .with_configs(configs.clone())
             .with_audio_buffer(&audio_ring_buffer)
             .with_output_sender(text_sender)
             .with_voice_activity_detector(vad)
+            .with_model_retriever(model_bank)
             .build()
             .expect("RealtimeTranscriber expected to build without issues.");
 
@@ -163,31 +160,25 @@ mod transcriber_tests {
 
     #[test]
     fn test_offline_segments_callback() {
-        let proj_dir = std::env::current_dir().unwrap().join("data").join("models");
         let model_type = DefaultModelType::Medium;
-
-        let model = model_type.to_model_with_path_prefix(proj_dir.as_path());
-
-        assert!(
-            model.exists_in_directory(),
-            "Whisper medium has not been downloaded."
-        );
+        let (model_bank, model_id) = prep_model_bank(model_type);
 
         let configs = WhisperConfigsV2::default()
             .with_n_threads(8)
-            .with_model(model.clone())
+            .with_model_id(Some(model_id))
             .set_flash_attention(true);
 
         // For receiving data in the print loop.
         let (text_sender, text_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
         // Since audio is pre-processed (silence removed), it needs to be cloned back into a
         // WhisperAudioSample.
-        let audio = WhisperAudioSample::F32(AUDIO_SAMPLE.clone());
+        let audio = WhisperAudioSample::F32(Arc::clone(&AUDIO_SAMPLE));
 
-        let mut transcriber = OfflineTranscriberBuilder::<Silero>::new()
+        let transcriber = OfflineTranscriberBuilder::<Silero, DefaultModelBank>::new()
             .with_configs(configs.clone())
             .with_audio(audio)
             .with_channel_configurations(AudioChannelConfiguration::Mono)
+            .with_model_retriever(model_bank)
             .build()
             .expect("Offline transcriber expected to build without issues.");
 
