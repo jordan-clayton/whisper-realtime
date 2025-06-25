@@ -60,15 +60,15 @@ see [examples/realtime_stream](https://github.com/jordan-clayton/whisper-realtim
 // Imports are omitted here for brevity; refer to examples/realtime_stream.
 use ribble_whisper::*;
 fn main() {
-    // TODO: refactor this RE: ModelBank
     // Handle this how you see fit and pass a model to the configs builder.
-    // See: realtime_stream::prepare_model() for an example of how to use the downloading API to retrieve a model from huggingface.
-    let model = prepare_model();
+    // See: realtime_stream::prepare_model_bank() for an example of how to use the downloading API to retrieve a model from huggingface.
+    let (model_bank, model_id) = prepare_model_bank();
+    let model_bank = Arc::new(model_bank);
     // Set the number of threads according to your hardware.
     // If you can allocate around 7-8, do so as this tends to be more performant.
     let configs = WhisperRealtimeConfigs::default()
         .with_n_threads(8)
-        .with_model(model)
+        .with_model_id(Some(model_id))
         // Also, optionally set flash attention.
         // (Generally keep this on for a performance gain with gpu processing).
         .set_flash_attention(true);
@@ -89,13 +89,17 @@ fn main() {
         .expect("Silero realtime VAD expected to build without issue when configured properly.");
 
     // Set up the RealtimeTranscriber + Ready handle.
-    let (mut transcriber, transcriber_handle) = RealtimeTranscriberBuilder::<Silero>::new()
-        .with_configs(configs.clone())
-        .with_audio_buffer(&audio_ring_buffer)
-        .with_output_sender(text_sender)
-        .with_voice_activity_detector(vad)
-        .build()
-        .expect("RealtimeTranscriber expected to build without issues when configured properly.");
+    let (transcriber, transcriber_handle) =
+        RealtimeTranscriberBuilder::<Silero, DefaultModelBank>::new()
+            .with_configs(configs.clone())
+            .with_audio_buffer(&audio_ring_buffer)
+            .with_output_sender(text_sender)
+            .with_voice_activity_detector(vad)
+            .with_shared_model_retriever(Arc::clone(&model_bank))
+            .build()
+            .expect(
+                "RealtimeTranscriber expected to build without issues when configured properly.",
+            );
 
     // Atomic flag for starting/stopping the transcription loop.
     // This is a "UI control" to allow the user to stop the transcription without an explicit timeout.
@@ -109,7 +113,7 @@ fn main() {
         .build_whisper_fanout_default(audio_sender)
         .expect("Mic handle expected to build without issue.");
 
-    // Ribble-Whisper is designed to be as flexible as possible, but real-time transcriptions need to be run using 
+    // Ribble-Whisper is designed to be as flexible as possible but real-time transcriptions need to be run using 
     // asynchronous/concurrent programming.
     // It is recommended to do this using threads.
     let transcriber_thread = scope(|s| {
@@ -168,8 +172,8 @@ fn main() {
                 clear_stdout();
                 println!("Latest Control Message: {}\n", latest_control_message);
                 println!("Transcription:\n");
-                // Print the up-to-date transcription thus far.
-                print!("{}", latest_confirmed);
+                // Print the latest confirmed transcription.
+                print!("{}", latest_snapshot.confirmed());
 
                 // Print the remaining current working set of segments.
                 for segment in latest_segments.iter() {
@@ -179,11 +183,10 @@ fn main() {
                 stdout().flush().expect("Stdout should clear normally.");
             }
 
-            // Drain the last of the segments into the final string.
-            let last_text = latest_segments.drain(..);
-            latest_confirmed.extend(last_text);
-            // In realtime_stream, this is returned for demonstration/comparison purposes.
-            latest_confirmed
+            // Take the last received snapshot and join it into a string.
+            // This is done in examples/realtime_stream to demonstrate that the sending mechanism terminates to
+            // the same state as the final transcription string.
+            latest_snapshot.to_string()
         });
 
         // Return the full transcription once the loop has either timed out or been stopped by the user.

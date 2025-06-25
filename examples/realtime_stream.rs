@@ -164,7 +164,7 @@ fn main() {
                 clear_stdout();
                 println!("Latest Control Message: {}\n", latest_control_message);
                 println!("Transcription:\n");
-                // Print the remaining current working set of segments.
+                // Print the latest confirmed transcription.
                 print!("{}", latest_snapshot.confirmed());
                 // Print the remaining current working set of segments.
                 for segment in latest_snapshot.string_segments() {
@@ -174,8 +174,9 @@ fn main() {
                 stdout().flush().expect("Stdout should clear normally.");
             }
 
-            // Take the last received snapshot and bake it into a string.
-            // This is just to demonstrate idempotency between message passing and the returned string
+            // Take the last received snapshot and join it into a string.
+            // This is just to demonstrate that the sending mechanism terminates to the same
+            // state as the final transcription string.
             latest_snapshot.to_string()
         });
 
