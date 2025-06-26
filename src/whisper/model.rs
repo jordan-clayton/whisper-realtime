@@ -57,7 +57,7 @@ pub trait ModelBank {
 
 // TODO: document. Same as ModelBank but imposes interior mutability + concurrency
 pub trait ConcurrentModelBank: Send + Sync {
-    fn data_directory(&self) -> &Path;
+    fn model_directory(&self) -> &Path;
     fn insert_model(&self, model: Model) -> Result<ModelId, RibbleWhisperError>;
     // TODO: document
     // Depending on the ways in which a model is stored/replaced, it's ModelId may change.
@@ -237,6 +237,8 @@ impl ModelRetriever for DefaultModelBank {
 #[derive(Clone)]
 pub struct Model {
     name: String,
+    // TODO: this should probably be ArcStr
+    // Or, make model a trait.
     file_name: String,
     #[cfg(feature = "integrity")]
     checksum_verified: bool,
