@@ -51,8 +51,8 @@ pub trait ModelBank {
         checksum: &Checksum,
     ) -> Result<bool, RibbleWhisperError>;
     fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
-    fn retrieve_model(&self, id: ModelId) -> Option<&Model>;
-    fn remove_model(&mut self, id: ModelId) -> Result<ModelId, RibbleWhisperError>;
+    fn retrieve_model(&self, model_id: ModelId) -> Option<&Model>;
+    fn remove_model(&mut self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError>;
 }
 
 // TODO: document. Same as ModelBank but imposes interior mutability + concurrency
@@ -81,14 +81,14 @@ pub trait ConcurrentModelBank: Send + Sync {
         checksum: &Checksum,
     ) -> Result<bool, RibbleWhisperError>;
     fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
-    fn retrieve_model(&self, id: ModelId) -> Option<&Model>;
-    fn remove_model(&self, id: ModelId) -> Result<ModelId, RibbleWhisperError>;
+    fn retrieve_model(&self, model_id: ModelId) -> Option<&Model>;
+    fn remove_model(&self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError>;
 }
 
 // TODO: document -> limited scope API for things that require getting paths for whisper models.
 // i.e. the transcribers so that the path doesn't need to be explicitly passed around.
 pub trait ModelRetriever {
-    fn retrieve_model_path(&self, id: ModelId) -> Option<PathBuf>;
+    fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf>;
 }
 
 // TODO: document - this is a very bare-bones implementation, but it's sufficient for getting things running
@@ -234,11 +234,10 @@ impl ModelRetriever for DefaultModelBank {
 }
 
 /// Encapsulates a compatible whisper model
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone)]
 pub struct Model {
     name: String,
-    // TODO: this should probably be ArcStr
-    // Or, make model a trait.
     file_name: String,
     #[cfg(feature = "integrity")]
     checksum_verified: bool,
