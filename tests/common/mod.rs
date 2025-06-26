@@ -7,7 +7,7 @@ pub(crate) fn prep_model_bank(model_type: DefaultModelType) -> (DefaultModelBank
 
     let model_id = bank.get_model_id(model_type);
     // Checking -> These models -should- exist before they're being used in testing.
-    let model = bank.retrieve_model(model_id);
+    let model = bank.get_model(model_id);
 
     assert!(
         model.is_some(),

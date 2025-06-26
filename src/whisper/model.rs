@@ -51,7 +51,8 @@ pub trait ModelBank {
         checksum: &Checksum,
     ) -> Result<bool, RibbleWhisperError>;
     fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
-    fn retrieve_model(&self, model_id: ModelId) -> Option<&Model>;
+    fn get_model(&self, model_id: ModelId) -> Option<&Model>;
+    fn get_model_mut(&self, model_id: ModelId) -> Option<&mut Model>;
     fn remove_model(&mut self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError>;
 }
 
@@ -81,7 +82,10 @@ pub trait ConcurrentModelBank: Send + Sync {
         checksum: &Checksum,
     ) -> Result<bool, RibbleWhisperError>;
     fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
-    fn retrieve_model(&self, model_id: ModelId) -> Option<&Model>;
+    fn get_model(&self, model_id: ModelId) -> Option<&Model>;
+
+    // ConcurrentModelBank assumes some level of interior mutability in the backing implementation.
+    fn get_model_mut(&self, model_id: ModelId) -> Option<&mut Model>;
     fn remove_model(&self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError>;
 }
 
@@ -204,8 +208,11 @@ impl ModelBank for DefaultModelBank {
         }
     }
 
-    fn retrieve_model(&self, model_id: ModelId) -> Option<&Model> {
+    fn get_model(&self, model_id: ModelId) -> Option<&Model> {
         self.models.get(&model_id)
+    }
+    fn get_model_mut(&mut self, model_id: ModelId) -> Option<&mut Model> {
+        self.models.get_mut(&model_id)
     }
 
     fn remove_model(&mut self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError> {

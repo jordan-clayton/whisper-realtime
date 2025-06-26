@@ -307,7 +307,7 @@ fn prepare_model_bank() -> (DefaultModelBank, ModelId) {
         let mut sync_downloader = sync_downloader.with_progress_callback(progress_callback);
 
         let model = bank
-            .retrieve_model(model_id)
+            .get_model(model_id)
             .expect("Model is expected to exist in default storage.");
 
         let download = sync_downloader.download(bank.model_directory(), model.file_name());

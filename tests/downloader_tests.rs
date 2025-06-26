@@ -85,7 +85,7 @@ mod downloader_tests {
         let mut stream_downloader = stream_downloader.with_progress_callback(progress_callback);
         let file_path = model_bank.model_directory();
         let file_name = model_bank
-            .retrieve_model(model_id)
+            .get_model(model_id)
             .and_then(|model| Some(model.file_name()));
         assert!(
             file_name.is_some(),
@@ -178,7 +178,7 @@ mod downloader_tests {
 
         let file_path = model_bank.model_directory();
         let file_name = model_bank
-            .retrieve_model(model_id)
+            .get_model(model_id)
             .and_then(|model| Some(model.file_name()));
         assert!(
             file_name.is_some(),
