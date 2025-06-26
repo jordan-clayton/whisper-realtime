@@ -718,7 +718,7 @@ impl WhisperConfigsV1 {
     /// Consumes and converts into WhisperConfigsV2.
     /// Since the new model implementation assumes some sort of id-value mapping infrastructure
     /// will be used, a ModelId hash is computed to store in the configs for quick data retrieval.
-    /// See: [ModelBank] and [DiskModelBank]
+    /// See: [crate::whisper::model::ModelBank] and [crate::whisper::model::DefaultModelBank]
     pub fn into_v2(self) -> WhisperConfigsV2 {
         let model = self.model.to_model();
         let mut hasher = DefaultHasher::new();
@@ -728,7 +728,7 @@ impl WhisperConfigsV1 {
     /// Consumes and converts into WhisperConfigsV2 with the given hasher.
     /// Since the new model implementation assumes some sort of id-value mapping infrastructure
     /// will be used, a ModelId hash is computed to store in the configs for quick data retrieval.
-    /// See: [ModelBank] and [DiskModelBank]
+    /// See: [crate::whisper::model::ModelBank] and [crate::whisper::model::DefaultModelBank]
     pub fn into_v2_with_hasher(self, hasher: &mut impl Hasher) -> WhisperConfigsV2 {
         let model = self.model.to_model();
         self.into_v2_with_model(model, hasher)
