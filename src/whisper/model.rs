@@ -10,7 +10,7 @@ use reqwest::blocking;
 use sha1::Sha1;
 #[cfg(feature = "integrity")]
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{hash_map, HashMap};
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -23,26 +23,58 @@ use strum::{
 pub type ModelId = u64;
 
 // TODO: document -> non-concurrent trait impl.
-pub trait ModelBank {
-    fn model_directory(&self) -> &Path;
-    fn insert_model(&mut self, model: Model) -> Result<ModelId, RibbleWhisperError>;
-    // TODO: document
-    // Depending on the ways in which a model is stored/replaced, it's ModelId may change.
-    // Thus, the ModelId should be returned upon a successful update.
-    fn replace_model(
-        &mut self,
-        model_id: ModelId,
-        model: Model,
-    ) -> Result<ModelId, RibbleWhisperError>;
+// NOTE: This isn't a requirement, but is a way to help organize Model management.
 
-    // Depending on the ways in which a model is stored/mutated, it's ModelId may change.
-    // Thus, the ModelId should be returned upon a successful update.
-    fn update_model_parameters(
+// The only strict requirement to construct a transcriber object is to implement ModelRetriever,
+// so that the transcribers can call it to open a whisper model.
+pub trait ModelBank {
+    type Iter<'a>: Iterator<Item = (&'a ModelId, &'a Model)>
+    where
+        Self: 'a;
+    fn model_directory(&self) -> &Path;
+
+    /// Inserts a model and returns its newly assigned [ModelId].
+    /// Since the backing buffer/ModelId paradigm is up to the implementer, the new ModelId must be
+    /// returned so that it can be accessed later.
+    fn insert_model(&mut self, model: Model) -> Result<ModelId, RibbleWhisperError>;
+
+    fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
+    fn get_model(&self, model_id: ModelId) -> Option<&Model>;
+
+    fn iter(&self) -> Self::Iter<'_>;
+
+    /// Searches for a model and updates its name.
+    /// # Returns:
+    /// * Ok(Some(ModelId)) if the model was found and updated successfully.
+    /// * Ok(None) if the model was not found but the operation was successful.
+    /// * Err(RibbleWhisperError) in the case of an implementer-defined error condition.
+    ///
+    /// Since the backing buffer/ModelId paradigm is up to the implementer, the key-value semantics
+    /// may change based on how the key is derived. Thus, the altered model's ModelId must be returned
+    /// for future accesses.
+    fn rename_model(
         &mut self,
         model_id: ModelId,
-        name: Option<String>,
-        file_name: Option<String>,
-    ) -> Result<ModelId, RibbleWhisperError>;
+        new_name: String,
+    ) -> Result<Option<ModelId>, RibbleWhisperError>;
+
+    /// Searches for a model and updates its file_name.
+    /// # Returns:
+    /// * Ok(Some(ModelId)) if the model was found and updated successfully.
+    /// * Ok(None) if the model was not found but the operation was successful.
+    /// * Err(RibbleWhisperError) in the case of an implementer-defined error condition.
+    ///
+    /// Since the backing buffer/ModelId paradigm is up to the implementer, the key-value semantics
+    /// may change based on how the key is derived. Thus, the altered model's ModelId must be returned
+    /// for future accesses.
+    fn change_model_file_name(
+        &mut self,
+        model_id: ModelId,
+        new_file_name: String,
+    ) -> Result<Option<ModelId>, RibbleWhisperError>;
+
+    fn remove_model(&mut self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError>;
+    fn refresh_model_bank(&mut self) -> Result<(), RibbleWhisperError>;
 
     #[cfg(feature = "integrity")]
     fn verify_checksum(
@@ -50,30 +82,55 @@ pub trait ModelBank {
         model_id: ModelId,
         checksum: &Checksum,
     ) -> Result<bool, RibbleWhisperError>;
-    fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
-    fn get_model(&self, model_id: ModelId) -> Option<&Model>;
-    fn get_model_mut(&self, model_id: ModelId) -> Option<&mut Model>;
-    fn remove_model(&mut self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError>;
 }
 
 // TODO: document. Same as ModelBank but imposes interior mutability + concurrency
-pub trait ConcurrentModelBank: Send + Sync {
-    fn model_directory(&self) -> &Path;
-    fn insert_model(&self, model: Model) -> Result<ModelId, RibbleWhisperError>;
-    // TODO: document
-    // Depending on the ways in which a model is stored/replaced, it's ModelId may change.
-    // Thus, the ModelId should be returned upon a successful update.
-    fn replace_model(&self, model_id: ModelId, model: Model)
-    -> Result<ModelId, RibbleWhisperError>;
+// NOTE: This isn't a requirement, but is a way to help organize Model management.
 
-    // Depending on the ways in which a model is stored/replaced, it's ModelId may change.
-    // Thus, the ModelId should be returned upon a successful update.
-    fn update_model_parameters(
+// The only strict requirement to construct a transcriber object is to implement ModelRetriever,
+// so that the transcribers can call it to open a whisper model.
+pub trait ConcurrentModelBank: Send + Sync {
+    type Iter<'a>: Iterator<Item = (&'a ModelId, &'a Model)>
+    where
+        Self: 'a;
+    fn model_directory(&self) -> &Path;
+    /// Inserts a model and returns its newly assigned [ModelId].
+    /// Since the backing buffer/ModelId paradigm is up to the implementer, the new ModelId must be
+    /// returned so that it can be accessed later.
+    fn insert_model(&self, model: Model) -> Result<ModelId, RibbleWhisperError>;
+    fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
+    fn get_model(&self, model_id: ModelId) -> Option<&Model>;
+
+    fn iter(&self) -> Self::Iter<'_>;
+    /// Searches for a model and updates its name.
+    /// # Returns:
+    /// * Ok(Some(ModelId)) if the model was found and updated successfully.
+    /// * Ok(None) if the model was not found but the operation was successful.
+    /// * Err(RibbleWhisperError) in the case of an implementer-defined error condition.
+    ///
+    /// Since the backing buffer/ModelId paradigm is up to the implementer, the key-value semantics
+    /// may change based on how the key is derived. Thus, the altered model's ModelId must be returned
+    /// for future accesses.
+    fn rename_model(
         &self,
         model_id: ModelId,
-        name: Option<String>,
-        file_name: Option<String>,
-    ) -> Result<ModelId, RibbleWhisperError>;
+        new_name: String,
+    ) -> Result<Option<ModelId>, RibbleWhisperError>;
+
+    /// Searches for a model and updates its file_name.
+    /// # Returns:
+    /// * Ok(Some(ModelId)) if the model was found and updated successfully.
+    /// * Ok(None) if the model was not found but the operation was successful.
+    /// * Err(RibbleWhisperError) in the case of an implementer-defined error condition.
+    ///
+    /// Since the backing buffer/ModelId paradigm is up to the implementer, the key-value semantics
+    /// may change based on how the key is derived. Thus, the altered model's ModelId must be returned
+    /// for future accesses.
+    fn change_model_file_name(
+        &self,
+        model_id: ModelId,
+        new_file_name: String,
+    ) -> Result<Option<ModelId>, RibbleWhisperError>;
 
     #[cfg(feature = "integrity")]
     fn verify_checksum(
@@ -81,12 +138,10 @@ pub trait ConcurrentModelBank: Send + Sync {
         model_id: ModelId,
         checksum: &Checksum,
     ) -> Result<bool, RibbleWhisperError>;
-    fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
-    fn get_model(&self, model_id: ModelId) -> Option<&Model>;
 
-    // ConcurrentModelBank assumes some level of interior mutability in the backing implementation.
-    fn get_model_mut(&self, model_id: ModelId) -> Option<&mut Model>;
     fn remove_model(&self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError>;
+
+    fn refresh_model_bank(&self) -> Result<(), RibbleWhisperError>;
 }
 
 // TODO: document -> limited scope API for things that require getting paths for whisper models.
@@ -136,6 +191,7 @@ impl DefaultModelBank {
 }
 
 impl ModelBank for DefaultModelBank {
+    type Iter<'a> = hash_map::Iter<'a, ModelId, Model>;
     fn model_directory(&self) -> &Path {
         self.model_directory.as_path()
     }
@@ -144,28 +200,80 @@ impl ModelBank for DefaultModelBank {
         let mut hasher = DefaultHasher::new();
         model.file_name().hash(&mut hasher);
         let model_id = hasher.finish();
-        // This returns None if the previous bucket was not occupied, otherwise
-        // it returns the previous value.
         self.models.insert(model_id, model);
         Ok(model_id)
     }
 
-    fn replace_model(
-        &mut self,
-        model_id: ModelId,
-        model: Model,
-    ) -> Result<ModelId, RibbleWhisperError> {
-        self.remove_model(model_id)?;
-        self.insert_model(model)
+    // Fails on an IO permissions error
+    fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError> {
+        let model = self.models.get(&model_id);
+        if model.is_none() {
+            return Ok(false);
+        }
+        let model = model.unwrap();
+        let file_path = self.model_directory.join(model.file_name());
+        match fs::metadata(&file_path) {
+            Ok(m) => Ok(m.is_file()),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => Ok(false),
+                _ => Err(e.into()),
+            },
+        }
     }
 
-    fn update_model_parameters(
+    fn get_model(&self, model_id: ModelId) -> Option<&Model> {
+        self.models.get(&model_id)
+    }
+
+    fn iter(&self) -> Self::Iter<'_> {
+        self.models.iter()
+    }
+
+    fn rename_model(
         &mut self,
-        _model_id: ModelId,
-        _name: Option<String>,
-        _file_name: Option<String>,
-    ) -> Result<ModelId, RibbleWhisperError> {
-        todo!("Implement this for testing purposes if needed.")
+        model_id: ModelId,
+        new_name: String,
+    ) -> Result<Option<ModelId>, RibbleWhisperError> {
+        if let Some(model) = self.models.get_mut(&model_id) {
+            model.rename(new_name);
+            Ok(Some(model_id))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn change_model_file_name(
+        &mut self,
+        model_id: ModelId,
+        new_file_name: String,
+    ) -> Result<Option<ModelId>, RibbleWhisperError> {
+        if let Some(model) = self.models.get_mut(&model_id) {
+            model.change_file_name(new_file_name);
+            Ok(Some(model_id))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn remove_model(&mut self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError> {
+        let model = self
+            .models
+            .get(&model_id)
+            .ok_or(RibbleWhisperError::ParameterError(
+                "Invalid model id supplied to test bank".to_string(),
+            ))?;
+
+        if self.model_exists_in_storage(model_id)? {
+            let file_path = self.model_directory.join(model.file_name());
+            fs::remove_file(&file_path)?;
+        }
+        self.models.remove(&model_id);
+        Ok(model_id)
+    }
+
+    fn refresh_model_bank(&mut self) -> Result<(), RibbleWhisperError> {
+        self.models.clear();
+        Ok(())
     }
 
     #[cfg(feature = "integrity")]
@@ -189,46 +297,6 @@ impl ModelBank for DefaultModelBank {
         } else {
             model.verify_checksum(self.model_directory.as_path(), checksum)
         }
-    }
-
-    // Fails on an IO permissions error
-    fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError> {
-        let model = self.models.get(&model_id);
-        if model.is_none() {
-            return Ok(false);
-        }
-        let model = model.unwrap();
-        let file_path = self.model_directory.join(model.file_name());
-        match fs::metadata(&file_path) {
-            Ok(m) => Ok(m.is_file()),
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::NotFound => Ok(false),
-                _ => Err(e.into()),
-            },
-        }
-    }
-
-    fn get_model(&self, model_id: ModelId) -> Option<&Model> {
-        self.models.get(&model_id)
-    }
-    fn get_model_mut(&mut self, model_id: ModelId) -> Option<&mut Model> {
-        self.models.get_mut(&model_id)
-    }
-
-    fn remove_model(&mut self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError> {
-        let model = self
-            .models
-            .get(&model_id)
-            .ok_or(RibbleWhisperError::ParameterError(
-                "Invalid model id supplied to test bank".to_string(),
-            ))?;
-
-        if self.model_exists_in_storage(model_id)? {
-            let file_path = self.model_directory.join(model.file_name());
-            fs::remove_file(&file_path)?;
-        }
-        self.models.remove(&model_id);
-        Ok(model_id)
     }
 }
 
@@ -291,6 +359,13 @@ impl Model {
     /// Gets the model's filename
     pub fn file_name(&self) -> &str {
         &self.file_name
+    }
+
+    pub fn rename(&mut self, new_name: String) {
+        self.name = new_name;
+    }
+    pub fn change_file_name(&mut self, new_file_name: String) {
+        self.file_name = new_file_name;
     }
 
     /// Gets the model's (checksum) verified status.
@@ -468,7 +543,7 @@ impl DefaultModelType {
     /// NOTE: Do not strip away the top level directory when extracting:
     /// Whisper-rs (Whisper.cpp) expects the -encoder.mlmodelc directory to exist within the same
     /// directory as its accompanying model.
-    /// eg. models/ggml-base.en-encoder.mlmodelc AND models/ggml-base.en.bin
+    /// e.g. models/ggml-base.en-encoder.mlmodelc AND models/ggml-base.en.bin
     #[cfg(feature = "coreml")]
     pub fn coreml_zip_url(&self) -> String {
         let url = self.url();
