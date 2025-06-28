@@ -1,8 +1,8 @@
 use crate::utils::errors::RibbleWhisperError;
 #[cfg(feature = "integrity")]
 use crate::whisper::integrity_utils::{
-    checksums_need_updating, get_model_checksum, get_new_checksums, serialize_new_checksums,
-    write_latest_repo_checksum_to_disk, ChecksumStatus,
+    ChecksumStatus, checksums_need_updating, get_model_checksum, get_new_checksums,
+    serialize_new_checksums, write_latest_repo_checksum_to_disk,
 };
 #[cfg(feature = "integrity")]
 use reqwest::blocking;
@@ -10,7 +10,7 @@ use reqwest::blocking;
 use sha1::Sha1;
 #[cfg(feature = "integrity")]
 use sha2::{Digest, Sha256};
-use std::collections::{hash_map, HashMap};
+use std::collections::{HashMap, hash_map};
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -190,6 +190,12 @@ impl DefaultModelBank {
     }
 }
 
+impl Default for DefaultModelBank {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModelBank for DefaultModelBank {
     type Iter<'a> = hash_map::Iter<'a, ModelId, Model>;
     fn model_directory(&self) -> &Path {
@@ -304,7 +310,7 @@ impl ModelRetriever for DefaultModelBank {
     fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf> {
         self.models
             .get(&model_id)
-            .and_then(|model| Some(self.model_directory.join(model.file_name())))
+            .map(|model| self.model_directory.join(model.file_name()))
     }
 }
 
@@ -452,12 +458,19 @@ impl Model {
     }
 }
 
+impl Default for Model {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Encapsulates a series of base models available for download and use with WhisperRealtime
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(
     Copy,
     Clone,
     Debug,
+    Default,
     PartialOrd,
     PartialEq,
     Ord,
@@ -475,6 +488,7 @@ impl Model {
     VariantNames,
 )]
 pub enum DefaultModelType {
+    #[default]
     TinyEn,
     Tiny,
     BaseEn,
@@ -532,8 +546,7 @@ impl DefaultModelType {
     /// Canonicalizes a download url to retrieve the model from huggingface.
     pub fn url(&self) -> String {
         let file_name = self.to_file_name();
-        const URL_PREFIX: &'static str =
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
+        const URL_PREFIX: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
 
         [URL_PREFIX, file_name].concat()
     }
@@ -591,12 +604,6 @@ impl DefaultModelType {
             RibbleWhisperError::ParameterError(format!("Failed to find mapping for: {}", key)),
         )?;
         Ok(model_checksum)
-    }
-}
-
-impl Default for DefaultModelType {
-    fn default() -> Self {
-        DefaultModelType::TinyEn
     }
 }
 

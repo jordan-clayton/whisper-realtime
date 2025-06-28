@@ -1,18 +1,12 @@
-use std::marker::PhantomData;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use parking_lot::Mutex;
-use sdl2::audio::AudioFormatNum;
 
 use crate::utils::constants;
 use crate::utils::errors::RibbleWhisperError;
 
-// This is a workaround for trait aliasing until the feature reaches stable.
-pub trait AudioSampleFormat: Default + Clone + Copy + AudioFormatNum + 'static {}
-impl<T: Default + Clone + Copy + AudioFormatNum + 'static> AudioSampleFormat for T {}
-
-struct InnerAudioRingBuffer<T: AudioSampleFormat> {
+struct InnerAudioRingBuffer<T: Copy + Clone + Default> {
     // Insertion pointer
     head: AtomicUsize,
     // The amount of audio within the buffer, in units of sizeof(T)
@@ -25,30 +19,28 @@ struct InnerAudioRingBuffer<T: AudioSampleFormat> {
     buffer: Mutex<Vec<T>>,
 }
 
-/// A thread-safe mpmc ring-buffer designed for use with a RealtimeTranscriber.
-/// Due to thread-safety requirements it cannot be lock-free, but the overhead is negligible
-/// in comparison with actual transcription.
+/// A thread-safe mpmc ring-buffer designed for use with a [RealtimeTranscriber].
+/// Due to thread-safety requirements it cannot be lock-free, but it should have minimal overhead
+/// in most use-cases.
 #[derive(Clone)]
-pub struct AudioRingBuffer<T: AudioSampleFormat> {
+pub struct AudioRingBuffer<T: Copy + Clone + Default> {
     inner: Arc<InnerAudioRingBuffer<T>>,
 }
 
 /// Builder to set the parameters of an AudioRingBuffer
 #[derive(Clone)]
-pub struct AudioRingBufferBuilder<T: AudioSampleFormat> {
+pub struct AudioRingBufferBuilder {
     /// Size of the buffer in milliseconds
     capacity_ms: Option<usize>,
     /// Sample rate of the audio in the buffer
     sample_rate: Option<usize>,
-    _marker: PhantomData<T>,
 }
 
-impl<T: AudioSampleFormat> AudioRingBufferBuilder<T> {
+impl AudioRingBufferBuilder {
     pub fn new() -> Self {
         Self {
             capacity_ms: None,
             sample_rate: None,
-            _marker: PhantomData,
         }
     }
 
@@ -65,7 +57,9 @@ impl<T: AudioSampleFormat> AudioRingBufferBuilder<T> {
 
     /// Build an AudioRingBuffer with the desired parameters.
     /// This will return Err if the length/sample rate are missing or zero.
-    pub fn build(self) -> Result<AudioRingBuffer<T>, RibbleWhisperError> {
+    pub fn build<T: Copy + Clone + Default>(
+        self,
+    ) -> Result<AudioRingBuffer<T>, RibbleWhisperError> {
         let c_ms =
             self.capacity_ms
                 .filter(|&ms| ms > 0)
@@ -99,7 +93,13 @@ impl<T: AudioSampleFormat> AudioRingBufferBuilder<T> {
     }
 }
 
-impl<T: AudioSampleFormat> AudioRingBuffer<T> {
+impl Default for AudioRingBufferBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Copy + Clone + Default> AudioRingBuffer<T> {
     /// Returns the currently stored audio length measured in units of size_of(T)
     pub fn get_audio_length(&self) -> usize {
         self.inner.audio_len.load(Ordering::Acquire)
@@ -207,7 +207,7 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
         }
         result.resize(n_samples, T::default());
         // If n_samples == 0 (ie. the audio buffer has just been cleared).
-        if result.len() == 0 {
+        if result.is_empty() {
             return;
         }
 
@@ -258,7 +258,7 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
     pub fn clear_n_samples(&self, len_ms: usize) {
         // Guard the state by hogging the mutex until atomic operations are done
         let _buffer = self.inner.buffer.lock();
-        let mut ms = len_ms.clone();
+        let mut ms = len_ms;
         if ms == 0 {
             let this_ms = self.inner.capacity_ms.load(Ordering::Acquire);
             ms = this_ms;
@@ -277,7 +277,7 @@ impl<T: AudioSampleFormat> AudioRingBuffer<T> {
     }
 }
 
-impl<T: AudioSampleFormat> Default for AudioRingBuffer<T> {
+impl<T: Copy + Clone + Default> Default for AudioRingBuffer<T> {
     /// Returns a Whisper-ready AudioRingBuffer, ready for use in a RealtimeTranscriber.
     fn default() -> Self {
         AudioRingBufferBuilder::new()

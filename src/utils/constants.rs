@@ -29,7 +29,7 @@ pub const INPUT_BUFFER_CAPACITY: usize = 10000;
 // This is currently set at 1 hr -> This has not yet been tested for OOM panics.
 pub const REALTIME_AUDIO_TIMEOUT: u128 = std::time::Duration::new(3600, 0).as_millis();
 
-pub const AUDIO_BUFFER_SIZE: u16 = 1024;
+pub const AUDIO_BUFFER_SIZE: usize = 1024;
 
 pub const BLANK_AUDIO: &str = "[BLANK_AUDIO]";
 pub const ELLIPSIS: &str = "...";

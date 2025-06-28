@@ -28,6 +28,8 @@ pub enum RibbleWhisperError {
     /// [whisper_rs::WhisperError]
     #[error("Whisper Error {0}")]
     WhisperError(#[from] whisper_rs::WhisperError),
+    #[error("Device Error {0}")]
+    DeviceError(String),
     /// [rubato::ResampleError]
     #[cfg(feature = "resampler")]
     #[error("ResampleError: {0}")]

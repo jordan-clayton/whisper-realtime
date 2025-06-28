@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+pub mod audio_backend;
 pub mod audio_ring_buffer;
 pub mod loading;
 pub mod microphone;
@@ -20,6 +21,9 @@ impl WhisperAudioSample {
             WhisperAudioSample::I16(audio) => audio.len(),
             WhisperAudioSample::F32(audio) => audio.len(),
         }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

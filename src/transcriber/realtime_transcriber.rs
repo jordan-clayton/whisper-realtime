@@ -1,6 +1,6 @@
 use parking_lot::Mutex;
 use std::collections::VecDeque;
-use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
+use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use strsim::jaro_winkler;
@@ -10,9 +10,9 @@ use crate::transcriber::vad::VAD;
 use crate::transcriber::{
     Transcriber, TranscriptionSnapshot, WhisperControlPhrase, WhisperOutput, WhisperSegment,
 };
+use crate::utils::Sender;
 use crate::utils::constants;
 use crate::utils::errors::RibbleWhisperError;
-use crate::utils::Sender;
 use crate::whisper::configs::WhisperRealtimeConfigs;
 use crate::whisper::model::ModelRetriever;
 
@@ -203,6 +203,16 @@ where
     vad: Arc<Mutex<V>>,
 }
 
+impl<V, M> Default for RealtimeTranscriberBuilder<V, M>
+where
+    V: VAD<f32>,
+    M: ModelRetriever,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<V, M> Transcriber for RealtimeTranscriber<V, M>
 where
     V: VAD<f32>,
@@ -251,7 +261,7 @@ where
         let model_id = self.configs.model_id().unwrap();
 
         let model_path = self.model_retriever.retrieve_model_path(model_id).ok_or(
-            RibbleWhisperError::ParameterError(format!("Failed to find model: {}", model_id)),
+            RibbleWhisperError::ParameterError(format!("Failed to find model: {model_id}")),
         )?;
 
         let ctx = whisper_rs::WhisperContext::new_with_params(
@@ -365,9 +375,8 @@ where
                     .drain(..constants::N_SEGMENTS_DIFF.min(segments.len()))
                     .collect::<Vec<_>>();
 
-                let mut swap_indices: Vec<_> = vec![];
                 // For collecting swaps
-                swap_indices.reserve(constants::N_SEGMENTS_DIFF);
+                let mut swap_indices = Vec::with_capacity(constants::N_SEGMENTS_DIFF);
 
                 // This is Amortized O(1), with an upper bound of constants::N_SEGMENTS_DIFF * constants::N_SEGMENTS_DIFF iterations
                 // In practice this is very unlikely to hit that upper bound.

@@ -1,21 +1,20 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::scope;
 
-use criterion::{criterion_group, criterion_main, Criterion};
-use parking_lot::Mutex;
+use criterion::{Criterion, criterion_group, criterion_main};
 
+use ribble_whisper::audio::WhisperAudioSample;
 use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
 use ribble_whisper::audio::loading::load_normalized_audio_file;
-use ribble_whisper::audio::WhisperAudioSample;
 use ribble_whisper::transcriber::realtime_transcriber::{
     RealtimeTranscriber, RealtimeTranscriberBuilder, RealtimeTranscriberHandle,
 };
-use ribble_whisper::transcriber::vad::{Earshot, Silero, WebRtc, VAD};
+use ribble_whisper::transcriber::vad::{Silero, SileroBuilder, VAD, WebRtcBuilder};
 use ribble_whisper::transcriber::{Transcriber, WhisperOutput};
 use ribble_whisper::utils;
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{constants, Receiver};
+use ribble_whisper::utils::{Receiver, constants};
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::{DefaultModelBank, DefaultModelType, ModelBank};
 
@@ -42,20 +41,54 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
         audio_ring_buffer.push_audio(chunk);
     }
 
+    let silero_build_method = || {
+        SileroBuilder::new()
+            .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
+            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
+            .with_detection_probability_threshold(0.5)
+            .build()
+    };
+
+    let webrtc_build_method = || {
+        WebRtcBuilder::new()
+            .with_sample_rate(ribble_whisper::transcriber::vad::WebRtcSampleRate::R16kHz)
+            .with_frame_length_millis(
+                ribble_whisper::transcriber::vad::WebRtcFrameLengthMillis::MS10,
+            )
+            .with_filter_aggressiveness(
+                ribble_whisper::transcriber::vad::WebRtcFilterAggressiveness::LowBitrate,
+            )
+            .with_detection_probability_threshold(0.5)
+            .build_webrtc()
+    };
+
+    let earshot_build_method = || {
+        WebRtcBuilder::new()
+            .with_sample_rate(ribble_whisper::transcriber::vad::WebRtcSampleRate::R16kHz)
+            .with_frame_length_millis(
+                ribble_whisper::transcriber::vad::WebRtcFrameLengthMillis::MS10,
+            )
+            .with_filter_aggressiveness(
+                ribble_whisper::transcriber::vad::WebRtcFilterAggressiveness::LowBitrate,
+            )
+            .with_detection_probability_threshold(0.5)
+            .build_earshot()
+    };
+
     // Prep each transcriber. Each has its own sender/receiver channel to avoid the need to drain in-between tests.
     // Silero
     let (mut s_transcriber, s_handle, s_channel) = build_transcriber(
         &configs,
         &audio_ring_buffer,
         Arc::clone(&model_bank),
-        Silero::try_new_whisper_realtime_default,
+        silero_build_method,
     );
     eprintln!("SILERO BUILT");
     let (mut w_transcriber, w_handle, w_channel) = build_transcriber(
         &configs,
         &audio_ring_buffer,
         Arc::clone(&model_bank),
-        WebRtc::try_new_whisper_realtime_default,
+        webrtc_build_method,
     );
 
     eprintln!("WEBRTC BUILT");
@@ -63,13 +96,13 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
         &configs,
         &audio_ring_buffer,
         Arc::clone(&model_bank),
-        Earshot::try_new_whisper_realtime_default,
+        earshot_build_method,
     );
     eprintln!("EARSHOT BUILT");
 
-    let s_channel = Arc::new(Mutex::new(s_channel));
-    let w_channel = Arc::new(Mutex::new(w_channel));
-    let e_channel = Arc::new(Mutex::new(e_channel));
+    let s_channel = Arc::new(s_channel);
+    let w_channel = Arc::new(w_channel);
+    let e_channel = Arc::new(e_channel);
 
     c.bench_function("Silero realtime", |b| {
         b.iter(|| {
@@ -111,7 +144,7 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
 pub fn realtime_bencher<V: VAD<f32> + Send + Sync>(
     transcriber: &mut RealtimeTranscriber<V, DefaultModelBank>,
     handle: RealtimeTranscriberHandle,
-    receiver: Arc<Mutex<Receiver<WhisperOutput>>>,
+    receiver: Arc<Receiver<WhisperOutput>>,
     audio_ring_buffer: &AudioRingBuffer<f32>,
     audio_sample: Box<[f32]>,
 ) {
@@ -151,7 +184,7 @@ pub fn realtime_bencher<V: VAD<f32> + Send + Sync>(
             // repeatedly drain the audio buffer to prevent a memory panic, and also set the
             // exit condition
             while d_thread_run_transcription.load(Ordering::Acquire) {
-                match receiver.lock().recv() {
+                match receiver.recv() {
                     Ok(out) => {
                         let message = match out {
                             WhisperOutput::TranscriptionSnapshot(snapshot) => snapshot.to_string(),
@@ -166,17 +199,21 @@ pub fn realtime_bencher<V: VAD<f32> + Send + Sync>(
                 }
             }
             // Drain any excess messages.
-            while let Ok(_) = receiver.lock().try_recv() {}
+            while let Ok(_) = receiver.try_recv() {}
         });
     });
 }
 
-criterion_group!(benches, realtime_vad_benchmark);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().sample_size(10);
+    targets = realtime_vad_benchmark
+}
+
 criterion_main!(benches);
 
 // Some quick-n-dirty functions to automate building the transcriber objects to avoid reallocations
 // during the testing.
-
 fn prep_audio() -> Box<[f32]> {
     let audio = load_normalized_audio_file(
         "tests/audio_files/128896__joshenanigans__sentence-recitation.wav",

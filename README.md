@@ -20,9 +20,11 @@ guaranteed.
 
 ## External Dependencies
 
-- At this time, Ribble-Whisper does not support the use of multiple audio input backends. You will require SDL2 to build
-  this library
 - If you are building with an optional GPU backend (e.g. CUDA), you will require the appropriate SDK
+- CMake for building whisper-rs
+
+## Audio Backends
+By default this crate uses SDL2 to handle audio, but other backends can be used by implementing `AudioBackend`. Since SDL2 and related subsystems are not thread-safe (but devices are), it is up to the user to handle ownership and uphold SDL2 invariants in the application. For an example of how to do this, see: [Ribble](https://github.com/jordan-clayton/ribble).
 
 ## Building
 
@@ -58,8 +60,7 @@ see [examples/realtime_stream](https://github.com/jordan-clayton/whisper-realtim
 
 ```rust
 // Imports are omitted here for brevity; refer to examples/realtime_stream.
-use ribble_whisper::*;
-fn main() {
+/// ... 
     // Handle this how you see fit and pass a model to the configs builder.
     // See: realtime_stream::prepare_model_bank() for an example of how to use the downloading API to retrieve a model from huggingface.
     let (model_bank, model_id) = prepare_model_bank();
@@ -106,12 +107,17 @@ fn main() {
     let run_transcription = Arc::new(AtomicBool::new(true));
 
     // Set up the Audio Backend.
-    let audio_backend = AudioBackend::new().expect("Audio backend should build without issue");
-    // The default implementation assumes there will be additional processing happening concurrently with transcription.
-    // If this is not required, consider the ClosedLoopCapture for simpler audio cpature API.
-    let mic: FanoutMicCapture<f32, UseArc> = audio_backend
-        .build_whisper_fanout_default(audio_sender)
-        .expect("Mic handle expected to build without issue.");
+    let spec = CaptureSpec::default();
+    let sink = ArcChannelSink::new(audio_sender);
+    let (_ctx, backend) =
+        default_backend().expect("Audio backend expected to build without issue.");
+
+    // For all intents and purposes, the backend should be able to handle most if not all devices,
+    // Expect this to always work until it doesn't
+
+    let mic = backend
+        .open_capture(spec, sink)
+        .expect("Audio capture expected to open without issue");
 
     // Ribble-Whisper is designed to be as flexible as possible but real-time transcriptions need to be run using 
     // asynchronous/concurrent programming.
@@ -203,14 +209,23 @@ fn main() {
         .expect("Transcription should return without error.");
 
     println!("Final Transcription: {}", &transcription);
+
+    //...
 }
 ```
 
 ## Features
 
+### Audio Backends
+The default audio backend uses SDL2. If you want to implement AudioBackend yourself, disable default features:
+```toml
+ribble-whisper = {version = "...", default features = false}
+```
+- sdl2-static: Statically link with sdl2 when building Ribble-Whisper (recommended). Implicitly enables the `bundled` flag to build SDL2 from source for linking.
+
 ### Whisper Hardware Acceleration
 
-This library follows
+This crate follows
 whisper-rs [conventions](https://github.com/tazz4843/whisper-rs/tree/master?tab=readme-ov-file#feature-flags).
 All backends are disabled by default and considered opt-in features.
 It is recommended to enable at least one of these if supported by your system to ensure
@@ -225,8 +240,8 @@ that real-time performance is acceptable.
 
 ### Additional Whisper-rs Flags
 
-- log_backend: enable whisper-rs log_backend for hooking into whisper.cpp's log output
-- tracing_backend: enable whisper-rs tracing_backend for hooking into whisper.cpp's log output
+- log\_backend: enable whisper-rs log\_backend for hooking into whisper.cpp's log output
+- tracing\_backend: enable whisper-rs tracing\_backend for hooking into whisper.cpp's log output
 
 ### Symphonia Codecs
 

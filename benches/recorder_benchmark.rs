@@ -3,13 +3,12 @@ use std::sync::mpsc::sync_channel;
 use std::thread::{scope, sleep};
 use std::time::Duration;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 #[cfg(feature = "crossbeam")]
 use crossbeam::channel;
-use sdl2::audio::AudioCallback;
 use std::hint::black_box;
 
-use ribble_whisper::audio::recorder;
+use ribble_whisper::audio::recorder::{ArcChannelSink, SampleSink, VecChannelSink};
 use ribble_whisper::utils::constants;
 
 // Benchmark summary:
@@ -67,7 +66,7 @@ fn run_with_recorder_st(n_samples: usize) {
     let (a_sender, a_receiver) = channel::bounded(n_samples + 1);
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
-    let mut recorder = recorder::FanoutRecorder::new_vec(a_sender);
+    let mut recorder = VecChannelSink::new(a_sender);
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -85,7 +84,7 @@ fn run_with_recorder_st(n_samples: usize) {
 
     // Fill the audio channel with n_samples
     for sample in audio.chunks_mut(sample_size) {
-        recorder.callback(sample)
+        recorder.push(sample)
     }
 
     // Drain the audio sending channel and send out to multiple worker channels
@@ -110,7 +109,7 @@ fn run_with_slice_st(n_samples: usize) {
     let (a_sender, a_receiver) = channel::bounded(n_samples + 1);
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
-    let mut recorder = ribble_whisper::audio::recorder::FanoutRecorder::new_arc(a_sender);
+    let mut recorder = ArcChannelSink::new(a_sender);
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -128,7 +127,7 @@ fn run_with_slice_st(n_samples: usize) {
 
     // Fill the audio channel with n_samples
     for sample in audio.chunks_mut(sample_size) {
-        recorder.callback(sample)
+        recorder.push(sample)
     }
 
     // Drain the audio sending channel and send out to multiple worker channels
@@ -154,7 +153,7 @@ fn run_with_recorder_par(n_samples: usize, work_millis: u64) {
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
 
-    let mut recorder = ribble_whisper::audio::recorder::FanoutRecorder::new_vec(a_sender);
+    let mut recorder = VecChannelSink::new(a_sender);
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -174,7 +173,7 @@ fn run_with_recorder_par(n_samples: usize, work_millis: u64) {
         let _send = s.spawn(move || {
             // Fill the audio channel with n_samples
             for sample in audio.chunks_mut(sample_size) {
-                recorder.callback(sample)
+                recorder.push(sample)
             }
         });
         let _read = s.spawn(move || {
@@ -256,7 +255,7 @@ fn run_with_slice_par(n_samples: usize, work_millis: u64) {
     #[cfg(not(feature = "crossbeam"))]
     let (a_sender, a_receiver) = sync_channel(n_samples + 1);
 
-    let mut recorder = ribble_whisper::audio::recorder::FanoutRecorder::new_arc(a_sender);
+    let mut recorder = ArcChannelSink::new(a_sender);
 
     // Prepare channels for multiple worker threads to operate on the data simultaneously
     #[cfg(feature = "crossbeam")]
@@ -277,7 +276,7 @@ fn run_with_slice_par(n_samples: usize, work_millis: u64) {
             // Fill the audio channel with n_samples
             // When the loop finishes, the recorder should go out of scope and be dropped
             for sample in audio.chunks_mut(sample_size) {
-                recorder.callback(sample)
+                recorder.push(sample)
             }
         });
         let _read = s.spawn(move || {

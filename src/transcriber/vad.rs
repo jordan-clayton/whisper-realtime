@@ -86,10 +86,15 @@ impl SileroBuilder {
             })
             .map_err(|e| {
                 RibbleWhisperError::ParameterError(format!(
-                    "Failed to build Silero VAD. Error: {}",
-                    e
+                    "Failed to build Silero VAD. Error: {e}",
                 ))
             })
+    }
+}
+
+impl Default for SileroBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -147,7 +152,7 @@ impl<T: voice_activity_detector::Sample> VAD<T> for Silero {
     /// A mismatch is likely to produce incorrect results.
     fn voice_detected(&mut self, samples: &[T]) -> bool {
         // If a zero-length slice of samples are sent, there is obviously no voice
-        if samples.len() == 0 {
+        if samples.is_empty() {
             return false;
         }
         // Create a LabelIterator to stream the prediction over the sample chunks at the given detection threshold.
@@ -180,7 +185,7 @@ impl<T: voice_activity_detector::Sample> VAD<T> for Silero {
         voiced_proportion > 0.5
     }
     fn extract_voiced_frames(&mut self, samples: &[T]) -> Box<[T]> {
-        if samples.len() == 0 {
+        if samples.is_empty() {
             return vec![].into_boxed_slice();
         }
 
@@ -190,8 +195,7 @@ impl<T: voice_activity_detector::Sample> VAD<T> for Silero {
             .label(&mut self.vad, self.detection_probability_threshold, 3usize)
             .filter(|frame| frame.is_speech())
             // Extract the chunks which contain speech
-            .map(|frame| frame.iter().copied().collect::<Vec<T>>())
-            .flatten()
+            .flat_map(|frame| frame.iter().copied().collect::<Vec<T>>())
             .collect()
     }
 }
@@ -206,7 +210,7 @@ pub enum WebRtcSampleRate {
 }
 
 impl WebRtcSampleRate {
-    fn to_webrtc_sample_rate(&self) -> webrtc_vad::SampleRate {
+    fn to_webrtc_sample_rate(self) -> webrtc_vad::SampleRate {
         match self {
             Self::R8kHz => webrtc_vad::SampleRate::Rate8kHz,
             Self::R16kHz => webrtc_vad::SampleRate::Rate16kHz,
@@ -214,7 +218,7 @@ impl WebRtcSampleRate {
             Self::R48kHz => webrtc_vad::SampleRate::Rate48kHz,
         }
     }
-    fn to_sample_rate_hz(&self) -> usize {
+    fn to_sample_rate_hz(self) -> usize {
         match self {
             Self::R8kHz => 8000usize,
             Self::R16kHz => 16000usize,
@@ -240,7 +244,7 @@ pub enum WebRtcFilterAggressiveness {
 }
 
 impl WebRtcFilterAggressiveness {
-    fn to_webrtc_vad_mode(&self) -> webrtc_vad::VadMode {
+    fn to_webrtc_vad_mode(self) -> webrtc_vad::VadMode {
         match self {
             Self::Quality => webrtc_vad::VadMode::Quality,
             Self::LowBitrate => webrtc_vad::VadMode::LowBitrate,
@@ -248,7 +252,7 @@ impl WebRtcFilterAggressiveness {
             Self::VeryAggressive => webrtc_vad::VadMode::VeryAggressive,
         }
     }
-    fn to_earshot_vad_profile(&self) -> earshot::VoiceActivityProfile {
+    fn to_earshot_vad_profile(self) -> earshot::VoiceActivityProfile {
         match self {
             Self::Quality => earshot::VoiceActivityProfile::QUALITY,
             Self::LowBitrate => earshot::VoiceActivityProfile::LBR,
@@ -274,7 +278,7 @@ pub enum WebRtcFrameLengthMillis {
 }
 
 impl WebRtcFrameLengthMillis {
-    fn to_ms(&self) -> usize {
+    fn to_ms(self) -> usize {
         match self {
             Self::MS10 => 10usize,
             Self::MS20 => 20usize,
@@ -374,6 +378,12 @@ impl WebRtcBuilder {
     }
 }
 
+impl Default for WebRtcBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A thread-safe WebRtc VAD backend for use in transcription.
 /// Adapts [webrtc_vad::Vad] to predict voice activity using WebRtc
 pub struct WebRtc {
@@ -437,7 +447,7 @@ impl<T: PcmS16Convertible + Copy> VAD<T> for WebRtc {
     /// Samples of insufficient length are zero-padded/truncated to avoid internal panicking.
     fn voice_detected(&mut self, samples: &[T]) -> bool {
         // If a zero-length slice of samples are sent, there is obviously no voice
-        if samples.len() == 0 {
+        if samples.is_empty() {
             return false;
         }
         let (int_audio, frame_size) = prepare_webrtc_frames(
@@ -465,7 +475,7 @@ impl<T: PcmS16Convertible + Copy> VAD<T> for WebRtc {
         voiced_proportion > self.realtime_detection_probability_threshold
     }
     fn extract_voiced_frames(&mut self, samples: &[T]) -> Box<[T]> {
-        if samples.len() == 0 {
+        if samples.is_empty() {
             return vec![].into_boxed_slice();
         }
         let (int_audio, frame_size) = prepare_webrtc_frames(
@@ -548,7 +558,7 @@ impl<T: PcmS16Convertible + Copy> VAD<T> for Earshot {
     /// Samples of insufficient length are zero-padded/truncated to avoid internal panicking.
     fn voice_detected(&mut self, samples: &[T]) -> bool {
         // If a zero-length slice of samples are sent, there is obviously no voice
-        if samples.len() == 0 {
+        if samples.is_empty() {
             return false;
         }
 
@@ -572,7 +582,7 @@ impl<T: PcmS16Convertible + Copy> VAD<T> for Earshot {
     }
 
     fn extract_voiced_frames(&mut self, samples: &[T]) -> Box<[T]> {
-        if samples.len() == 0 {
+        if samples.is_empty() {
             return vec![].into_boxed_slice();
         }
 

@@ -1,7 +1,7 @@
 use parking_lot::Mutex;
-use std::ffi::{c_int, c_void, CStr};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::ffi::{CStr, c_int, c_void};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use whisper_rs::{WhisperNewSegmentCallback, WhisperProgressCallback};
 
@@ -128,10 +128,10 @@ where
     /// # Returns:
     /// * Ok(`OfflineTranscriber<V>`) on successful build
     /// * Err(RibbleWhisperError) if one of the following are true:
-    /// ** missing whisper configurations,
-    /// ** missing channel configurations,
-    /// ** missing audio
-    /// ** Model ID is not set in configs.
+    ///   ** missing whisper configurations,
+    ///   ** missing channel configurations,
+    ///   ** missing audio
+    ///   ** Model ID is not set in configs.
     pub fn build(self) -> Result<OfflineTranscriber<V, M>, RibbleWhisperError> {
         let configs = self.configs.ok_or(RibbleWhisperError::ParameterError(
             "Configs missing in OfflineTranscriberBuilder..".to_string(),
@@ -141,7 +141,7 @@ where
             "Model ID missing from configs in OfflineTranscriberBuilder".to_string(),
         ));
 
-        let audio = self.audio.filter(|audio| audio.len() > 0).ok_or(
+        let audio = self.audio.filter(|audio| !audio.is_empty()).ok_or(
             RibbleWhisperError::ParameterError(
                 "Audio missing in OfflineTranscriberBuilder.".to_string(),
             ),
@@ -164,6 +164,16 @@ where
             voice_activity_detector: vad,
             model_retriever,
         })
+    }
+}
+
+impl<V, M> Default for OfflineTranscriberBuilder<V, M>
+where
+    V: VAD<f32>,
+    M: ModelRetriever,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -202,7 +212,7 @@ where
         let model_id = self.configs.model_id().unwrap();
 
         let model_path = self.model_retriever.retrieve_model_path(model_id).ok_or(
-            RibbleWhisperError::ParameterError(format!("Failed to find model: {}", model_id)),
+            RibbleWhisperError::ParameterError(format!("Failed to find model: {model_id}")),
         )?;
 
         // Set up a whisper context
@@ -218,10 +228,10 @@ where
             WhisperAudioSample::I16(audio) => {
                 let len = audio.len();
                 let mut float_samples = vec![0.0; len];
-                whisper_rs::convert_integer_to_float_audio(&audio, &mut float_samples)?;
+                whisper_rs::convert_integer_to_float_audio(audio, &mut float_samples)?;
                 Arc::from(float_samples)
             }
-            WhisperAudioSample::F32(audio) => Arc::clone(&audio),
+            WhisperAudioSample::F32(audio) => Arc::clone(audio),
         };
 
         // Extract speech frames if there's a VAD
@@ -248,8 +258,7 @@ where
         // Otherwise, expect the transcription to have been successful; subsequent errors
         // will bubble up.
         let num_segments = whisper_state.full_n_segments()?;
-        let mut text: Vec<String> = vec![];
-        text.reserve(num_segments as usize);
+        let mut text = Vec::with_capacity(num_segments as usize);
 
         // Transcribe segments and send through a channel to a UI.
         for i in 0..num_segments {
@@ -291,7 +300,7 @@ impl<V: VAD<f32>, M: ModelRetriever> Transcriber for OfflineTranscriber<V, M> {
         // Since the Arc is peeked in the C callback, a_ptr needs to be consumed one last time
         // to prevent memory leaks.
         unsafe {
-            let _ = Arc::from_raw(a_ptr);
+            let _ = Arc::from_raw(a_ptr as *const AtomicBool);
         }
         res
     }
@@ -373,7 +382,7 @@ where
         // Since the Arc is peeked in the C callback, a_ptr needs to be consumed one last time
         // to prevent memory leaks.
         unsafe {
-            let _ = Arc::from_raw(a_ptr);
+            let _ = Arc::from_raw(a_ptr as *const AtomicBool);
         }
 
         res
@@ -443,8 +452,7 @@ unsafe extern "C" fn new_segment_callback<S: OfflineWhisperNewSegmentCallback>(
 ) {
     let callback = unsafe { &mut *(user_data as *mut S) };
     let n_segments = unsafe { whisper_rs_sys::whisper_full_n_segments_from_state(state) };
-    let mut segments = vec![];
-    segments.reserve(n_segments as usize);
+    let mut segments = Vec::with_capacity(n_segments as usize);
     for i in 0..n_segments {
         let text = unsafe { whisper_rs_sys::whisper_full_get_segment_text_from_state(state, i) };
         let segment = unsafe { CStr::from_ptr(text) };

@@ -8,9 +8,9 @@ use symphonia::core::formats::FormatReader;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::{Hint, ProbeResult};
 
-#[cfg(feature = "resampler")]
-use crate::audio::resampler::{needs_normalizing, normalize_audio, ResampleableAudio};
 use crate::audio::WhisperAudioSample;
+#[cfg(feature = "resampler")]
+use crate::audio::resampler::{ResampleableAudio, needs_normalizing, normalize_audio};
 use crate::utils::callback::{Callback, Nop, RibbleWhisperCallback};
 use crate::utils::errors::RibbleWhisperError;
 
@@ -142,7 +142,7 @@ fn decode_loop(
         //     break;
         // }
         // Otherwise, an unrecoverable error has occured; break the decoding loop
-        if let Err(_) = next_packet.as_ref() {
+        if next_packet.as_ref().is_err() {
             break;
         }
         // Otherwise, unpack the packet and let the error bubble up
@@ -168,8 +168,7 @@ fn decode_loop(
                 let channels = audio_buffer.spec().channels.iter().count();
                 if channels > 2 {
                     return Err(RibbleWhisperError::ParameterError(format!(
-                        "Only Stereo/Mono audio supported. Number of channels: {}",
-                        channels
+                        "Only Stereo/Mono audio supported. Number of channels: {channels}"
                     )));
                 }
 

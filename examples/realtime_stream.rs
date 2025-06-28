@@ -1,27 +1,32 @@
-use std::io::{stdout, Write};
+use std::io::{Write, stdout};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::scope;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use parking_lot::Mutex;
 
+use ribble_whisper::audio::audio_backend::AudioBackend;
+use ribble_whisper::audio::audio_backend::CaptureSpec;
+#[cfg(feature = "sdl2")]
+use ribble_whisper::audio::audio_backend::default_backend;
 use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
-use ribble_whisper::audio::microphone::{AudioBackend, FanoutMicCapture, MicCapture};
-use ribble_whisper::audio::recorder::UseArc;
+use ribble_whisper::audio::microphone::MicCapture;
+use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
-use ribble_whisper::downloader::downloaders::sync_download_request;
 #[cfg(feature = "downloader")]
 use ribble_whisper::downloader::SyncDownload;
+#[cfg(feature = "downloader")]
+use ribble_whisper::downloader::downloaders::sync_download_request;
 use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::Silero;
 use ribble_whisper::transcriber::{
-    redirect_whisper_logging_to_hooks, Transcriber, TranscriptionSnapshot,
+    CallbackTranscriber, WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
 };
 use ribble_whisper::transcriber::{
-    CallbackTranscriber, WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
+    Transcriber, TranscriptionSnapshot, redirect_whisper_logging_to_hooks,
 };
 use ribble_whisper::utils;
 use ribble_whisper::utils::callback::{Nop, RibbleWhisperCallback, StaticRibbleWhisperCallback};
@@ -94,13 +99,17 @@ fn main() {
     .expect("failed to set SIGINT handler");
 
     // Set up the Audio Backend.
-    let audio_backend = AudioBackend::new().expect("Audio backend should build without issue");
+    let spec = CaptureSpec::default();
+    let sink = ArcChannelSink::new(audio_sender);
+    let (_ctx, backend) =
+        default_backend().expect("Audio backend expected to build without issue.");
 
     // For all intents and purposes, the backend should be able to handle most if not all devices,
     // Expect this to always work until it doesn't
-    let mic: FanoutMicCapture<UseArc<f32>> = audio_backend
-        .build_whisper_fanout_default(audio_sender)
-        .expect("Mic handle expected to build without issue.");
+
+    let mic = backend
+        .open_capture(spec, sink)
+        .expect("Audio capture expected to open without issue");
 
     let transcriber_thread = scope(|s| {
         let a_thread_run_transcription = Arc::clone(&run_transcription);
@@ -121,6 +130,7 @@ fn main() {
                         if !transcriber_handle.ready() {
                             continue;
                         }
+
                         // Otherwise, fan out to the ring-buffer (for transcrption) and the optional
                         // offline buffer
                         audio_ring_buffer.push_audio(&audio_data);
@@ -134,8 +144,9 @@ fn main() {
                 }
             }
 
+            println!("Audio fanout thread completed.");
             // Drop the guard to release the mutex.
-            drop(offline_buffer)
+            drop(offline_buffer);
         });
 
         // Move the transcriber off to a thread to handle processing audio
@@ -170,10 +181,10 @@ fn main() {
                 for segment in latest_snapshot.string_segments() {
                     print!("{}", segment);
                 }
-
                 stdout().flush().expect("Stdout should clear normally.");
             }
 
+            println!("Print thread completed.");
             // Take the last received snapshot and join it into a string.
             // This is just to demonstrate that the sending mechanism terminates to the same
             // state as the final transcription string.

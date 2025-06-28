@@ -24,7 +24,7 @@ impl<T, CB: FnMut(T)> RibbleWhisperCallback<T, CB> {
 impl<T, CB: FnMut(T)> Callback for RibbleWhisperCallback<T, CB> {
     type Argument = T;
     fn call(&mut self, arg: T) {
-        (&mut self.callback)(arg);
+        (self.callback)(arg);
     }
 }
 
@@ -50,7 +50,7 @@ impl<T, CB: FnMut(T) + 'static> StaticRibbleWhisperCallback<T, CB> {
 impl<T, CB: FnMut(T) + 'static> Callback for StaticRibbleWhisperCallback<T, CB> {
     type Argument = T;
     fn call(&mut self, arg: T) {
-        (&mut self.callback)(arg);
+        (self.callback)(arg);
     }
 }
 
@@ -69,6 +69,12 @@ impl<T> Nop<T> {
         Self {
             _marker: PhantomData,
         }
+    }
+}
+
+impl<T> Default for Nop<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 impl<T> Callback for Nop<T> {
