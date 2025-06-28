@@ -60,7 +60,7 @@ see [examples/realtime_stream](https://github.com/jordan-clayton/whisper-realtim
 
 ```rust
 // Imports are omitted here for brevity; refer to examples/realtime_stream.
-/// ... 
+// ... 
     // Handle this how you see fit and pass a model to the configs builder.
     // See: realtime_stream::prepare_model_bank() for an example of how to use the downloading API to retrieve a model from huggingface.
     let (model_bank, model_id) = prepare_model_bank();
@@ -211,7 +211,6 @@ see [examples/realtime_stream](https://github.com/jordan-clayton/whisper-realtim
     println!("Final Transcription: {}", &transcription);
 
     //...
-}
 ```
 
 ## Features

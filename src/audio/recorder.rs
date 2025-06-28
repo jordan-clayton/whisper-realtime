@@ -34,7 +34,7 @@ impl<S: SampleSink> AudioCallback for Recorder<S> {
 }
 
 /// Pushes audio out by writing directly into a ring-buffer that can be used by
-/// [RealtimeTranscriber]
+/// [crate::transcriber::realtime_transcriber::RealtimeTranscriber]
 pub struct RingBufSink<T: RecorderSample>(AudioRingBuffer<T>);
 impl<T: RecorderSample> RingBufSink<T> {
     pub fn new(buffer: AudioRingBuffer<T>) -> Self {
@@ -42,7 +42,7 @@ impl<T: RecorderSample> RingBufSink<T> {
     }
 }
 /// Pushes audio out using a message queue to fan out data as `Arc<[T]>`
-/// Significantly faster for audio fanout than Vec<T>; prefer when possible.
+/// Significantly faster for audio fanout than `Vec<T>`; prefer when possible.
 pub struct ArcChannelSink<T>(Sender<Arc<[T]>>);
 impl<T: RecorderSample> ArcChannelSink<T> {
     pub fn new(sender: Sender<Arc<[T]>>) -> Self {

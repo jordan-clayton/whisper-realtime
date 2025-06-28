@@ -19,7 +19,7 @@ struct InnerAudioRingBuffer<T: Copy + Clone + Default> {
     buffer: Mutex<Vec<T>>,
 }
 
-/// A thread-safe mpmc ring-buffer designed for use with a [RealtimeTranscriber].
+/// A thread-safe mpmc ring-buffer designed for use with a [crate::transcriber::realtime_transcriber::RealtimeTranscriber].
 /// Due to thread-safety requirements it cannot be lock-free, but it should have minimal overhead
 /// in most use-cases.
 #[derive(Clone)]
@@ -278,7 +278,7 @@ impl<T: Copy + Clone + Default> AudioRingBuffer<T> {
 }
 
 impl<T: Copy + Clone + Default> Default for AudioRingBuffer<T> {
-    /// Returns a Whisper-ready AudioRingBuffer, ready for use in a RealtimeTranscriber.
+    /// Returns a Whisper-ready AudioRingBuffer, ready for use in a [crate::transcriber::realtime_transcriber::RealtimeTranscriber].
     fn default() -> Self {
         AudioRingBufferBuilder::new()
             .with_capacity_ms(constants::INPUT_BUFFER_CAPACITY)

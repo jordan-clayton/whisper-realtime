@@ -113,9 +113,9 @@ pub trait AudioBackend<S: SampleSink>: Sized {
 }
 
 #[cfg(feature = "sdl2")]
-/// The default audio backend. Can be integrated with Sdl2 by using [SdlBackend::from_subsystem].
+/// The default audio backend. Can be integrated with Sdl2 by using [Sdl2Backend::from_subsystem].
 /// ***Note: SDL2 is not thread-safe, so SdlBackends cannot be safely shared across threads.***
-/// However, audio devices created using SdlBackend::open_capture() are guaranteed to be
+/// However, audio devices created using [Sdl2Backend::open_capture()] are guaranteed to be
 /// thread-safe and can be shared freely. It is left up to the implementation to handle managing
 /// SDL2 lifetimes and quirks.
 pub struct Sdl2Backend {
@@ -161,9 +161,9 @@ impl<S: SampleSink> AudioBackend<S> for Sdl2Backend {
 }
 
 #[cfg(feature = "sdl2")]
-/// Convenience function that handles initializing SDL and an [SdlBackend] for obtaining a capture
+/// Convenience function that handles initializing SDL and an [Sdl2Backend] for obtaining a capture
 /// device. If managing SDL2 independenently, construct using `Sdlbackend::from_subsystem()`
-/// See: [SdlBackend] for information about thread-safety.
+/// See: [Sdl2Backend] for information about thread-safety.
 pub fn default_backend() -> Result<(sdl2::Sdl, Sdl2Backend), RibbleWhisperError> {
     let ctx = sdl2::init()
         .map_err(|e| RibbleWhisperError::DeviceError(format!("Failed to open SDL context: {e}")))?;
