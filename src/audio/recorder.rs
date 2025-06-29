@@ -72,7 +72,7 @@ impl<T: RecorderSample> SampleSink for ArcChannelSink<T> {
         // The only way for this to fail is if there's no receiver to receive the audio.
         // This means that transcription has stopped for whatever reason, so this device is due to
         // be dropped.
-        let _ = self.0.send(Arc::from(data));
+        let _ = self.0.try_send(Arc::from(data));
     }
 }
 
@@ -82,6 +82,6 @@ impl<T: RecorderSample> SampleSink for VecChannelSink<T> {
         // The only way for this to fail is if there's no receiver to receive the audio.
         // This means that transcription has stopped for whatever reason, so this device is due to
         // be dropped.
-        let _ = self.0.send(data.to_vec());
+        let _ = self.0.try_send(data.to_vec());
     }
 }
