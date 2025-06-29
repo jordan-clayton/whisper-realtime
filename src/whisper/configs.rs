@@ -470,7 +470,7 @@ pub enum Language {
 /// A composite configurations type holding all relevant configurations for running realtime
 /// transcription.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct WhisperRealtimeConfigs {
     whisper: WhisperConfigsV2,
     realtime: RealtimeConfigs,
