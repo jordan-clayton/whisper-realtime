@@ -1,6 +1,7 @@
 use parking_lot::Mutex;
 use std::collections::VecDeque;
-use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
+use std::ops::Deref;
+use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use strsim::jaro_winkler;
@@ -10,9 +11,9 @@ use crate::transcriber::vad::VAD;
 use crate::transcriber::{
     Transcriber, TranscriptionSnapshot, WhisperControlPhrase, WhisperOutput, WhisperSegment,
 };
-use crate::utils::Sender;
 use crate::utils::constants;
 use crate::utils::errors::RibbleWhisperError;
+use crate::utils::Sender;
 use crate::whisper::configs::WhisperRealtimeConfigs;
 use crate::whisper::model::ModelRetriever;
 
@@ -249,7 +250,7 @@ where
         let mut total_time = 0u128;
 
         // For collecting the transcribed segments to return a full transcription at the end
-        let mut output_string = String::default();
+        let mut output_string = Arc::new(String::default());
         let mut working_set: VecDeque<WhisperSegment> =
             VecDeque::with_capacity(constants::WORKING_SET_SIZE);
 
@@ -309,7 +310,9 @@ where
             if !voice_detected {
                 // Drain the dequeue and push to the confirmed output_string
                 let next_output = working_set.drain(..).map(|output| output.text);
-                output_string.extend(next_output);
+                let mut new_out = output_string.deref().clone();
+                new_out.extend(next_output);
+                output_string = Arc::new(new_out);
 
                 // Clear the audio buffer to prevent data incoherence messing up the transcription.
                 self.audio_feed.clear();
@@ -349,7 +352,7 @@ where
                 .collect::<Result<Vec<WhisperSegment>, whisper_rs::WhisperError>>()?;
 
             // If the working set is empty, push the segments into the working set.
-            // ie. This should only happen on first run.
+            // i.e. This should only happen on first run.
             if working_set.is_empty() {
                 working_set.extend(segments.drain(..));
             }
@@ -397,7 +400,7 @@ where
                         let new_lower = new_segment.text.to_lowercase();
                         let similar = jaro_winkler(&old_lower, &new_lower);
                         // If it's within the same alignment, it's likely for the segments to be
-                        // a match (ie. the audio buffer has recently been cleared, and this is a new window)
+                        // a match (i.e. the audio buffer has recently been cleared, and this is a new window)
                         // Compare based on similarity to confirm.
 
                         // If the timestamp is close enough such that it's lower than the epsilon: (10 ms)
@@ -476,18 +479,22 @@ where
                             .saturating_sub(constants::WORKING_SET_SIZE),
                     )
                     .map(|segment| segment.text);
+                let mut new_out = output_string.deref().clone();
+                new_out.extend(next_text);
                 // Push to the output string.
-                output_string.extend(next_text);
+                output_string = Arc::new(new_out);
             }
 
             // Send the current transcription as it exists, so that the UI can update
             if !output_string.is_empty() || !working_set.is_empty() {
                 let snapshot = Arc::new(TranscriptionSnapshot::new(
-                    output_string.clone(),
-                    working_set
-                        .iter()
-                        .map(|segment| segment.text.clone())
-                        .collect(),
+                    Arc::clone(&output_string),
+                    Arc::from(
+                        working_set
+                            .iter()
+                            .map(|segment| segment.text.clone())
+                            .collect::<Vec<_>>(),
+                    ),
                 ));
                 self.output_sender
                     .send(WhisperOutput::TranscriptionSnapshot(snapshot))
@@ -522,17 +529,18 @@ where
 
         // Drain the last of the working set.
         let next_text = working_set.drain(..).map(|segment| segment.text);
-        output_string.extend(next_text);
+        let mut final_out = output_string.deref().clone();
+        final_out.extend(next_text);
 
         // Set internal state to non-ready in case the transcriber is going to be reused
         self.ready.store(false, Ordering::Release);
         // Strip remaining whitespace and return
-        Ok(output_string.trim().to_string())
+        Ok(final_out.trim().to_string())
     }
 }
 
 /// A simple handle that allows for checking the ready state of a RealtimeTranscriber from another
-/// location (eg. a different thread).
+/// location (e.g. a different thread).
 #[derive(Clone)]
 pub struct RealtimeTranscriberHandle {
     ready: Arc<AtomicBool>,

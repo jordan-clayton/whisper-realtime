@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use std::ops::Deref;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use strum::{Display, EnumString, IntoStaticStr};
 
@@ -86,11 +87,11 @@ pub struct WhisperSegment {
 /// Encapsulates the state of whisper transcription (confirmed + working segments) at a given point in time
 #[derive(Clone, Default)]
 pub struct TranscriptionSnapshot {
-    confirmed: String,
-    string_segments: Box<[String]>,
+    confirmed: Arc<String>,
+    string_segments: Arc<[String]>,
 }
 impl TranscriptionSnapshot {
-    pub fn new(confirmed: String, string_segments: Box<[String]>) -> Self {
+    pub fn new(confirmed: Arc<String>, string_segments: Arc<[String]>) -> Self {
         Self {
             confirmed,
             string_segments,
@@ -104,19 +105,19 @@ impl TranscriptionSnapshot {
         &self.string_segments
     }
 
-    pub fn into_parts(self) -> (String, Box<[String]>) {
+    pub fn into_parts(self) -> (Arc<String>, Arc<[String]>) {
         (self.confirmed, self.string_segments)
     }
     pub fn into_string(self) -> String {
-        let mut confirmed = self.confirmed;
-        confirmed.extend(self.string_segments);
+        let mut confirmed = self.confirmed.deref().clone();
+        confirmed.extend(self.string_segments.iter().cloned());
         confirmed
     }
 }
 
 impl std::fmt::Display for TranscriptionSnapshot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut confirmed = self.confirmed.clone();
+        let mut confirmed = self.confirmed.deref().clone();
         confirmed.extend(self.string_segments.iter().cloned());
         write!(f, "{confirmed}")
     }

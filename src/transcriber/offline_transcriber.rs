@@ -1,7 +1,7 @@
 use parking_lot::Mutex;
-use std::ffi::{CStr, c_int, c_void};
-use std::sync::Arc;
+use std::ffi::{c_int, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use whisper_rs::{WhisperNewSegmentCallback, WhisperProgressCallback};
 
@@ -444,6 +444,7 @@ unsafe extern "C" fn progress_callback<PC: OfflineWhisperProgressCallback>(
 // Bear in mind, this gets called whenever whisper finishes decoding, so do heavy computation
 // outside of this callback whenever possible.
 // At this time, there are no plans to include timestamps/associated metadata.
+// TODO: THIS NEEDS AN EARLY ESCAPE MECHANISM -> REFACTOR THE OFFLINEWHISPERNEWSEGMENTCALLBACK.
 unsafe extern "C" fn new_segment_callback<S: OfflineWhisperNewSegmentCallback>(
     _: *mut whisper_rs_sys::whisper_context,
     state: *mut whisper_rs_sys::whisper_state,
@@ -459,7 +460,7 @@ unsafe extern "C" fn new_segment_callback<S: OfflineWhisperNewSegmentCallback>(
         segments.push(segment.to_string_lossy().to_string())
     }
     callback.call(TranscriptionSnapshot {
-        confirmed: String::default(),
-        string_segments: segments.into_boxed_slice(),
+        confirmed: Arc::new(String::default()),
+        string_segments: Arc::from(segments),
     })
 }
