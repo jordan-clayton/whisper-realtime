@@ -1,10 +1,10 @@
 use std::ops::Deref;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use strum::{Display, EnumString, IntoStaticStr};
 
-use crate::utils::callback::Callback;
+use crate::utils::callback::{Callback, ShortCircuitCallback};
 use crate::utils::errors::RibbleWhisperError;
 
 pub mod offline_transcriber;
@@ -17,10 +17,10 @@ impl<T: Callback<Argument = i32> + Send + Sync + 'static> OfflineWhisperProgress
 
 // Trait alias, used until the feature reaches stable
 pub trait OfflineWhisperNewSegmentCallback:
-    Callback<Argument = TranscriptionSnapshot> + Send + Sync + 'static
+    ShortCircuitCallback<Argument = TranscriptionSnapshot> + Send + Sync + 'static
 {
 }
-impl<T: Callback<Argument = TranscriptionSnapshot> + Send + Sync + 'static>
+impl<T: ShortCircuitCallback<Argument = TranscriptionSnapshot> + Send + Sync + 'static>
     OfflineWhisperNewSegmentCallback for T
 {
 }
@@ -69,7 +69,11 @@ where
     pub progress: Option<P>,
     /// Optional new segment callback.
     /// NOTE: this operates at a snapshot level and produces a full representation of the
-    /// transcription whenever a new segment is decoded.
+    /// transcription whenever the new_segment callback fires. This is very expensive and should
+    /// not be called frequently:
+    /// * Implement [crate::utils::callback::ShortCircuitCallback] or use
+    /// [crate::utils::callback::ShortCircuitRibbleWhisperCallback] to provide a mechanism for controlling how often the
+    /// snapshotting happens.
     pub new_segment: Option<S>,
 }
 
@@ -124,8 +128,7 @@ impl std::fmt::Display for TranscriptionSnapshot {
 }
 
 /// Encapsulates possible types of output sent through a Transcriber channel
-/// NOTE: Outputs with accompanying timestamps are not yet implemented
-/// This may not be possible due to real-time implementation details.
+/// NOTE: Outputs with accompanying timestamps are not yet implemented.
 #[derive(Clone)]
 pub enum WhisperOutput {
     TranscriptionSnapshot(Arc<TranscriptionSnapshot>),
@@ -145,8 +148,12 @@ impl WhisperOutput {
 
 /// A set of control phrases to pass information from the transcriber to a UI
 // These would benefit from some eventual localization
-#[derive(Clone, EnumString, IntoStaticStr, Display)]
+#[derive(Default, Clone, EnumString, IntoStaticStr, Display)]
 pub enum WhisperControlPhrase {
+    /// The default "ready" state
+    #[default]
+    #[strum(serialize = "[IDLE]")]
+    Idle,
     /// Preparing whisper for transcription
     #[strum(serialize = "[GETTING_READY]")]
     GettingReady,

@@ -7,20 +7,22 @@ mod transcriber_tests {
 
     use crate::common::prep_model_bank;
     use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
+    #[cfg(feature = "resampler")]
     use ribble_whisper::audio::loading::load_normalized_audio_file;
     use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
     use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
     use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
     use ribble_whisper::transcriber::vad::{Silero, VAD};
     use ribble_whisper::transcriber::{
-        redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
-        WhisperOutput,
+        CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks, WhisperOutput,
+        redirect_whisper_logging_to_hooks,
     };
     use ribble_whisper::utils;
-    use ribble_whisper::utils::callback::{Nop, StaticRibbleWhisperCallback};
+    use ribble_whisper::utils::callback::{Nop, ShortCircuitRibbleWhisperCallback};
     use ribble_whisper::utils::constants;
     use ribble_whisper::whisper::configs::{WhisperConfigsV2, WhisperRealtimeConfigs};
     use ribble_whisper::whisper::model::{DefaultModelBank, DefaultModelType};
+    use std::time::Instant;
 
     // Prepare an audio sample with a known output to try and make conditions as replicable as
     // possible
@@ -190,7 +192,30 @@ mod transcriber_tests {
                 .expect("Receiver should not be deallocated.");
         };
 
-        let segment_callback = StaticRibbleWhisperCallback::new(segment_closure);
+        // NOTE: since this new segment callback is extremely expensive, the segment callback
+        // should use some form of early-escape mechanism.
+        // E.g. every 1-3 seconds
+        let mut last = Instant::now();
+        const TIME_LIMIT: u128 = 1000;
+        // The callback is guaranteed to fire at least for the first run.
+        // Subsequent ones should take a little longer.
+
+        let segment_should_run = move || {
+            let now = Instant::now();
+            let diff = now.duration_since(last);
+
+            let should_run = if diff.as_millis() >= TIME_LIMIT {
+                last = now;
+                true
+            } else {
+                false
+            };
+
+            should_run
+        };
+
+        let segment_callback =
+            ShortCircuitRibbleWhisperCallback::new(segment_should_run, segment_closure);
 
         let callbacks = WhisperCallbacks {
             progress: None::<Nop<i32>>,

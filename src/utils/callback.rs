@@ -6,7 +6,13 @@ pub trait Callback {
     fn call(&mut self, arg: Self::Argument);
 }
 
-/// Encapsulates a basic FnMut callback for functions that accept optional callbacks.
+pub trait ShortCircuitCallback {
+    type Argument;
+    fn should_run_callback(&mut self) -> bool;
+    fn call(&mut self, arg: Self::Argument);
+}
+
+/// Encapsulates a basic FnMut(T) callback for functions that accept optional callbacks.
 #[repr(C)]
 pub struct RibbleWhisperCallback<T, CB: FnMut(T)> {
     callback: CB,
@@ -54,6 +60,49 @@ impl<T, CB: FnMut(T) + 'static> Callback for StaticRibbleWhisperCallback<T, CB> 
     }
 }
 
+/// Encapsulates both a basic FnMut(T) callback and an FnMut() -> bool short-circuiting callback
+/// to early-escape potentially expensive callbacks.
+#[repr(C)]
+pub struct ShortCircuitRibbleWhisperCallback<T, B, CB>
+where
+    B: FnMut() -> bool + 'static,
+    CB: FnMut(T) + 'static,
+{
+    should_run_callback: B,
+    callback: CB,
+    _marker: PhantomData<T>,
+}
+
+impl<T, B, CB> ShortCircuitRibbleWhisperCallback<T, B, CB>
+where
+    B: FnMut() -> bool + 'static,
+    CB: FnMut(T) + 'static,
+{
+    pub fn new(should_run_callback: B, callback: CB) -> Self {
+        Self {
+            should_run_callback,
+            callback,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T, B, CB> ShortCircuitCallback for ShortCircuitRibbleWhisperCallback<T, B, CB>
+where
+    B: FnMut() -> bool + 'static,
+    CB: FnMut(T) + 'static,
+{
+    type Argument = T;
+
+    fn should_run_callback(&mut self) -> bool {
+        (self.should_run_callback)()
+    }
+
+    fn call(&mut self, arg: Self::Argument) {
+        (self.callback)(arg)
+    }
+}
+
 /// To indicate "None" in functions that expect a callback (eg. downloading, loading audio, etc.)
 /// Since all optional callbacks are unpacked before a hot loop to cut down on branching,
 /// this will get called repeatedly but expect this to be optimized out.
@@ -79,5 +128,13 @@ impl<T> Default for Nop<T> {
 }
 impl<T> Callback for Nop<T> {
     type Argument = T;
+    fn call(&mut self, _arg: T) {}
+}
+
+impl<T> ShortCircuitCallback for Nop<T> {
+    type Argument = T;
+    fn should_run_callback(&mut self) -> bool {
+        false
+    }
     fn call(&mut self, _arg: T) {}
 }

@@ -1,7 +1,7 @@
 use parking_lot::Mutex;
-use std::ffi::{c_int, c_void, CStr};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::ffi::{CStr, c_int, c_void};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use whisper_rs::{WhisperNewSegmentCallback, WhisperProgressCallback};
 
@@ -437,14 +437,18 @@ unsafe extern "C" fn progress_callback<PC: OfflineWhisperProgressCallback>(
 
 // NOTE: this is obviously not the most efficient--but whisper apparently does its own
 // mutation/correction to previous segments as it receives more information.
-// Thus, for this to be a truly accurate snapshot, it will have to collect the entire state of the
-// transcription thus far. It is also going to be dwarfed by the time required for whisper to finish transcribing,
-// so it doesn't necessarily matter.
 //
-// Bear in mind, this gets called whenever whisper finishes decoding, so do heavy computation
-// outside of this callback whenever possible.
-// At this time, there are no plans to include timestamps/associated metadata.
-// TODO: THIS NEEDS AN EARLY ESCAPE MECHANISM -> REFACTOR THE OFFLINEWHISPERNEWSEGMENTCALLBACK.
+// In place of pushing out the newest n_next segments and expecting the user to do a last-3 segment
+// diffing strategy (apparently the mutation usually only happens around the last 3 segments or
+// so), instead this opts for a callback that short-circuits the callback based on a condition.
+// If the callback should run on a full snapshot, this will collect the n segments into a full
+// snapshot and then perform the callback on it.
+//
+// Bear in mind, this has relatively high memory and time requirements and this callback can fire
+// rapidly. If performance is of concern, only fire the callback over a limited period.
+//
+// NOTE: this may change at a later date to allow swapping between full snapshots and only the
+// n_next segments.
 unsafe extern "C" fn new_segment_callback<S: OfflineWhisperNewSegmentCallback>(
     _: *mut whisper_rs_sys::whisper_context,
     state: *mut whisper_rs_sys::whisper_state,
@@ -452,6 +456,13 @@ unsafe extern "C" fn new_segment_callback<S: OfflineWhisperNewSegmentCallback>(
     user_data: *mut c_void,
 ) {
     let callback = unsafe { &mut *(user_data as *mut S) };
+
+    // Escape early if the callback shouldn't fire.
+    if !callback.should_run_callback() {
+        return;
+    }
+
+    // Collect into a snapshot and then call the callback.
     let n_segments = unsafe { whisper_rs_sys::whisper_full_n_segments_from_state(state) };
     let mut segments = Vec::with_capacity(n_segments as usize);
     for i in 0..n_segments {
