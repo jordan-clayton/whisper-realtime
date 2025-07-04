@@ -22,11 +22,9 @@ use strum::{
 /// A Type alias representing a model's ID, (e.g. based on a hash)
 pub type ModelId = u64;
 
-// TODO: document -> non-concurrent trait impl.
-// NOTE: This isn't a requirement, but is a way to help organize Model management.
-
-// The only strict requirement to construct a transcriber object is to implement ModelRetriever,
-// so that the transcribers can call it to open a whisper model.
+/// Optional non-concurrent trait interface for structuring the storage and manipulation of models.
+/// This is not strictly necessary to use, but can be helpful. Only [ModelRetriever] needs to be
+/// implemented to use Transcription objects.
 pub trait ModelBank {
     type Iter<'a>: Iterator<Item = (&'a ModelId, &'a Model)>
     where
@@ -84,11 +82,9 @@ pub trait ModelBank {
     ) -> Result<bool, RibbleWhisperError>;
 }
 
-// TODO: document. Same as ModelBank but imposes interior mutability + concurrency
-// NOTE: This isn't a requirement, but is a way to help organize Model management.
-
-// The only strict requirement to construct a transcriber object is to implement ModelRetriever,
-// so that the transcribers can call it to open a whisper model.
+/// A thread-safe equivalent trait to [ModelBank]. It does not need to be strictly implemented, but
+/// it may be helpful for structuring model storage. Requires implementers to guarantee
+/// thread-safety.
 pub trait ConcurrentModelBank: Send + Sync {
     type Iter<'a>: Iterator<Item = (&'a ModelId, &'a Model)>
     where
@@ -144,14 +140,12 @@ pub trait ConcurrentModelBank: Send + Sync {
     fn refresh_model_bank(&self) -> Result<(), RibbleWhisperError>;
 }
 
-// TODO: document -> limited scope API for things that require getting paths for whisper models.
-// i.e. the transcribers so that the path doesn't need to be explicitly passed around.
+/// A simple trait that allows Transcriber objects to retrieve model paths from storage.
 pub trait ModelRetriever {
     fn retrieve_model_path(&self, model_id: ModelId) -> Option<PathBuf>;
 }
 
-// TODO: document - this is a very bare-bones implementation, but it's sufficient for getting things running
-// This is mainly used for testing, but it can be exposed for use.
+/// A default [ModelBank] implementation that stores information for for a small subset of [DefaultModelType] members.
 pub struct DefaultModelBank {
     model_directory: PathBuf,
     models: HashMap<ModelId, Model>,
@@ -464,7 +458,7 @@ impl Default for Model {
     }
 }
 
-/// Encapsulates a series of base models available for download and use with WhisperRealtime
+/// Encapsulates a series of base models available for download and use with Ribble-Whisper
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(
     Copy,
@@ -500,9 +494,9 @@ pub enum DefaultModelType {
     LargeV1,
     LargeV2,
     LargeV3,
+    LargeV3Turbo,
 }
 
-// TODO: rethink this.
 impl DefaultModelType {
     pub fn to_file_name(&self) -> &'static str {
         match self {
@@ -517,8 +511,16 @@ impl DefaultModelType {
             DefaultModelType::LargeV1 => "ggml-large-v1.bin",
             DefaultModelType::LargeV2 => "ggml-large-v2.bin",
             DefaultModelType::LargeV3 => "ggml-large-v3.bin",
+            DefaultModelType::LargeV3Turbo => "ggml-large-v3-turbo.bin",
         }
     }
+
+    /// Due to legacy implementation details, this method exists to provide a way to transition
+    /// over to the new scheme.
+    pub fn old_file_name(&self) -> String {
+        self.to_file_name().replace("ggml-", "")
+    }
+
     #[cfg(feature = "integrity")]
     fn to_sha_key(&self) -> &'static str {
         match self {
@@ -533,10 +535,11 @@ impl DefaultModelType {
             DefaultModelType::LargeV1 => "large-v1",
             DefaultModelType::LargeV2 => "large-v2",
             DefaultModelType::LargeV3 => "large-v3",
+            DefaultModelType::LargeV3Turbo => "large-v3-turbo",
         }
     }
 
-    /// Constructs a model object and sets the path prefix to the current working directory
+    /// Constructs a model object with a "default" file-name and user-facing name
     pub fn to_model(&self) -> Model {
         Model::new()
             .with_name(self.to_string())
@@ -611,4 +614,41 @@ impl DefaultModelType {
 pub enum Checksum<'a> {
     Sha1(&'a str),
     Sha256(&'a str),
+}
+
+// TODO: determine whether or not to... make this happen.
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    PartialOrd,
+    PartialEq,
+    Ord,
+    Eq,
+    Hash,
+    AsRefStr,
+    EnumCount,
+    EnumIter,
+    EnumString,
+    Display,
+    IntoStaticStr,
+    EnumIs,
+    FromRepr,
+    VariantArray,
+    VariantNames,
+)]
+pub enum DefaultQuantizedModels {
+    #[default]
+    TinyQ5,
+    TinyQ8,
+    BaseQ5,
+    BaseQ8,
+    SmallQ5,
+    SmallQ8,
+    MediumQ5,
+    MediumQ8,
+    LargeV2Q5,
+    LargeV2Q8,
 }

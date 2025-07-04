@@ -247,16 +247,26 @@ impl<T: Copy + Clone + Default> AudioRingBuffer<T> {
 
     /// Clears the AudioRingBuffer completely
     pub fn clear(&self) {
-        // Guard the state by hogging the mutex until atomic operations are done
+        // Guard state by hogging the mutex to prevent data inconsistencies
         let _buffer = self.inner.buffer.lock();
         self.inner.head.store(0, Ordering::SeqCst);
         self.inner.audio_len.store(0, Ordering::SeqCst);
     }
 
+    /// Clears the AudioRingBuffer but retains at most len_ms amount of data.
+    pub fn clear_retain_ms(&self, len_ms: usize) {
+        // Guard state by hogging the mutex to prevent data inconsistencies
+        let _buffer = self.inner.buffer.lock();
+        let sample_rate = self.inner.sample_rate.load(Ordering::Acquire);
+        let audio_len = self.inner.audio_len.load(Ordering::Acquire);
+        let n_samples = ((len_ms as f64 * sample_rate as f64 / 1000f64) as usize).min(audio_len);
+        self.inner.audio_len.store(n_samples, Ordering::Release);
+    }
+
     /// Clears the requested amount of audio data from the back of the buffer,
     /// minus a small amount of audio that can be used to try to resolve word boundaries.
     pub fn clear_n_samples(&self, len_ms: usize) {
-        // Guard the state by hogging the mutex until atomic operations are done
+        // Guard state by hogging the mutex to prevent data inconsistencies
         let _buffer = self.inner.buffer.lock();
         let mut ms = len_ms;
         if ms == 0 {

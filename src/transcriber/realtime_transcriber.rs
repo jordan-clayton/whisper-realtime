@@ -1,7 +1,7 @@
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::ops::Deref;
-use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
+use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use strsim::jaro_winkler;
@@ -11,11 +11,12 @@ use crate::transcriber::vad::VAD;
 use crate::transcriber::{
     Transcriber, TranscriptionSnapshot, WhisperControlPhrase, WhisperOutput, WhisperSegment,
 };
+use crate::utils::Sender;
 use crate::utils::constants;
 use crate::utils::errors::RibbleWhisperError;
-use crate::utils::Sender;
 use crate::whisper::configs::WhisperRealtimeConfigs;
 use crate::whisper::model::ModelRetriever;
+use std::error::Error;
 
 /// Builder for [RealtimeTranscriber]
 /// All fields are necessary and thus required to successfully build a RealtimeTranscriber.
@@ -236,11 +237,13 @@ where
         run_transcription: Arc<AtomicBool>,
     ) -> Result<String, RibbleWhisperError> {
         // Alert the UI
-        self.output_sender
-            .send(WhisperOutput::ControlPhrase(
-                WhisperControlPhrase::GettingReady,
-            ))
-            .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?;
+        if let Err(e) = self.output_sender.try_send(WhisperOutput::ControlPhrase(
+            WhisperControlPhrase::GettingReady,
+        )) {
+            // TODO: proper logging.
+            eprintln!("Error sending snapshot: {:?}", e.source())
+        }
+
         let mut t_last = Instant::now();
 
         // To collect audio from the ring buffer.
@@ -272,11 +275,12 @@ where
 
         let mut whisper_state = ctx.create_state()?;
         self.ready.store(true, Ordering::Release);
-        self.output_sender
-            .send(WhisperOutput::ControlPhrase(
-                WhisperControlPhrase::StartSpeaking,
-            ))
-            .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?;
+        if let Err(e) = self.output_sender.send(WhisperOutput::ControlPhrase(
+            WhisperControlPhrase::StartSpeaking,
+        )) {
+            // TODO: proper logging.
+            eprintln!("Error sending snapshot: {:?}", e.source())
+        }
         while run_transcription.load(Ordering::Acquire) {
             let t_now = Instant::now();
             let diff = t_now - t_last;
@@ -306,22 +310,41 @@ where
             }
 
             // Check for voice activity
+            // In case the audio needs to be cleared, record the amount of time for VAD + lock
+            // contention, so that audio isn't fully lost.
+            let before_vad = Instant::now();
             let voice_detected = self.vad.lock().voice_detected(&audio_samples);
             if !voice_detected {
+                // DEBUGGING.
+                let _ = self.output_sender.try_send(WhisperOutput::ControlPhrase(
+                    WhisperControlPhrase::Debug("PAUSE DETECTED".to_string()),
+                ));
+
                 // Drain the dequeue and push to the confirmed output_string
                 let next_output = working_set.drain(..).map(|output| output.text);
                 let mut new_out = output_string.deref().clone();
                 new_out.extend(next_output);
                 output_string = Arc::new(new_out);
 
+                let after_vad = Instant::now();
+                let diff = (after_vad - before_vad).as_millis();
+
                 // Clear the audio buffer to prevent data incoherence messing up the transcription.
-                self.audio_feed.clear();
+                // Since VAD + clearing takes up a small amount of time, keep diff ms of audio in
+                // case speech has resumed.
+                self.audio_feed.clear_retain_ms(diff as usize);
+                // self.audio_feed.clear();
 
                 // Sleep for a little bit to give the buffer time to fill up
                 sleep(Duration::from_millis(constants::PAUSE_DURATION));
                 // Jump to the next iteration.
                 continue;
             }
+
+            // DEBUGGING.
+            let _ = self.output_sender.try_send(WhisperOutput::ControlPhrase(
+                WhisperControlPhrase::Debug("RUNNING INFERENCE".to_string()),
+            ));
 
             // Update the time (for timeout)
             t_last = t_now;
@@ -496,9 +519,13 @@ where
                             .collect::<Vec<_>>(),
                     ),
                 ));
-                self.output_sender
-                    .send(WhisperOutput::TranscriptionSnapshot(snapshot))
-                    .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?
+                if let Err(e) = self
+                    .output_sender
+                    .try_send(WhisperOutput::TranscriptionSnapshot(snapshot))
+                {
+                    // TODO: proper logging.
+                    eprintln!("Error sending snapshot: {:?}", e.source())
+                }
             }
 
             // If the timeout is set to 0, this loop runs infinitely.
@@ -508,20 +535,23 @@ where
 
             // Otherwise check for timeout.
             if total_time > self.configs.realtime_timeout() {
-                self.output_sender
-                    .send(WhisperOutput::ControlPhrase(
-                        WhisperControlPhrase::TranscriptionTimeout,
-                    ))
-                    .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?;
+                if let Err(e) = self.output_sender.try_send(WhisperOutput::ControlPhrase(
+                    WhisperControlPhrase::TranscriptionTimeout,
+                )) {
+                    // TODO: proper logging.
+                    eprintln!("Error sending snapshot: {:?}", e.source())
+                }
+
                 run_transcription.store(false, Ordering::Release);
             }
         }
 
-        self.output_sender
-            .send(WhisperOutput::ControlPhrase(
-                WhisperControlPhrase::EndTranscription,
-            ))
-            .map_err(|e| RibbleWhisperError::TranscriptionSenderError(e.0.into_inner()))?;
+        if let Err(e) = self.output_sender.send(WhisperOutput::ControlPhrase(
+            WhisperControlPhrase::EndTranscription,
+        )) {
+            // TODO: proper logging.
+            eprintln!("Error sending snapshot: {:?}", e.source())
+        }
 
         // Clean up the whisper context
         drop(whisper_state);
