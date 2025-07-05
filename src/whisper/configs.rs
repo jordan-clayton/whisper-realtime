@@ -5,7 +5,6 @@ use std::str::FromStr;
 use strum::{AsRefStr, Display, EnumString, FromRepr, IntoStaticStr};
 use whisper_rs;
 
-use crate::utils::constants;
 use crate::whisper::model::{DefaultModelType, Model, ModelId};
 
 // TODO: make cloning cheaper for WhisperConfigsV2/WhisperRealtimeConfigs
@@ -271,7 +270,7 @@ impl Default for WhisperConfigsV2 {
 
         Self::new()
             .with_n_threads(n_threads)
-            .with_max_past_prompt_tokens(constants::MAX_PROMPT_TOKENS)
+            .with_max_past_prompt_tokens(MAX_PROMPT_TOKENS)
             .with_sampling_strategy(WhisperSamplingStrategy::Greedy { best_of: 1 })
             .set_gpu(cfg!(feature = "_gpu"))
     }
@@ -338,11 +337,11 @@ impl Default for RealtimeConfigs {
     fn default() -> Self {
         Self::new()
             // 1 hour
-            .with_realtime_timeout(constants::REALTIME_AUDIO_TIMEOUT)
+            .with_realtime_timeout(REALTIME_AUDIO_TIMEOUT)
             // 10 seconds / 10 000 ms
-            .with_audio_sample_len(constants::AUDIO_SAMPLE_MS)
+            .with_audio_sample_len(AUDIO_SAMPLE_MS)
             // .3 seconds / 300 ms
-            .with_vad_sample_len(constants::VAD_SAMPLE_MS)
+            .with_vad_sample_len(VAD_SAMPLE_MS)
     }
 }
 
@@ -778,3 +777,10 @@ impl WhisperConfigsV1 {
             .with_realtime_timeout(self.realtime_timeout)
     }
 }
+
+pub const MAX_PROMPT_TOKENS: usize = 16384;
+// Recommended 1Hr.
+pub const REALTIME_AUDIO_TIMEOUT: u128 = std::time::Duration::new(3600, 0).as_millis();
+pub const VAD_SAMPLE_MS: usize = 300;
+// in ms
+pub const AUDIO_SAMPLE_MS: usize = 10000;

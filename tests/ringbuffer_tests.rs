@@ -1,14 +1,14 @@
 // Basic tests to ensure the ring_buffer runs properly and wraparound logic is correct
 #[cfg(test)]
 mod ringbuffer_tests {
+    use ribble_whisper::audio::audio_ring_buffer;
     use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
-    use ribble_whisper::utils::constants;
-
+    use ribble_whisper::transcriber;
     #[test]
     fn test_get_audio_length_ms() {
         let expected_ms = 4000;
         let ring_buffer = AudioRingBuffer::default();
-        let sample_len = (4f64 * constants::WHISPER_SAMPLE_RATE) as usize;
+        let sample_len = (4f64 * transcriber::WHISPER_SAMPLE_RATE) as usize;
         let samples = vec![0.5f32; sample_len];
         ring_buffer.push_audio(&samples);
         // Ensure the push was okay
@@ -21,8 +21,7 @@ mod ringbuffer_tests {
     fn test_copy_buffer_lengths() {
         // Full length
         let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
-        let sample_len =
-            (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE;
+        let sample_len = (crate::SAMPLE_DURATION / 1000) as f64 * transcriber::WHISPER_SAMPLE_RATE;
         let sample_len = sample_len as usize;
 
         let samples = vec![0.5f32; sample_len];
@@ -33,7 +32,7 @@ mod ringbuffer_tests {
         // Half-length
         let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
         let sample_len =
-            (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
+            (crate::SAMPLE_DURATION / 1000) as f64 * transcriber::WHISPER_SAMPLE_RATE / 2f64;
         let sample_len = sample_len as usize;
 
         let mut samples = vec![0.5f32; sample_len];
@@ -48,7 +47,7 @@ mod ringbuffer_tests {
         let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
 
         // Insert four seconds of audio data.
-        let sample_len = 4f64 * constants::WHISPER_SAMPLE_RATE;
+        let sample_len = 4f64 * transcriber::WHISPER_SAMPLE_RATE;
         let sample_len = sample_len as usize;
 
         let samples = vec![0.5f32; sample_len];
@@ -75,7 +74,7 @@ mod ringbuffer_tests {
         // Half-length
         let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
         let sample_len =
-            (constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE / 2f64;
+            (crate::SAMPLE_DURATION / 1000) as f64 * transcriber::WHISPER_SAMPLE_RATE / 2f64;
         let sample_len = sample_len as usize;
 
         let samples = vec![0.5f32; sample_len];
@@ -99,7 +98,7 @@ mod ringbuffer_tests {
         let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
         // These are 5-second samples
         let sample_len =
-            ((constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE) / 2f64;
+            ((crate::SAMPLE_DURATION / 1000) as f64 * transcriber::WHISPER_SAMPLE_RATE) / 2f64;
         let sample_len = sample_len as usize;
 
         // Fill the first half with 0.1
@@ -123,7 +122,7 @@ mod ringbuffer_tests {
 
         // Read 5 seconds of audio
         let mut read_buffer = vec![];
-        ring_buffer.read_into(constants::SAMPLE_DURATION / 2, &mut read_buffer);
+        ring_buffer.read_into(crate::SAMPLE_DURATION / 2, &mut read_buffer);
         // Bisect at the midpoint and compare the audio output
         let (first_half, second_half) = read_buffer.split_at(sample_len / 2);
         assert_eq!(first_half.len(), second_half.len());
@@ -148,10 +147,10 @@ mod ringbuffer_tests {
         // Half-length
         let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
         let sample_len =
-            ((constants::SAMPLE_DURATION / 1000) as f64 * constants::WHISPER_SAMPLE_RATE) / 2f64;
+            ((crate::SAMPLE_DURATION / 1000) as f64 * transcriber::WHISPER_SAMPLE_RATE) / 2f64;
         let sample_len = sample_len as usize;
 
-        let expect_length = (2f64 * constants::WHISPER_SAMPLE_RATE) as usize;
+        let expect_length = (2f64 * transcriber::WHISPER_SAMPLE_RATE) as usize;
 
         let mut results_vec: [Vec<f32>; 3] = [vec![], vec![], vec![]];
         // This is expected to not panic.
@@ -175,7 +174,7 @@ mod ringbuffer_tests {
         let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
 
         // Insert four seconds of audio data.
-        let sample_len = (4f64 * constants::WHISPER_SAMPLE_RATE) as usize;
+        let sample_len = (4f64 * transcriber::WHISPER_SAMPLE_RATE) as usize;
 
         let samples = vec![0.5f32; sample_len];
         // This is expected to not panic.
@@ -185,7 +184,10 @@ mod ringbuffer_tests {
 
         // Now, clear 4 seconds of audio; expect the buffer to be of length constants::N_SAMPLES_KEEP
         ring_buffer.clear_n_samples(4000);
-        assert_eq!(ring_buffer.get_audio_length(), constants::N_SAMPLES_KEEP);
+        assert_eq!(
+            ring_buffer.get_audio_length(),
+            audio_ring_buffer::N_SAMPLES_KEEP
+        );
         // Ensure the head is unchanged (only the audio length should be reduced to nearly 0).
         assert_eq!(ring_buffer.get_head_position(), head_len);
     }
@@ -194,10 +196,11 @@ mod ringbuffer_tests {
         let ring_buffer: AudioRingBuffer<f32> = AudioRingBuffer::default();
 
         // Insert 15 seconds of audio data.
-        let sample_len = (15f64 * constants::WHISPER_SAMPLE_RATE) as usize;
+        let sample_len = (15f64 * transcriber::WHISPER_SAMPLE_RATE) as usize;
 
         let samples = vec![0.5f32; sample_len];
-        let sample_chunks = samples.chunks_exact((5f64 * constants::WHISPER_SAMPLE_RATE) as usize);
+        let sample_chunks =
+            samples.chunks_exact((5f64 * transcriber::WHISPER_SAMPLE_RATE) as usize);
         // This is expected to not panic, the head should be halfway through the buffer.
         // This has to be added in chunks to get the full sample, otherwise only the last buffer_len
         // samples get pushed to the ringbuffer.
@@ -208,14 +211,14 @@ mod ringbuffer_tests {
         // Ensure that the head is at the middle of the audio buffer
         let head_pos = ring_buffer.get_head_position();
         assert_eq!(head_pos, ring_buffer.get_audio_length() / 2);
-        let expected_audio_len = (10f64 * constants::WHISPER_SAMPLE_RATE) as usize;
+        let expected_audio_len = (10f64 * transcriber::WHISPER_SAMPLE_RATE) as usize;
 
         assert_eq!(ring_buffer.get_audio_length(), expected_audio_len);
 
         // Now, clear 5 seconds of audio; expect the buffer to be of length 5s + constants::N_SAMPLES_KEEP
         ring_buffer.clear_n_samples(5000);
         let anticipated_len =
-            (5f64 * constants::WHISPER_SAMPLE_RATE) as usize + constants::N_SAMPLES_KEEP;
+            (5f64 * transcriber::WHISPER_SAMPLE_RATE) as usize + audio_ring_buffer::N_SAMPLES_KEEP;
 
         assert_eq!(anticipated_len, ring_buffer.get_audio_length());
         // Expect the head to be at position constants::N_SAMPLES_KEEP
@@ -232,3 +235,5 @@ mod ringbuffer_tests {
         true
     }
 }
+
+pub const SAMPLE_DURATION: usize = 10000;

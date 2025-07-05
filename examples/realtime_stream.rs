@@ -1,36 +1,35 @@
-use std::io::{Write, stdout};
+use std::io::{stdout, Write};
 use std::process::Command;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread::scope;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use parking_lot::Mutex;
 
-use ribble_whisper::audio::audio_backend::AudioBackend;
-use ribble_whisper::audio::audio_backend::CaptureSpec;
 #[cfg(feature = "sdl2")]
 use ribble_whisper::audio::audio_backend::default_backend;
+use ribble_whisper::audio::audio_backend::AudioBackend;
+use ribble_whisper::audio::audio_backend::CaptureSpec;
 use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
 use ribble_whisper::audio::microphone::MicCapture;
 use ribble_whisper::audio::recorder::ArcChannelSink;
 use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
 #[cfg(feature = "downloader")]
-use ribble_whisper::downloader::SyncDownload;
-#[cfg(feature = "downloader")]
 use ribble_whisper::downloader::downloaders::sync_download_request;
+#[cfg(feature = "downloader")]
+use ribble_whisper::downloader::SyncDownload;
 use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
 use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
 use ribble_whisper::transcriber::vad::Silero;
 use ribble_whisper::transcriber::{
-    CallbackTranscriber, WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
+    redirect_whisper_logging_to_hooks, Transcriber, TranscriptionSnapshot,
 };
 use ribble_whisper::transcriber::{
-    Transcriber, TranscriptionSnapshot, redirect_whisper_logging_to_hooks,
+    CallbackTranscriber, WhisperCallbacks, WhisperControlPhrase, WhisperOutput,
 };
 use ribble_whisper::utils;
 use ribble_whisper::utils::callback::{Nop, RibbleWhisperCallback, StaticRibbleWhisperCallback};
-use ribble_whisper::utils::constants;
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model;
 use ribble_whisper::whisper::model::{DefaultModelBank, ModelBank, ModelId};
@@ -48,9 +47,8 @@ fn main() {
         .set_flash_attention(true);
 
     let audio_ring_buffer = AudioRingBuffer::<f32>::default();
-    let (audio_sender, audio_receiver) =
-        utils::get_channel::<Arc<[f32]>>(constants::INPUT_BUFFER_CAPACITY);
-    let (text_sender, text_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
+    let (audio_sender, audio_receiver) = utils::get_channel::<Arc<[f32]>>(32);
+    let (text_sender, text_receiver) = utils::get_channel(32);
 
     // Note: Any VAD<T> + Send can be used.
     let vad = Silero::try_new_whisper_realtime_default()

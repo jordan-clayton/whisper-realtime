@@ -1,6 +1,6 @@
 use std::ops::Deref;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use strum::{Display, EnumString, IntoStaticStr};
 
@@ -170,3 +170,5 @@ pub enum WhisperControlPhrase {
     #[strum(serialize = "Debug: {0}")]
     Debug(String),
 }
+
+pub const WHISPER_SAMPLE_RATE: f64 = 16000f64;

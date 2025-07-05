@@ -12,10 +12,10 @@ mod resampler_test {
     use ribble_whisper::audio::loading::load_normalized_audio_file;
     use ribble_whisper::audio::resampler::file_needs_normalizing;
     use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
+    use ribble_whisper::transcriber;
     use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
     use ribble_whisper::transcriber::vad::Silero;
     use ribble_whisper::transcriber::Transcriber;
-    use ribble_whisper::utils::constants;
     use ribble_whisper::whisper::configs::WhisperConfigsV2;
     use ribble_whisper::whisper::model::{DefaultModelBank, DefaultModelType};
 
@@ -49,7 +49,7 @@ mod resampler_test {
             bits_per_sample: 32,
             channels: 1,
             sample_format: SampleFormat::Float,
-            sample_rate: constants::WHISPER_SAMPLE_RATE as u32,
+            sample_rate: transcriber::WHISPER_SAMPLE_RATE as u32,
         };
 
         let mut writer = WavWriter::create("tests/audio_files/resampled.wav", wav_spec).unwrap();

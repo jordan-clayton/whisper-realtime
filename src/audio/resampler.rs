@@ -9,7 +9,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::Hint;
 
 use crate::audio::WhisperAudioSample;
-use crate::utils::constants;
+use crate::transcriber;
 use crate::utils::errors::RibbleWhisperError;
 
 /// Encapsulates a reference to a slice of (supported-format) audio to be resampled.
@@ -162,5 +162,5 @@ pub fn needs_normalizing(track: &Track) -> Result<bool, RibbleWhisperError> {
         .ok_or(RibbleWhisperError::ParameterError(
             "Failed to get sample rate".to_owned(),
         ))? as f64;
-    Ok(sample_rate != constants::WHISPER_SAMPLE_RATE)
+    Ok(sample_rate != transcriber::WHISPER_SAMPLE_RATE)
 }

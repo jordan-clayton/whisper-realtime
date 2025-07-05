@@ -7,12 +7,12 @@ mod vad_tests {
     use ribble_whisper::audio::pcm::IntoPcmS16;
     use ribble_whisper::audio::resampler::{resample, ResampleableAudio};
     use ribble_whisper::audio::WhisperAudioSample;
+    use ribble_whisper::transcriber::vad;
     use ribble_whisper::transcriber::vad::{
         Earshot, Resettable, Silero, SileroBuilder, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness,
         WebRtcFrameLengthMillis, WebRtcSampleRate, VAD,
     };
-    use ribble_whisper::utils::constants;
-    use ribble_whisper::utils::constants::WHISPER_SAMPLE_RATE;
+    use ribble_whisper::transcriber::WHISPER_SAMPLE_RATE;
 
     // This audio file contains a speaker who methodically reads out a series of random sentences.
     // The voice clip is not super clear, nor loud, and there are significant gaps between phrases,
@@ -159,9 +159,9 @@ mod vad_tests {
     #[test]
     fn silero_vad_extraction_loose() {
         let mut vad = SileroBuilder::new()
-            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
+            .with_chunk_size(vad::DEFAULT_SILERO_CHUNK_SIZE)
             .with_sample_rate(8000)
-            .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(vad::SILERO_VOICE_PROBABILITY_THRESHOLD)
             .build()
             .expect("Silero expected to build without issues");
         let voiced_frames = vad.extract_voiced_frames(&AUDIO_SAMPLE);
@@ -180,8 +180,7 @@ mod vad_tests {
 
         // Run the voice-detection over the extracted frames with the offline threshold to ensure
         // that most frames are speech
-        vad = vad
-            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD);
+        vad = vad.with_detection_probability_threshold(vad::OFFLINE_VOICE_PROBABILITY_THRESHOLD);
 
         let voice_detected = vad.voice_detected(&voiced_frames);
         assert!(voice_detected, "Too many non-voiced samples.");
@@ -189,9 +188,9 @@ mod vad_tests {
     #[test]
     fn silero_vad_extraction_strict() {
         let mut vad = SileroBuilder::new()
-            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
+            .with_chunk_size(vad::DEFAULT_SILERO_CHUNK_SIZE)
             .with_sample_rate(8000)
-            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(vad::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
             .build()
             .expect("Silero expected to build without issues");
         let voiced_frames = vad.extract_voiced_frames(&AUDIO_SAMPLE);
@@ -220,7 +219,7 @@ mod vad_tests {
         let builder = WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R8kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-            .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD);
+            .with_detection_probability_threshold(vad::SILERO_VOICE_PROBABILITY_THRESHOLD);
 
         let mut vad = builder
             .clone()
@@ -246,7 +245,7 @@ mod vad_tests {
         vad = builder
             .clone()
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
-            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(vad::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
             .build_webrtc()
             .expect("WebRtc expected to build without issue");
 
@@ -259,7 +258,7 @@ mod vad_tests {
         let builder = WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R8kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
-            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD);
+            .with_detection_probability_threshold(vad::OFFLINE_VOICE_PROBABILITY_THRESHOLD);
 
         let mut vad = builder
             .clone()
@@ -299,7 +298,7 @@ mod vad_tests {
         let builder = WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R8kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-            .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD);
+            .with_detection_probability_threshold(vad::SILERO_VOICE_PROBABILITY_THRESHOLD);
 
         let mut vad = builder
             .clone()
@@ -325,7 +324,7 @@ mod vad_tests {
         vad = builder
             .clone()
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
-            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(vad::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
             .build_earshot()
             .expect("Earshot expected to build without issue");
 
@@ -338,7 +337,7 @@ mod vad_tests {
         let builder = WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R8kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
-            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD);
+            .with_detection_probability_threshold(vad::OFFLINE_VOICE_PROBABILITY_THRESHOLD);
 
         let mut vad = builder
             .clone()
@@ -377,9 +376,9 @@ mod vad_tests {
     #[test]
     fn silero_vad_extraction_silent() {
         let mut vad = SileroBuilder::new()
-            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
+            .with_chunk_size(vad::DEFAULT_SILERO_CHUNK_SIZE)
             .with_sample_rate(8000)
-            .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(vad::SILERO_VOICE_PROBABILITY_THRESHOLD)
             .build()
             .expect("Silero expected to build without issues");
         let voiced_frames = vad.extract_voiced_frames(&SILENCE);
@@ -395,7 +394,7 @@ mod vad_tests {
         let mut vad = WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R8kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-            .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(vad::SILERO_VOICE_PROBABILITY_THRESHOLD)
             .build_webrtc()
             .expect("Webrtc expected to build without issues");
         let voiced_frames = vad.extract_voiced_frames(&SILENCE);
@@ -411,7 +410,7 @@ mod vad_tests {
         let mut vad = WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R8kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-            .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(vad::SILERO_VOICE_PROBABILITY_THRESHOLD)
             .build_earshot()
             .expect("Earshot expected to build without issues");
         let voiced_frames = vad.extract_voiced_frames(&SILENCE);

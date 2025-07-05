@@ -9,19 +9,18 @@ mod transcriber_tests {
     use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
     #[cfg(feature = "resampler")]
     use ribble_whisper::audio::loading::load_normalized_audio_file;
-    use ribble_whisper::audio::{AudioChannelConfiguration, WhisperAudioSample};
+    use ribble_whisper::audio::{audio_backend, AudioChannelConfiguration, WhisperAudioSample};
     use ribble_whisper::transcriber::offline_transcriber::OfflineTranscriberBuilder;
     use ribble_whisper::transcriber::realtime_transcriber::RealtimeTranscriberBuilder;
     use ribble_whisper::transcriber::vad::{Silero, VAD};
     use ribble_whisper::transcriber::{
-        CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks, WhisperOutput,
-        redirect_whisper_logging_to_hooks,
+        redirect_whisper_logging_to_hooks, CallbackTranscriber, Transcriber, TranscriptionSnapshot, WhisperCallbacks,
+        WhisperOutput,
     };
-    use ribble_whisper::utils;
     use ribble_whisper::utils::callback::{Nop, ShortCircuitRibbleWhisperCallback};
-    use ribble_whisper::utils::constants;
     use ribble_whisper::whisper::configs::{WhisperConfigsV2, WhisperRealtimeConfigs};
     use ribble_whisper::whisper::model::{DefaultModelBank, DefaultModelType};
+    use ribble_whisper::{transcriber, utils};
     use std::time::Instant;
 
     // Prepare an audio sample with a known output to try and make conditions as replicable as
@@ -58,11 +57,11 @@ mod transcriber_tests {
             // Generally keep this on for a performance gain.
             .set_flash_attention(true);
 
-        let (text_sender, text_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
+        let (text_sender, text_receiver) = utils::get_channel(32);
         let mut vad = Silero::try_new_whisper_realtime_default()
             .expect("Silero VAD expected to build without issue");
-        let sample_up_to =
-            ((configs.vad_sample_len() as f64 / 1000f64) * constants::WHISPER_SAMPLE_RATE) as usize;
+        let sample_up_to = ((configs.vad_sample_len() as f64 / 1000f64)
+            * transcriber::WHISPER_SAMPLE_RATE) as usize;
 
         // Silero needs to be warmed up before it can predictably detect audio.
         let mut detected_audio = vad.voice_detected(&AUDIO_SAMPLE[..sample_up_to]);
@@ -89,7 +88,7 @@ mod transcriber_tests {
         redirect_whisper_logging_to_hooks();
         // Break the audio sample into chunks of size constants::AUDIO_CHUNK_SIZE to simulate default
         // audio input
-        let chunks = AUDIO_SAMPLE.chunks(constants::AUDIO_BUFFER_SIZE as usize);
+        let chunks = AUDIO_SAMPLE.chunks(audio_backend::AUDIO_BUFFER_SIZE as usize);
         let run_transcription = Arc::new(AtomicBool::new(true));
 
         let transcribed = scope(|s| {
@@ -171,7 +170,7 @@ mod transcriber_tests {
             .set_flash_attention(true);
 
         // For receiving data in the print loop.
-        let (text_sender, text_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
+        let (text_sender, text_receiver) = utils::get_channel(32);
         // Since audio is pre-processed (silence removed), it needs to be cloned back into a
         // WhisperAudioSample.
         let audio = WhisperAudioSample::F32(Arc::clone(&AUDIO_SAMPLE));

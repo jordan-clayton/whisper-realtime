@@ -1,22 +1,23 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread::scope;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 
-use ribble_whisper::audio::WhisperAudioSample;
 use ribble_whisper::audio::audio_ring_buffer::AudioRingBuffer;
 use ribble_whisper::audio::loading::load_normalized_audio_file;
+use ribble_whisper::audio::{audio_backend, WhisperAudioSample};
 use ribble_whisper::transcriber::realtime_transcriber::{
     RealtimeTranscriber, RealtimeTranscriberBuilder, RealtimeTranscriberHandle,
 };
-use ribble_whisper::transcriber::vad::{Silero, SileroBuilder, VAD, WebRtcBuilder};
-use ribble_whisper::transcriber::{Transcriber, WhisperOutput};
-use ribble_whisper::utils;
+use ribble_whisper::transcriber::vad::{Silero, SileroBuilder, WebRtcBuilder, VAD};
+use ribble_whisper::transcriber::{vad, Transcriber, WhisperOutput};
 use ribble_whisper::utils::errors::RibbleWhisperError;
-use ribble_whisper::utils::{Receiver, constants};
+use ribble_whisper::utils::Receiver;
+use ribble_whisper::whisper::configs;
 use ribble_whisper::whisper::configs::WhisperRealtimeConfigs;
 use ribble_whisper::whisper::model::{DefaultModelBank, DefaultModelType, ModelBank};
+use ribble_whisper::{transcriber, utils};
 
 // Bear in mind, this benchmark is a little fragile given the test structure and the difficulty of
 // simulating the realtime loop. It is highly unlikely to fail at a point where the bench will
@@ -36,15 +37,15 @@ pub fn realtime_vad_benchmark(c: &mut Criterion) {
     // In practice, this is fine because it will pick up next read and the audio will not get lost.
     // In these test conditions, there is a risk the audio buffer might get cleared prematurely
 
-    let chunks = audio_sample.chunks(constants::AUDIO_BUFFER_SIZE as usize);
+    let chunks = audio_sample.chunks(audio_backend::AUDIO_BUFFER_SIZE as usize);
     for chunk in chunks {
         audio_ring_buffer.push_audio(chunk);
     }
 
     let silero_build_method = || {
         SileroBuilder::new()
-            .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
-            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
+            .with_sample_rate(transcriber::WHISPER_SAMPLE_RATE as i64)
+            .with_chunk_size(vad::DEFAULT_SILERO_CHUNK_SIZE)
             .with_detection_probability_threshold(0.5)
             .build()
     };
@@ -152,7 +153,7 @@ pub fn realtime_bencher<V: VAD<f32> + Send + Sync>(
     whisper_rs::install_logging_hooks();
     // Break the audio sample into chunks of size constants::AUDIO_CHUNK_SIZE to simulate default
     // audio input
-    let chunks = audio_sample.chunks(constants::AUDIO_BUFFER_SIZE as usize);
+    let chunks = audio_sample.chunks(audio_backend::AUDIO_BUFFER_SIZE as usize);
     let run_transcription = Arc::new(AtomicBool::new(true));
     scope(|s| {
         let t_thread_run_transcription = Arc::clone(&run_transcription);
@@ -263,12 +264,12 @@ fn build_transcriber<V: VAD<f32> + Send + Sync>(
     RealtimeTranscriberHandle,
     Receiver<WhisperOutput>,
 ) {
-    let (text_sender, text_receiver) = utils::get_channel(constants::INPUT_BUFFER_CAPACITY);
+    let (text_sender, text_receiver) = utils::get_channel(30);
 
     let mut vad = build_method().expect("realtime VAD expected to build without issue");
 
     // Prime the VAD to prevent false negatives.
-    let sample = audio_buffer.read(constants::VAD_SAMPLE_MS);
+    let sample = audio_buffer.read(configs::VAD_SAMPLE_MS);
     let detected_audio = vad.voice_detected(&sample);
     if !detected_audio {
         eprintln!("FAILED TO DETECT FIRST RUN");

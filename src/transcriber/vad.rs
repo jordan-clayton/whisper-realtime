@@ -2,7 +2,7 @@ use parking_lot::Mutex;
 use voice_activity_detector::{IteratorExt, LabeledAudio};
 
 use crate::audio::pcm::PcmS16Convertible;
-use crate::utils::constants;
+use crate::transcriber;
 use crate::utils::errors::RibbleWhisperError;
 
 /// A voice activity detector backend for use with [crate::transcriber::realtime_transcriber::RealtimeTranscriber]
@@ -121,18 +121,18 @@ impl Silero {
     /// A "Default" whisper-ready Silero configuration for realtime transcription.
     pub fn try_new_whisper_realtime_default() -> Result<Self, RibbleWhisperError> {
         SileroBuilder::new()
-            .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
-            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
-            .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD)
+            .with_sample_rate(transcriber::WHISPER_SAMPLE_RATE as i64)
+            .with_chunk_size(DEFAULT_SILERO_CHUNK_SIZE)
+            .with_detection_probability_threshold(SILERO_VOICE_PROBABILITY_THRESHOLD)
             .build()
     }
 
     /// A "Default" whisper-ready Silero configuration for offline transcription.
     pub fn try_new_whisper_offline_default() -> Result<Self, RibbleWhisperError> {
         SileroBuilder::new()
-            .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i64)
-            .with_chunk_size(constants::SILERO_CHUNK_SIZE)
-            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
+            .with_sample_rate(transcriber::WHISPER_SAMPLE_RATE as i64)
+            .with_chunk_size(DEFAULT_SILERO_CHUNK_SIZE)
+            .with_detection_probability_threshold(OFFLINE_VOICE_PROBABILITY_THRESHOLD)
             .build()
     }
 }
@@ -410,7 +410,7 @@ impl WebRtc {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-            .with_detection_probability_threshold(constants::WEBRTC_VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(WEBRTC_VOICE_PROBABILITY_THRESHOLD)
             .build_webrtc()
     }
     /// A "Default" whisper-ready WebRtc configuration for offline transcription.
@@ -418,7 +418,7 @@ impl WebRtc {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
-            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(OFFLINE_VOICE_PROBABILITY_THRESHOLD)
             .build_webrtc()
     }
 }
@@ -528,7 +528,7 @@ impl Earshot {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-            .with_detection_probability_threshold(constants::WEBRTC_VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(WEBRTC_VOICE_PROBABILITY_THRESHOLD)
             .build_earshot()
     }
 
@@ -537,7 +537,7 @@ impl Earshot {
         WebRtcBuilder::new()
             .with_sample_rate(WebRtcSampleRate::R16kHz)
             .with_filter_aggressiveness(WebRtcFilterAggressiveness::Aggressive)
-            .with_detection_probability_threshold(constants::OFFLINE_VOICE_PROBABILITY_THRESHOLD)
+            .with_detection_probability_threshold(OFFLINE_VOICE_PROBABILITY_THRESHOLD)
             .build_earshot()
     }
 }
@@ -618,3 +618,11 @@ fn prepare_webrtc_frames<T: PcmS16Convertible + Copy>(
     int_audio.resize(int_audio.len() + zero_pad, 0);
     (int_audio, frame_size)
 }
+
+// THESE ARE RECOMMENDATIONS
+// This works best when within the range of 0.65-0.80
+// Higher thresholds are prone to false negatives.
+pub const SILERO_VOICE_PROBABILITY_THRESHOLD: f32 = 0.60;
+pub const WEBRTC_VOICE_PROBABILITY_THRESHOLD: f32 = 0.65;
+pub const OFFLINE_VOICE_PROBABILITY_THRESHOLD: f32 = 0.75;
+pub const DEFAULT_SILERO_CHUNK_SIZE: usize = 512;

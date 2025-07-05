@@ -3,14 +3,13 @@ use std::sync::mpsc::sync_channel;
 use std::thread::{scope, sleep};
 use std::time::Duration;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 #[cfg(feature = "crossbeam")]
 use crossbeam::channel;
 use std::hint::black_box;
 
 use ribble_whisper::audio::recorder::{ArcChannelSink, SampleSink, VecChannelSink};
-use ribble_whisper::utils::constants;
-
+use ribble_whisper::transcriber;
 // Benchmark summary:
 // Arc<[T]> is orders of magnitude faster in single thread, multi-thread with light work
 // Vec<T> in parallel is, abnormally, reasonably fast.
@@ -59,7 +58,7 @@ pub fn recorder_benchmark(c: &mut Criterion) {
 }
 
 fn run_with_recorder_st(n_samples: usize) {
-    let sample_size = constants::WHISPER_SAMPLE_RATE as usize;
+    let sample_size = transcriber::WHISPER_SAMPLE_RATE as usize;
     let audio_len = n_samples * sample_size;
     let mut audio = vec![0.0f32; audio_len];
     #[cfg(feature = "crossbeam")]
@@ -102,7 +101,7 @@ fn run_with_recorder_st(n_samples: usize) {
 }
 
 fn run_with_slice_st(n_samples: usize) {
-    let sample_size = constants::WHISPER_SAMPLE_RATE as usize;
+    let sample_size = transcriber::WHISPER_SAMPLE_RATE as usize;
     let audio_len = n_samples * sample_size;
     let mut audio = vec![0.0f32; audio_len];
     #[cfg(feature = "crossbeam")]
@@ -145,7 +144,7 @@ fn run_with_slice_st(n_samples: usize) {
 }
 
 fn run_with_recorder_par(n_samples: usize, work_millis: u64) {
-    let sample_size = constants::WHISPER_SAMPLE_RATE as usize;
+    let sample_size = transcriber::WHISPER_SAMPLE_RATE as usize;
     let audio_len = n_samples * sample_size;
     let mut audio = vec![0.0f32; audio_len];
     #[cfg(feature = "crossbeam")]
@@ -247,7 +246,7 @@ fn run_with_recorder_par(n_samples: usize, work_millis: u64) {
     });
 }
 fn run_with_slice_par(n_samples: usize, work_millis: u64) {
-    let sample_size = constants::WHISPER_SAMPLE_RATE as usize;
+    let sample_size = transcriber::WHISPER_SAMPLE_RATE as usize;
     let audio_len = n_samples * sample_size;
     let mut audio = vec![0.0f32; audio_len];
     #[cfg(feature = "crossbeam")]

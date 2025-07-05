@@ -1,13 +1,13 @@
-use crate::utils::constants::{AUDIO_BUFFER_SIZE, WHISPER_SAMPLE_RATE};
+use crate::transcriber::WHISPER_SAMPLE_RATE;
 
 use crate::audio::microphone::{MicCapture, Sdl2Capture};
 use crate::audio::recorder::{Recorder, SampleSink};
 use crate::utils::errors::RibbleWhisperError;
 
 #[cfg(feature = "sdl2")]
-use sdl2::AudioSubsystem;
-#[cfg(feature = "sdl2")]
 use sdl2::audio::AudioSpecDesired;
+#[cfg(feature = "sdl2")]
+use sdl2::AudioSubsystem;
 
 /// Encapsulates required recording spec information.
 /// Set fields to None to use device defaults.
@@ -175,3 +175,5 @@ pub fn default_backend() -> Result<(sdl2::Sdl, Sdl2Backend), RibbleWhisperError>
 
     Ok((ctx, backend))
 }
+
+pub const AUDIO_BUFFER_SIZE: usize = 1024;

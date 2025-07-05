@@ -1,10 +1,10 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
-use parking_lot::Mutex;
-
-use crate::utils::constants;
+use crate::transcriber;
+use crate::transcriber::WHISPER_SAMPLE_RATE;
 use crate::utils::errors::RibbleWhisperError;
+use parking_lot::Mutex;
 
 struct InnerAudioRingBuffer<T: Copy + Clone + Default> {
     // Insertion pointer
@@ -282,7 +282,7 @@ impl<T: Copy + Clone + Default> AudioRingBuffer<T> {
             n_samples = audio_len;
         }
 
-        let new_len = audio_len - n_samples + constants::N_SAMPLES_KEEP;
+        let new_len = audio_len - n_samples + N_SAMPLES_KEEP;
         self.inner.audio_len.store(new_len, Ordering::Release);
     }
 }
@@ -291,9 +291,15 @@ impl<T: Copy + Clone + Default> Default for AudioRingBuffer<T> {
     /// Returns a Whisper-ready AudioRingBuffer, ready for use in a [crate::transcriber::realtime_transcriber::RealtimeTranscriber].
     fn default() -> Self {
         AudioRingBufferBuilder::new()
-            .with_capacity_ms(constants::INPUT_BUFFER_CAPACITY)
-            .with_sample_rate(constants::WHISPER_SAMPLE_RATE as usize)
+            .with_capacity_ms(AUDIO_BUFFER_CAPACITY)
+            .with_sample_rate(transcriber::WHISPER_SAMPLE_RATE as usize)
             .build()
             .expect("Default AudioRingbuffer should build without problems.")
     }
 }
+
+// Total length is 10s
+pub const AUDIO_BUFFER_CAPACITY: usize = 10000;
+const KEEP_MS: f64 = 300f64;
+// To help with resolving word boundaries.
+pub const N_SAMPLES_KEEP: usize = ((1e-3 * KEEP_MS) * WHISPER_SAMPLE_RATE) as usize;

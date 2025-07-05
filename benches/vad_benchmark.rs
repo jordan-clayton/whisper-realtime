@@ -1,13 +1,12 @@
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 use hound::SampleFormat;
 
 use ribble_whisper::audio::pcm::IntoPcmS16;
+use ribble_whisper::transcriber::vad;
 use ribble_whisper::transcriber::vad::WebRtcSampleRate::R8kHz;
 use ribble_whisper::transcriber::vad::{
-    Earshot, Silero, SileroBuilder, VAD, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness,
+    Earshot, Silero, SileroBuilder, WebRtc, WebRtcBuilder, WebRtcFilterAggressiveness, VAD,
 };
-use ribble_whisper::utils::constants;
-
 pub fn vad_benchmark(c: &mut Criterion) {
     // Load the audio sample to pass to each benchmark function
     let audio: Vec<i16> = {
@@ -29,21 +28,21 @@ pub fn vad_benchmark(c: &mut Criterion) {
 
     let mut silero = SileroBuilder::new()
         .with_sample_rate(8000)
-        .with_chunk_size(constants::SILERO_CHUNK_SIZE)
-        .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD)
+        .with_chunk_size(vad::DEFAULT_SILERO_CHUNK_SIZE)
+        .with_detection_probability_threshold(vad::SILERO_VOICE_PROBABILITY_THRESHOLD)
         .build()
         .expect("Silero VAD should build without problems");
 
     let mut webrtc = WebRtcBuilder::new()
         .with_sample_rate(R8kHz)
         .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-        .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD)
+        .with_detection_probability_threshold(vad::SILERO_VOICE_PROBABILITY_THRESHOLD)
         .build_webrtc()
         .expect("Silero VAD should build without problems");
     let mut earshot = WebRtcBuilder::new()
         .with_sample_rate(R8kHz)
         .with_filter_aggressiveness(WebRtcFilterAggressiveness::LowBitrate)
-        .with_detection_probability_threshold(constants::SILERO_VOICE_PROBABILITY_THRESHOLD)
+        .with_detection_probability_threshold(vad::SILERO_VOICE_PROBABILITY_THRESHOLD)
         .build_earshot()
         .expect("Silero VAD should build without problems");
 

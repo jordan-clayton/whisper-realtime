@@ -1,19 +1,20 @@
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::ops::Deref;
-use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
+use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use strsim::jaro_winkler;
 
 use crate::audio::audio_ring_buffer::AudioRingBuffer;
+use crate::transcriber;
 use crate::transcriber::vad::VAD;
 use crate::transcriber::{
     Transcriber, TranscriptionSnapshot, WhisperControlPhrase, WhisperOutput, WhisperSegment,
+    WHISPER_SAMPLE_RATE,
 };
-use crate::utils::Sender;
-use crate::utils::constants;
 use crate::utils::errors::RibbleWhisperError;
+use crate::utils::Sender;
 use crate::whisper::configs::WhisperRealtimeConfigs;
 use crate::whisper::model::ModelRetriever;
 use std::error::Error;
@@ -247,15 +248,14 @@ where
         let mut t_last = Instant::now();
 
         // To collect audio from the ring buffer.
-        let mut audio_samples: Vec<f32> = vec![0f32; constants::N_SAMPLES_30S];
+        let mut audio_samples: Vec<f32> = vec![0f32; N_SAMPLES_30S];
 
         // For timing the transcription (and timeout)
         let mut total_time = 0u128;
 
         // For collecting the transcribed segments to return a full transcription at the end
         let mut output_string = Arc::new(String::default());
-        let mut working_set: VecDeque<WhisperSegment> =
-            VecDeque::with_capacity(constants::WORKING_SET_SIZE);
+        let mut working_set: VecDeque<WhisperSegment> = VecDeque::with_capacity(WORKING_SET_SIZE);
 
         // Set up whisper
         let full_params = self.configs.to_whisper_full_params();
@@ -290,7 +290,7 @@ where
             // To prevent accidental audio clearing, hold off to ensure at least
             // vad_sample_len ms have passed before trying to detect voice.
             if millis < self.configs.vad_sample_len() as u128 {
-                sleep(Duration::from_millis(constants::PAUSE_DURATION));
+                sleep(Duration::from_millis(PAUSE_DURATION));
                 continue;
             }
 
@@ -300,12 +300,12 @@ where
                 .read_into(self.configs.vad_sample_len(), &mut audio_samples);
 
             let vad_size = (self.configs.vad_sample_len() as f64 / 1000f64
-                * constants::WHISPER_SAMPLE_RATE) as usize;
+                * transcriber::WHISPER_SAMPLE_RATE) as usize;
 
             // If the buffer has recently been cleared/there's not enough data to send to the voice detector,
             // sleep for a little bit longer.
             if audio_samples.len() < vad_size {
-                sleep(Duration::from_millis(constants::PAUSE_DURATION));
+                sleep(Duration::from_millis(PAUSE_DURATION));
                 continue;
             }
 
@@ -336,7 +336,7 @@ where
                 // self.audio_feed.clear();
 
                 // Sleep for a little bit to give the buffer time to fill up
-                sleep(Duration::from_millis(constants::PAUSE_DURATION));
+                sleep(Duration::from_millis(PAUSE_DURATION));
                 // Jump to the next iteration.
                 continue;
             }
@@ -394,15 +394,14 @@ where
                 let old_segments = working_set.make_contiguous();
                 // Get the tail N_SEGMENTS
                 let old_len = old_segments.len();
-                let tail =
-                    old_segments[old_len.saturating_sub(constants::N_SEGMENTS_DIFF)..].iter_mut();
+                let tail = old_segments[old_len.saturating_sub(N_SEGMENTS_DIFF)..].iter_mut();
 
                 let head = segments
-                    .drain(..constants::N_SEGMENTS_DIFF.min(segments.len()))
+                    .drain(..N_SEGMENTS_DIFF.min(segments.len()))
                     .collect::<Vec<_>>();
 
                 // For collecting swaps
-                let mut swap_indices = Vec::with_capacity(constants::N_SEGMENTS_DIFF);
+                let mut swap_indices = Vec::with_capacity(N_SEGMENTS_DIFF);
 
                 // This is Amortized O(1), with an upper bound of constants::N_SEGMENTS_DIFF * constants::N_SEGMENTS_DIFF iterations
                 // In practice this is very unlikely to hit that upper bound.
@@ -412,7 +411,7 @@ where
                     let mut best_score = 0.0;
                     let mut best_match = None::<&WhisperSegment>;
                     // This is out of bounds, but it should always be swapped if there's a best_match
-                    let mut best_index = constants::N_SEGMENTS_DIFF;
+                    let mut best_index = N_SEGMENTS_DIFF;
                     // Get the head N_SEGMENTS
                     for (index, new_segment) in head.iter().enumerate() {
                         // With the way that segments are being output, it seems to work a little better
@@ -428,18 +427,16 @@ where
 
                         // If the timestamp is close enough such that it's lower than the epsilon: (10 ms)
                         // Consider it to be a 1:1 match.
-                        let timestamp_close = time_gap < constants::TIMESTAMP_EPSILON
-                            && similar > constants::DIFF_THRESHOLD_MIN;
-                        let compare_score = if time_gap <= constants::TIMESTAMP_GAP {
+                        let timestamp_close =
+                            time_gap < TIMESTAMP_EPSILON && similar > DIFF_THRESHOLD_MIN;
+                        let compare_score = if time_gap <= TIMESTAMP_GAP {
                             timestamp_close || {
-                                if similar >= constants::DIFF_THRESHOLD_MED {
+                                if similar >= DIFF_THRESHOLD_MED {
                                     true
-                                } else if similar >= constants::DIFF_THRESHOLD_LOW {
-                                    best_score < constants::DIFF_THRESHOLD_MED
-                                        || best_match.is_none()
-                                } else if similar > constants::DIFF_THRESHOLD_MIN {
-                                    best_score < constants::DIFF_THRESHOLD_LOW
-                                        || best_match.is_none()
+                                } else if similar >= DIFF_THRESHOLD_LOW {
+                                    best_score < DIFF_THRESHOLD_MED || best_match.is_none()
+                                } else if similar > DIFF_THRESHOLD_MIN {
+                                    best_score < DIFF_THRESHOLD_LOW || best_match.is_none()
                                 } else {
                                     false
                                 }
@@ -447,12 +444,12 @@ where
                         } else {
                             // Otherwise, if it's outside the timestamp gap, only match on likely probability
                             // High matches indicate close segments (ie. a word/phrase boundary)
-                            if similar >= constants::DIFF_THRESHOLD_HIGH {
+                            if similar >= DIFF_THRESHOLD_HIGH {
                                 true
-                            } else if similar >= constants::DIFF_THRESHOLD_MED {
-                                best_score < constants::DIFF_THRESHOLD_HIGH || best_match.is_none()
-                            } else if similar >= constants::DIFF_THRESHOLD_LOW {
-                                best_score < constants::DIFF_THRESHOLD_MED || best_match.is_none()
+                            } else if similar >= DIFF_THRESHOLD_MED {
+                                best_score < DIFF_THRESHOLD_HIGH || best_match.is_none()
+                            } else if similar >= DIFF_THRESHOLD_LOW {
+                                best_score < DIFF_THRESHOLD_MED || best_match.is_none()
                             } else {
                                 false
                             }
@@ -470,7 +467,7 @@ where
                         if new_seg.text.len() > old_segment.text.len() {
                             *old_segment = new_seg.clone();
                         }
-                        assert_ne!(best_index, constants::N_SEGMENTS_DIFF);
+                        assert_ne!(best_index, N_SEGMENTS_DIFF);
                         swap_indices.push(best_index)
                     }
                 }
@@ -494,13 +491,9 @@ where
             // generally pretty good at detecting pauses.
             // It is most likely that the working set will get drained beforehand, but this is a
             // fallback to ensure the working_set is always WORKING_SET_SIZE
-            if working_set.len() > constants::WORKING_SET_SIZE {
+            if working_set.len() > WORKING_SET_SIZE {
                 let next_text = working_set
-                    .drain(
-                        0..working_set
-                            .len()
-                            .saturating_sub(constants::WORKING_SET_SIZE),
-                    )
+                    .drain(0..working_set.len().saturating_sub(WORKING_SET_SIZE))
                     .map(|segment| segment.text);
                 let mut new_out = output_string.deref().clone();
                 new_out.extend(next_text);
@@ -581,3 +574,15 @@ impl RealtimeTranscriberHandle {
         self.ready.load(Ordering::Acquire)
     }
 }
+
+// Conservatively at 90% match
+pub const DIFF_THRESHOLD_HIGH: f64 = 0.9;
+pub const DIFF_THRESHOLD_MED: f64 = 0.7;
+pub const DIFF_THRESHOLD_LOW: f64 = 0.50;
+pub const DIFF_THRESHOLD_MIN: f64 = 0.40;
+pub const TIMESTAMP_GAP: i64 = 3000;
+pub const TIMESTAMP_EPSILON: i64 = 10;
+pub const N_SEGMENTS_DIFF: usize = 3;
+pub const WORKING_SET_SIZE: usize = N_SEGMENTS_DIFF * 5;
+pub const PAUSE_DURATION: u64 = 100;
+pub const N_SAMPLES_30S: usize = ((1e-3 * 30000.0) * WHISPER_SAMPLE_RATE) as usize;
