@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 use strsim::jaro_winkler;
 
 use crate::audio::audio_ring_buffer::AudioRingBuffer;
-use crate::transcriber;
 use crate::transcriber::vad::VAD;
 use crate::transcriber::{
     Transcriber, TranscriptionSnapshot, WhisperControlPhrase, WhisperOutput, WhisperSegment,
@@ -299,8 +298,8 @@ where
             self.audio_feed
                 .read_into(self.configs.vad_sample_len(), &mut audio_samples);
 
-            let vad_size = (self.configs.vad_sample_len() as f64 / 1000f64
-                * transcriber::WHISPER_SAMPLE_RATE) as usize;
+            let vad_size =
+                (self.configs.vad_sample_len() as f64 / 1000f64 * WHISPER_SAMPLE_RATE) as usize;
 
             // If the buffer has recently been cleared/there's not enough data to send to the voice detector,
             // sleep for a little bit longer.
@@ -312,7 +311,6 @@ where
             // Check for voice activity
             // In case the audio needs to be cleared, record the amount of time for VAD + lock
             // contention, so that audio isn't fully lost.
-            let before_vad = Instant::now();
             let voice_detected = self.vad.lock().voice_detected(&audio_samples);
             if !voice_detected {
                 // DEBUGGING.
@@ -326,14 +324,10 @@ where
                 new_out.extend(next_output);
                 output_string = Arc::new(new_out);
 
-                let after_vad = Instant::now();
-                let diff = (after_vad - before_vad).as_millis();
-
                 // Clear the audio buffer to prevent data incoherence messing up the transcription.
                 // Since VAD + clearing takes up a small amount of time, keep diff ms of audio in
                 // case speech has resumed.
-                self.audio_feed.clear_retain_ms(diff as usize);
-                // self.audio_feed.clear();
+                self.audio_feed.clear();
 
                 // Sleep for a little bit to give the buffer time to fill up
                 sleep(Duration::from_millis(PAUSE_DURATION));
