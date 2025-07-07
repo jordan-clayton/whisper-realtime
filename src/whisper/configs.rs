@@ -2,7 +2,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 
-use strum::{AsRefStr, Display, EnumString, FromRepr, IntoStaticStr};
+use strum::{AsRefStr, Display, EnumCount, EnumIter, EnumString, FromRepr, IntoStaticStr};
 use whisper_rs;
 
 use crate::whisper::model::{DefaultModelType, Model, ModelId};
@@ -125,7 +125,7 @@ impl WhisperConfigsV2 {
         self
     }
 
-    /// Toggles translating to the specified output language
+    /// Toggles translating from the input language to english.
     pub fn set_translate(mut self, set_translate: bool) -> Self {
         self.translate = set_translate;
         self
@@ -359,6 +359,8 @@ impl Default for RealtimeConfigs {
     FromRepr,
     Display,
     EnumString,
+    EnumIter,
+    EnumCount,
 )]
 #[strum(serialize_all = "lowercase")]
 pub enum Language {

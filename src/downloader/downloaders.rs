@@ -1,6 +1,6 @@
 #[cfg(feature = "downloader-async")]
 use std::io::Write;
-use std::io::{copy, Read};
+use std::io::{Read, copy};
 use std::path::Path;
 
 #[cfg(feature = "downloader-async")]
@@ -142,6 +142,7 @@ pub struct SyncDownloader<R: Read, CB: Callback<Argument = usize>> {
     progress: usize,
     total_size: usize,
     progress_callback: CB,
+    // TODO: add a mechanism to interrupt the download.
 }
 
 impl<R: Read> SyncDownloader<R, Nop<usize>> {
@@ -200,6 +201,9 @@ impl<R: Read, CB: Callback<Argument = usize>> SyncDownloader<R, CB> {
 
 impl<R: Read, CB: Callback<Argument = usize>> Read for SyncDownloader<R, CB> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        // TODO: early-escape here if the user wants to cut the download.
+        // e.g. if !self.should_continue() {return Err(DownloadError::interrupted)
+        //
         let byte_read = self.file_stream.read(buf);
         if let Ok(num_bytes) = byte_read {
             self.progress += num_bytes;
