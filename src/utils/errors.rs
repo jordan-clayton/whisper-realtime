@@ -46,6 +46,11 @@ pub enum RibbleWhisperError {
     #[error("Download Error {0}")]
     #[cfg(feature = "downloader")]
     DownloadError(String),
+    /// Indicates a user has cancelled the download.
+    /// Contains the file_name of the cancelled download.
+    #[cfg(feature = "downloader")]
+    #[error("Download Aborted: {0}")]
+    DownloadAborted(String),
     /// [serde_json::Error]
     #[error("JSON Parse Error {0}")]
     #[cfg(feature = "integrity")]

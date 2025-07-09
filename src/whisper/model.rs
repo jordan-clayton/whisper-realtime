@@ -39,6 +39,7 @@ pub trait ModelBank {
     fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
     fn get_model(&self, model_id: ModelId) -> Option<&Model>;
 
+    /// Returns an iterator over the Model entries in the backing storage.
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Searches for a model and updates its name.
@@ -71,7 +72,7 @@ pub trait ModelBank {
         new_file_name: String,
     ) -> Result<Option<ModelId>, RibbleWhisperError>;
 
-    fn remove_model(&mut self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError>;
+    fn remove_model(&mut self, model_id: ModelId) -> Result<Option<ModelId>, RibbleWhisperError>;
     fn refresh_model_bank(&mut self) -> Result<(), RibbleWhisperError>;
 
     #[cfg(feature = "integrity")]
@@ -86,18 +87,25 @@ pub trait ModelBank {
 /// it may be helpful for structuring model storage. Requires implementers to guarantee
 /// thread-safety.
 pub trait ConcurrentModelBank: Send + Sync {
-    type Iter<'a>: Iterator<Item = (&'a ModelId, &'a Model)>
-    where
-        Self: 'a;
     fn model_directory(&self) -> &Path;
     /// Inserts a model and returns its newly assigned [ModelId].
     /// Since the backing buffer/ModelId paradigm is up to the implementer, the new ModelId must be
     /// returned so that it can be accessed later.
     fn insert_model(&self, model: Model) -> Result<ModelId, RibbleWhisperError>;
     fn model_exists_in_storage(&self, model_id: ModelId) -> Result<bool, RibbleWhisperError>;
-    fn get_model(&self, model_id: ModelId) -> Option<&Model>;
+    /// Returns a clone of model if it exists within the bank.
+    /// NOTE: since this trait assumes some form of synchronization is in place to protect the
+    /// backing storage, there are significant lifetime challenges involved with trying to return a reference.
+    fn get_model(&self, model_id: ModelId) -> Option<Model>;
 
-    fn iter(&self) -> Self::Iter<'_>;
+    /// This trait assumes that some form of synchronization exists to protect the underlying model
+    /// bank. This makes returning an iterator over the underlying data incredibly difficult, if
+    /// not impossible. Instead, for_each takes in a callback which gets called over the backing
+    /// data.
+    fn for_each<F>(&self, f: F)
+    where
+        F: Fn((&ModelId, &Model));
+
     /// Searches for a model and updates its name.
     /// # Returns:
     /// * Ok(Some(ModelId)) if the model was found and updated successfully.
@@ -135,7 +143,7 @@ pub trait ConcurrentModelBank: Send + Sync {
         checksum: &Checksum,
     ) -> Result<bool, RibbleWhisperError>;
 
-    fn remove_model(&self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError>;
+    fn remove_model(&self, model_id: ModelId) -> Result<Option<ModelId>, RibbleWhisperError>;
 
     fn refresh_model_bank(&self) -> Result<(), RibbleWhisperError>;
 }
@@ -255,7 +263,7 @@ impl ModelBank for DefaultModelBank {
         }
     }
 
-    fn remove_model(&mut self, model_id: ModelId) -> Result<ModelId, RibbleWhisperError> {
+    fn remove_model(&mut self, model_id: ModelId) -> Result<Option<ModelId>, RibbleWhisperError> {
         let model = self
             .models
             .get(&model_id)
@@ -268,7 +276,7 @@ impl ModelBank for DefaultModelBank {
             fs::remove_file(&file_path)?;
         }
         self.models.remove(&model_id);
-        Ok(model_id)
+        Ok(Some(model_id))
     }
 
     fn refresh_model_bank(&mut self) -> Result<(), RibbleWhisperError> {
@@ -614,41 +622,4 @@ impl DefaultModelType {
 pub enum Checksum<'a> {
     Sha1(&'a str),
     Sha256(&'a str),
-}
-
-// TODO: determine whether or not to... make this happen.
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Default,
-    PartialOrd,
-    PartialEq,
-    Ord,
-    Eq,
-    Hash,
-    AsRefStr,
-    EnumCount,
-    EnumIter,
-    EnumString,
-    Display,
-    IntoStaticStr,
-    EnumIs,
-    FromRepr,
-    VariantArray,
-    VariantNames,
-)]
-pub enum DefaultQuantizedModels {
-    #[default]
-    TinyQ5,
-    TinyQ8,
-    BaseQ5,
-    BaseQ8,
-    SmallQ5,
-    SmallQ8,
-    MediumQ5,
-    MediumQ8,
-    LargeV2Q5,
-    LargeV2Q8,
 }

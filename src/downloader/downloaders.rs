@@ -14,16 +14,20 @@ use url::Url;
 #[cfg(feature = "downloader-async")]
 use crate::downloader::AsyncDownload;
 use crate::downloader::{SyncDownload, Writable};
-use crate::utils::callback::{Callback, Nop};
+use crate::utils::callback::{AbortCallback, Callback, Nop};
 use crate::utils::errors::RibbleWhisperError;
+
+// TODO: Add escape mechanisms to abort long downloads.
 
 /// Streams in bytes (asynchronously) to download data.
 /// Current progress can be obtained by supplying a Callback.
 #[cfg(feature = "downloader-async")]
-pub struct StreamDownloader<
+pub struct StreamDownloader<S, CB, A>
+where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
     CB: Callback<Argument = usize>,
-> {
+    A: AbortCallback,
+{
     // Bytestream
     file_stream: S,
     // Total progress thus far
@@ -32,9 +36,13 @@ pub struct StreamDownloader<
     total_size: usize,
     // Optional progress callback. Default is a Nop
     progress_callback: CB,
+    abort_callback: A,
 }
 #[cfg(feature = "downloader-async")]
-impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin> StreamDownloader<S, Nop<usize>> {
+impl<S> StreamDownloader<S, Nop<usize>, Nop<()>>
+where
+    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+{
     /// Returns a StreamDownloader with the default (NOP) callback
     pub fn new_with_parameters(file_stream: S, total_size: usize) -> Self {
         Self {
@@ -42,48 +50,99 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin> StreamDownloader<S
             progress: 0,
             total_size,
             progress_callback: Nop::new(),
+            abort_callback: Nop::new(),
         }
     }
 }
 
 #[cfg(feature = "downloader-async")]
-impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argument = usize>>
-    StreamDownloader<S, CB>
+impl<S, CB, A> StreamDownloader<S, CB, A>
+where
+    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    CB: Callback<Argument = usize>,
+    A: AbortCallback,
 {
-    /// Returns a StreamDownloader with a set ProgressCallback
-    pub fn new_with_parameters_and_callback(
+    /// Returns a StreamDownloader with both a ProgressCallback and an AbortCallback
+    pub fn new_full(
         file_stream: S,
         total_size: usize,
         progress_callback: CB,
+        abort_callback: A,
     ) -> Self {
         Self {
             file_stream,
             progress: 0,
             total_size,
             progress_callback,
+            abort_callback,
         }
     }
+
+    /// Returns a StreamDownloader with a set ProgressCallback
+    pub fn new_with_parameters_and_progress_callback(
+        file_stream: S,
+        total_size: usize,
+        progress_callback: CB,
+    ) -> StreamDownloader<S, CB, Nop<()>> {
+        StreamDownloader {
+            file_stream,
+            progress: 0,
+            total_size,
+            progress_callback,
+            abort_callback: Nop::new(),
+        }
+    }
+
+    pub fn new_with_parameters_and_abort_callback(
+        file_stream: S,
+        total_size: usize,
+        abort_callback: A,
+    ) -> StreamDownloader<S, Nop<usize>, A> {
+        StreamDownloader {
+            file_stream,
+            progress: 0,
+            total_size,
+            progress_callback: Nop::new(),
+            abort_callback,
+        }
+    }
+
     /// Sets the file stream to be downloaded
-    pub fn with_file_stream<S2: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin>(
-        self,
-        file_stream: S2,
-    ) -> StreamDownloader<S2, CB> {
-        StreamDownloader::new_with_parameters_and_callback(
+    pub fn with_file_stream<S2>(self, file_stream: S2) -> StreamDownloader<S2, CB, A>
+    where
+        S2: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    {
+        StreamDownloader::new_full(
             file_stream,
             self.total_size,
             self.progress_callback,
+            self.abort_callback,
         )
     }
+
     /// Sets an optional progress callback.
     /// To un-set a callback, supply [Nop]
-    pub fn with_progress_callback<C: Callback<Argument = usize>>(
-        self,
-        progress_callback: C,
-    ) -> StreamDownloader<S, C> {
-        StreamDownloader::new_with_parameters_and_callback(
+    pub fn with_progress_callback<C>(self, progress_callback: C) -> StreamDownloader<S, C, A>
+    where
+        C: Callback<Argument = usize>,
+    {
+        StreamDownloader::new_full(
             self.file_stream,
             self.total_size,
             progress_callback,
+            self.abort_callback,
+        )
+    }
+
+    pub fn with_abort_callback<A2>(self, abort_callback: A2) -> StreamDownloader<S, CB, A2>
+    where
+        A2: AbortCallback,
+    {
+        StreamDownloader::new_full(
+            self.file_stream,
+            self.total_size,
+            self.progress_callback,
+            abort_callback,
         )
     }
 
@@ -94,14 +153,20 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argum
 }
 
 #[cfg(feature = "downloader-async")]
-impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argument = usize>>
-    Writable for StreamDownloader<S, CB>
+impl<S, CB, A> Writable for StreamDownloader<S, CB, A>
+where
+    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    CB: Callback<Argument = usize>,
+    A: AbortCallback,
 {
 }
 
 #[cfg(feature = "downloader-async")]
-impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argument = usize>>
-    AsyncDownload for StreamDownloader<S, CB>
+impl<S, CB, A> AsyncDownload for StreamDownloader<S, CB, A>
+where
+    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    CB: Callback<Argument = usize>,
+    A: AbortCallback,
 {
     /// Downloads a given file asynchronously to the desired location. Returns Err on I/O failure.
     /// This function must be awaited and should not be called on a UI thread.
@@ -120,6 +185,11 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argum
         let stream = &mut self.file_stream;
 
         while let Some(next) = stream.next().await {
+            // Call the abort callback and escape if the download is cancelled
+            if self.abort_callback.abort() {
+                return Err(RibbleWhisperError::DownloadAborted(file_name.to_string()));
+            }
+
             let buf = next?;
             dest.write_all(&buf)?;
 
@@ -137,15 +207,20 @@ impl<S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin, CB: Callback<Argum
 
 /// Downloads a file synchronously (blocking).
 /// Current progress can be obtained by supplying a Callback.
-pub struct SyncDownloader<R: Read, CB: Callback<Argument = usize>> {
+pub struct SyncDownloader<R, CB, A>
+where
+    R: Read,
+    CB: Callback<Argument = usize>,
+    A: AbortCallback,
+{
     file_stream: R,
     progress: usize,
     total_size: usize,
     progress_callback: CB,
-    // TODO: add a mechanism to interrupt the download.
+    abort_callback: A,
 }
 
-impl<R: Read> SyncDownloader<R, Nop<usize>> {
+impl<R: Read> SyncDownloader<R, Nop<usize>, Nop<()>> {
     /// Returns a SyncDownloader with the default (NOP) callback
     pub fn new_with_parameters(file_stream: R, total_size: usize) -> Self {
         Self {
@@ -153,43 +228,80 @@ impl<R: Read> SyncDownloader<R, Nop<usize>> {
             progress: 0,
             total_size,
             progress_callback: Nop::new(),
+            abort_callback: Nop::new(),
         }
     }
 }
 
-impl<R: Read, CB: Callback<Argument = usize>> SyncDownloader<R, CB> {
-    /// Returns a SyncDownloader with the provided optional progress callback.
-    pub fn new_with_parameters_and_callback(
+impl<R: Read, CB, A> SyncDownloader<R, CB, A>
+where
+    R: Read,
+    CB: Callback<Argument = usize>,
+    A: AbortCallback,
+{
+    /// Returns a SyncDownloader with both callbacks set.
+    pub fn new_full(
         file_stream: R,
         total_size: usize,
         progress_callback: CB,
+        abort_callback: A,
     ) -> Self {
         Self {
             file_stream,
             progress: 0,
             total_size,
             progress_callback,
+            abort_callback,
+        }
+    }
+
+    /// Returns a SyncDownloader with the provided optional progress callback.
+    pub fn new_with_parameters_and_progress_callback(
+        file_stream: R,
+        total_size: usize,
+        progress_callback: CB,
+    ) -> SyncDownloader<R, CB, Nop<()>> {
+        SyncDownloader {
+            file_stream,
+            progress: 0,
+            total_size,
+            progress_callback,
+            abort_callback: Nop::new(),
         }
     }
 
     /// Sets the file stream.
-    pub fn with_file_stream<R2: Read>(self, file_stream: R2) -> SyncDownloader<R2, CB> {
-        SyncDownloader::new_with_parameters_and_callback(
+    pub fn with_file_stream<R2: Read>(self, file_stream: R2) -> SyncDownloader<R2, CB, A> {
+        SyncDownloader::new_full(
             file_stream,
             self.total_size,
             self.progress_callback,
+            self.abort_callback,
         )
     }
     /// Sets the (optional) progress callback.
     /// To un-set the callback, supply a [Nop]
-    pub fn with_progress_callback<C: Callback<Argument = usize>>(
-        self,
-        progress_callback: C,
-    ) -> SyncDownloader<R, C> {
-        SyncDownloader::new_with_parameters_and_callback(
+    pub fn with_progress_callback<C>(self, progress_callback: C) -> SyncDownloader<R, C, A>
+    where
+        C: Callback<Argument = usize>,
+    {
+        SyncDownloader::new_full(
             self.file_stream,
             self.total_size,
             progress_callback,
+            self.abort_callback,
+        )
+    }
+
+    pub fn with_abort_callback<A2>(self, abort_callback: A2) -> SyncDownloader<R, CB, A2>
+    where
+        A2: AbortCallback,
+    {
+        SyncDownloader::new_full(
+            self.file_stream,
+            self.total_size,
+            self.progress_callback,
+            abort_callback,
         )
     }
 
@@ -199,11 +311,17 @@ impl<R: Read, CB: Callback<Argument = usize>> SyncDownloader<R, CB> {
     }
 }
 
-impl<R: Read, CB: Callback<Argument = usize>> Read for SyncDownloader<R, CB> {
+impl<R, CB, A> Read for SyncDownloader<R, CB, A>
+where
+    R: Read,
+    CB: Callback<Argument = usize>,
+    A: AbortCallback,
+{
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        // TODO: early-escape here if the user wants to cut the download.
-        // e.g. if !self.should_continue() {return Err(DownloadError::interrupted)
-        //
+        if self.abort_callback.abort() {
+            return Err(std::io::Error::from(std::io::ErrorKind::ConnectionAborted));
+        }
+
         let byte_read = self.file_stream.read(buf);
         if let Ok(num_bytes) = byte_read {
             self.progress += num_bytes;
@@ -215,9 +333,20 @@ impl<R: Read, CB: Callback<Argument = usize>> Read for SyncDownloader<R, CB> {
     }
 }
 
-impl<R: Read, CB: Callback<Argument = usize>> Writable for SyncDownloader<R, CB> {}
+impl<R, CB, A> Writable for SyncDownloader<R, CB, A>
+where
+    R: Read,
+    CB: Callback<Argument = usize>,
+    A: AbortCallback,
+{
+}
 
-impl<R: Read, CB: Callback<Argument = usize>> SyncDownload for SyncDownloader<R, CB> {
+impl<R, CB, A> SyncDownload for SyncDownloader<R, CB, A>
+where
+    R: Read,
+    CB: Callback<Argument = usize>,
+    A: AbortCallback,
+{
     /// Downloads a file synchronously to the desired location. Returns Err on I/O failure.
     /// This will block the calling thread.
     fn download(
@@ -234,7 +363,14 @@ impl<R: Read, CB: Callback<Argument = usize>> SyncDownload for SyncDownloader<R,
         destination.push(file_name);
 
         let mut dest = Self::open_write_file(&destination)?;
-        copy(self, &mut dest)?;
+
+        copy(self, &mut dest).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::ConnectionAborted {
+                RibbleWhisperError::DownloadAborted(file_name.to_string())
+            } else {
+                e.into()
+            }
+        })?;
 
         Ok(())
     }
@@ -252,7 +388,7 @@ impl<R: Read, CB: Callback<Argument = usize>> SyncDownload for SyncDownloader<R,
 pub async fn async_download_request(
     url: &str,
 ) -> Result<
-    StreamDownloader<impl Stream<Item = Result<Bytes, reqwest::Error>>, Nop<usize>>,
+    StreamDownloader<impl Stream<Item = Result<Bytes, reqwest::Error>>, Nop<usize>, Nop<()>>,
     RibbleWhisperError,
 > {
     let m_url = Url::parse(url)?;
@@ -290,7 +426,7 @@ pub async fn async_download_request(
 
 pub fn sync_download_request(
     url: &str,
-) -> Result<SyncDownloader<impl Read, Nop<usize>>, RibbleWhisperError> {
+) -> Result<SyncDownloader<impl Read, Nop<usize>, Nop<()>>, RibbleWhisperError> {
     let m_url = Url::parse(url)?;
     let client = reqwest::blocking::Client::new();
 

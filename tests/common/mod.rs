@@ -2,6 +2,9 @@ use ribble_whisper::whisper::model::{
     DefaultModelBank, DefaultModelType, ModelBank, ModelId, ModelRetriever,
 };
 
+// NOTE: this is not actually dead code. It's just a bit tricky to share common functions across
+// test modules. I'm not quite sure if this is the "correct" way to do this, but it works nonetheless.
+#[allow(dead_code)]
 pub(crate) fn prep_model_bank(model_type: DefaultModelType) -> (DefaultModelBank, ModelId) {
     let bank = DefaultModelBank::new();
 

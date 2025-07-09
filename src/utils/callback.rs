@@ -1,15 +1,27 @@
 use std::marker::PhantomData;
 
-/// Encapsulates optional callbacks
+/// Trait representing optional callbacks
 pub trait Callback {
     type Argument;
     fn call(&mut self, arg: Self::Argument);
 }
 
+/// Trait representing optional short-circuiting callbacks.
+/// For use with expensive callbacks, (e.g. OfflineWhisperNewSegmentCallback) that may not
+/// always be required to run. Allows controlling over the frequency at which these callbacks get
+/// callled.
 pub trait ShortCircuitCallback {
     type Argument;
     fn should_run_callback(&mut self) -> bool;
     fn call(&mut self, arg: Self::Argument);
+}
+
+/// Trait representing optional abort callbacks.
+/// NOTE: at this time, the whisper abort callback is used in the implementation but not exposed.
+/// This may change at a later date, but for now, use the shared running flag to stop an
+/// [OfflineTranscriber].
+pub trait AbortCallback {
+    fn abort(&mut self) -> bool;
 }
 
 /// Encapsulates a basic FnMut(T) callback for functions that accept optional callbacks.
@@ -103,6 +115,33 @@ where
     }
 }
 
+/// Encapsulates an abort callback. Return true in the close to indicate "should abort"
+#[repr(C)]
+pub struct RibbleAbortCallback<B>
+where
+    B: FnMut() -> bool + 'static,
+{
+    abort_callback: B,
+}
+
+impl<B> RibbleAbortCallback<B>
+where
+    B: FnMut() -> bool + 'static,
+{
+    pub fn new(abort_callback: B) -> Self {
+        Self { abort_callback }
+    }
+}
+
+impl<B> AbortCallback for RibbleAbortCallback<B>
+where
+    B: FnMut() -> bool + 'static,
+{
+    fn abort(&mut self) -> bool {
+        (self.abort_callback)()
+    }
+}
+
 /// To indicate "None" in functions that expect a callback (eg. downloading, loading audio, etc.)
 /// Since all optional callbacks are unpacked before a hot loop to cut down on branching,
 /// this will get called repeatedly but expect this to be optimized out.
@@ -137,4 +176,10 @@ impl<T> ShortCircuitCallback for Nop<T> {
         false
     }
     fn call(&mut self, _arg: T) {}
+}
+
+impl AbortCallback for Nop<()> {
+    fn abort(&mut self) -> bool {
+        false
+    }
 }
