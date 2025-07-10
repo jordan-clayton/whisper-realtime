@@ -5,9 +5,9 @@ use crate::audio::recorder::{Recorder, SampleSink};
 use crate::utils::errors::RibbleWhisperError;
 
 #[cfg(feature = "sdl2")]
-use sdl2::audio::AudioSpecDesired;
-#[cfg(feature = "sdl2")]
 use sdl2::AudioSubsystem;
+#[cfg(feature = "sdl2")]
+use sdl2::audio::AudioSpecDesired;
 
 /// Encapsulates required recording spec information.
 /// Set fields to None to use device defaults.
@@ -108,16 +108,25 @@ impl Default for CaptureSpec {
 
 pub trait AudioBackend<S: SampleSink>: Sized {
     type Capture: MicCapture;
+    /// Opens an audio stream for capture
     fn open_capture(&self, spec: CaptureSpec, sink: S)
     -> Result<Self::Capture, RibbleWhisperError>;
+    /// Closes an opened audio stream
+    fn close_capture(&self, capture: Self::Capture);
 }
 
 #[cfg(feature = "sdl2")]
 /// The default audio backend. Can be integrated with Sdl2 by using [Sdl2Backend::from_subsystem].
-/// ***Note: SDL2 is not thread-safe, so SdlBackends cannot be safely shared across threads.***
-/// However, audio devices created using [Sdl2Backend::open_capture()] are guaranteed to be
-/// thread-safe and can be shared freely. It is left up to the implementation to handle managing
-/// SDL2 lifetimes and quirks.
+/// ***Note: SDL2 is, by and large, not thread-safe, so SdlBackends cannot be safely shared across threads.***
+///
+/// As per: [this thread](https://github.com/Rust-SDL2/rust-sdl2/issues/318#issuecomment-167012003), it should be
+/// safe to call pause and resume from other threads. The issue lies with the destruction of an
+/// audio device; it is not guaranteed OS syscalls to shut down the audio device are safe to call
+/// on non-main threads.
+///
+/// It is left up to the implementation to handle managing this. See
+/// [Ribble](https://github.com/jordan-clayton/ribble) for ideas for how to work around this
+/// limitation.
 pub struct Sdl2Backend {
     audio_subsystem: AudioSubsystem,
 }
@@ -158,6 +167,10 @@ impl<S: SampleSink> AudioBackend<S> for Sdl2Backend {
 
         Ok(Sdl2Capture::new(device))
     }
+
+    /// NOTE: it is not required to call this function if the Sdl2Capture only exists on the main
+    /// thread. The capture will be dropped automatically once it goes out of scope.
+    fn close_capture(&self, _capture: Sdl2Capture<S>) {}
 }
 
 #[cfg(feature = "sdl2")]
