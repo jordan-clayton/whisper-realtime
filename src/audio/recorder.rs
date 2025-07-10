@@ -5,8 +5,14 @@ use crate::utils::Sender;
 use sdl2::audio::{AudioCallback, AudioFormatNum};
 
 /// Trait alias to unify Audio formats to meet the bounds of Audio Backends.
-pub trait RecorderSample: Default + Copy + AudioFormatNum + Send + Sync + 'static {}
-impl<T: Default + Copy + AudioFormatNum + Send + Sync + 'static> RecorderSample for T {}
+pub trait RecorderSample:
+    Default + Copy + AudioFormatNum + voice_activity_detector::Sample + Send + Sync + 'static
+{
+}
+impl<T: Default + Copy + AudioFormatNum + voice_activity_detector::Sample + Send + Sync + 'static>
+    RecorderSample for T
+{
+}
 
 /// A trait responsible for pushing audio out from the backend capture.
 pub trait SampleSink: Send + 'static {
