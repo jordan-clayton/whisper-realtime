@@ -19,7 +19,7 @@ pub trait ShortCircuitCallback {
 /// Trait representing optional abort callbacks.
 /// NOTE: at this time, the whisper abort callback is used in the implementation but not exposed.
 /// This may change at a later date, but for now, use the shared running flag to stop an
-/// [OfflineTranscriber].
+/// [crate::transcriber::offline_transcriber::OfflineTranscriber].
 pub trait AbortCallback {
     fn abort(&mut self) -> bool;
 }
