@@ -56,7 +56,10 @@ mod downloader_tests {
         let handle = rt.handle();
 
         // NOTE: callback url is public and can be set after creating the struct by using the builder.
-        let stream_downloader = downloader::downloaders::async_download_request(url.as_str());
+        let stream_downloader = downloader::downloaders::async_download_request(
+            url.as_str(),
+            model_type.to_file_name(),
+        );
 
         // Run the future -> At this time, tokio is not being used for async and this cannot be awaited in testing.
         let stream_downloader = handle.block_on(stream_downloader);
@@ -92,9 +95,8 @@ mod downloader_tests {
             file_name.is_some(),
             "Model bank failed to return a model via ID in async download test"
         );
-        let file_name = file_name.unwrap();
 
-        let download = stream_downloader.download(file_path, file_name);
+        let download = stream_downloader.download(file_path);
 
         let download = handle.block_on(download);
 
@@ -147,7 +149,8 @@ mod downloader_tests {
         let url = model_type.url();
 
         // NOTE: callback url is public and can be set after creating the struct by using the builder.
-        let sync_downloader = downloader::downloaders::sync_download_request(url.as_str());
+        let sync_downloader =
+            downloader::downloaders::sync_download_request(url.as_str(), model_type.to_file_name());
 
         // Ensure proper struct creation + download.
         assert!(
@@ -182,10 +185,8 @@ mod downloader_tests {
             "Model bank failed to return a model via ID in async download test"
         );
 
-        let file_name = file_name.unwrap();
-
         // File copy:
-        let download = sync_downloader.download(file_path, file_name);
+        let download = sync_downloader.download(file_path);
 
         assert!(download.is_ok(), "{}", download.unwrap_err());
 
@@ -201,14 +202,19 @@ mod downloader_tests {
         );
     }
 
+    // NOTE: The ".tmp" file extension is not currently exposed.
+    // THIS WILL CAUSE ISSUES IF THAT EXTENSION IS CHANGED.
+    // Either make the extension public, put it in the downloaders modfile,
+    // or maintain consistency.
+
     #[test]
     fn test_sync_abort_callback() {
         let model_type = DefaultModelType::SmallEn;
         let url = model_type.url();
 
         let file_path = std::env::current_dir().unwrap().join("data").join("models");
-        let file_name = model_type.to_file_name();
-        let sync_downloader = downloader::downloaders::sync_download_request(url.as_str());
+        let sync_downloader =
+            downloader::downloaders::sync_download_request(url.as_str(), model_type.to_file_name());
         assert!(
             sync_downloader.is_ok(),
             "{}",
@@ -219,7 +225,7 @@ mod downloader_tests {
         let abort_callback = RibbleAbortCallback::new(|| true);
         let mut sync_downloader = sync_downloader.unwrap().with_abort_callback(abort_callback);
 
-        let download = sync_downloader.download(file_path.as_path(), file_name);
+        let download = sync_downloader.download(file_path.as_path());
         assert!(
             download.is_err(),
             "Abort callback didn't fire, or the Read Impl didn't escape successfully."
@@ -233,10 +239,12 @@ mod downloader_tests {
             err
         );
 
-        // Clean up the zero-sized file.
-        // It doesn't really matter if this fails due to a missing file;
-        // this is just to remove any stale data.
-        let _ = std::fs::remove_file(file_path.join(file_name));
+        // Assert that the temporary file is gone.
+        let test_path = file_path.join([model_type.to_file_name(), ".tmp"].concat());
+        assert!(
+            !test_path.exists(),
+            "File still exists in directory, cleanup failed."
+        );
     }
 
     #[test]
@@ -245,13 +253,15 @@ mod downloader_tests {
         let url = model_type.url();
 
         let file_path = std::env::current_dir().unwrap().join("data").join("models");
-        let file_name = model_type.to_file_name();
         // Tokio runtime for block_on.
         let rt = Runtime::new().unwrap();
         let handle = rt.handle();
 
         // NOTE: callback url is public and can be set after creating the struct by using the builder.
-        let stream_downloader = downloader::downloaders::async_download_request(url.as_str());
+        let stream_downloader = downloader::downloaders::async_download_request(
+            url.as_str(),
+            model_type.to_file_name(),
+        );
 
         // Run the future -> At this time, tokio is not being used for async and this cannot be awaited in testing.
         let stream_downloader = handle.block_on(stream_downloader);
@@ -268,7 +278,7 @@ mod downloader_tests {
             .unwrap()
             .with_abort_callback(abort_callback);
 
-        let download_future = stream_downloader.download(file_path.as_path(), file_name);
+        let download_future = stream_downloader.download(file_path.as_path());
         let download = handle.block_on(download_future);
 
         assert!(
@@ -284,9 +294,122 @@ mod downloader_tests {
             err
         );
 
-        // Clean up the zero-sized file.
-        // It doesn't really matter if this fails due to a missing file;
-        // this is just to remove any stale data.
-        let _ = std::fs::remove_file(file_path.join(file_name));
+        // Assert that the temporary file is gone.
+        let test_path = file_path.join([model_type.to_file_name(), ".tmp"].concat());
+        assert!(
+            !test_path.exists(),
+            "File still exists in directory, cleanup failed."
+        );
+    }
+
+    // Provide the empty string as a fallback argument; expect this to actually get the file_name
+    // from either the URL/Content-Disposition
+    #[test]
+    fn test_content_name_valid_url_async() {
+        let model_type = DefaultModelType::SmallEn;
+        let url = model_type.url();
+
+        // Tokio runtime for block_on.
+        let rt = Runtime::new().unwrap();
+        let handle = rt.handle();
+
+        let stream_downloader = downloader::downloaders::async_download_request(url.as_str(), "");
+        // Run the future -> At this time, tokio is not being used for async and this cannot be awaited in testing.
+        let stream_downloader = handle.block_on(stream_downloader);
+
+        assert!(
+            stream_downloader.is_ok(),
+            "{}",
+            stream_downloader.err().unwrap()
+        );
+
+        let stream_downloader = stream_downloader.unwrap();
+        let content_name = stream_downloader.content_name();
+        let model_name = model_type.to_file_name();
+        assert_ne!(
+            content_name, "",
+            "Content name algorithm failed despite having a valid url."
+        );
+
+        assert_eq!(
+            content_name, model_name,
+            "Filenames do not match. Expected: {model_name}, Actual: {content_name}",
+        );
+    }
+
+    // Provide the empty string as a fallback argument; expect this to actually get the file_name
+    // from either the URL/Content-Disposition
+    #[test]
+    fn test_content_name_valid_url_sync() {
+        let model_type = DefaultModelType::SmallEn;
+        let url = model_type.url();
+
+        let sync_downloader = downloader::downloaders::sync_download_request(url.as_str(), "");
+        assert!(
+            sync_downloader.is_ok(),
+            "{}",
+            sync_downloader.err().unwrap()
+        );
+
+        let sync_downloader = sync_downloader.unwrap();
+        let content_name = sync_downloader.content_name();
+        let model_name = model_type.to_file_name();
+        assert_ne!(
+            content_name, "",
+            "Content name algorithm failed despite having a valid url."
+        );
+
+        assert_eq!(
+            content_name, model_name,
+            "Filenames do not match. Expected: {model_name}, Actual: {content_name}",
+        );
+    }
+
+    #[test]
+    fn test_content_name_invalid_url_async() {
+        let model_type = DefaultModelType::SmallEn;
+        let url = "https://www.google.ca";
+        let model_name = model_type.to_file_name();
+
+        // Tokio runtime for block_on.
+        let rt = Runtime::new().unwrap();
+        let handle = rt.handle();
+
+        let stream_downloader = downloader::downloaders::async_download_request(url, model_name);
+        // Run the future -> At this time, tokio is not being used for async and this cannot be awaited in testing.
+        let stream_downloader = handle.block_on(stream_downloader);
+
+        assert!(
+            stream_downloader.is_ok(),
+            "{}",
+            stream_downloader.err().unwrap()
+        );
+
+        let stream_downloader = stream_downloader.unwrap();
+
+        let content_name = stream_downloader.content_name();
+        assert_eq!(
+            content_name, model_name,
+            "Content name algorithm didn't fallback with invalid url. Expected: {model_name}, Actual: {content_name}",
+        );
+    }
+
+    #[test]
+    fn test_content_name_invalid_url_sync() {
+        let model_type = DefaultModelType::SmallEn;
+        let url = "https://www.google.ca";
+        let model_name = model_type.to_file_name();
+        let sync_downloader = downloader::downloaders::sync_download_request(url, model_name);
+        assert!(
+            sync_downloader.is_ok(),
+            "{}",
+            sync_downloader.err().unwrap()
+        );
+        let sync_downloader = sync_downloader.unwrap();
+        let content_name = sync_downloader.content_name();
+        assert_eq!(
+            content_name, model_name,
+            "Content name algorithm didn't fallback with invalid url. Expected: {model_name}, Actual: {content_name}",
+        );
     }
 }

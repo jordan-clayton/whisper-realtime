@@ -45,6 +45,7 @@ earshot = "0.1.0"
 webrtc-vad = "0.4.0"
 parking_lot = { version = "0.12.4", features = ["deadlock_detection"] }
 strsim = "0.11.1"
+sanitize-filename = {version = "0.6.0", optional = true}
 
 [dev-dependencies]
 criterion = "0.6.0"
@@ -67,7 +68,7 @@ all = ["downloader-async", "resampler", "integrity", "crossbeam", "serde"]
 _gpu = []
 crossbeam = ["dep:crossbeam"]
 serde = ["dep:serde"]
-downloader = ["dep:reqwest"]
+downloader = ["dep:reqwest", "dep:sanitize-filename"]
 integrity = ["downloader", "serde", "dep:serde_json", "dep:sha1", "dep:sha2", "dep:regex", "reqwest/json"]
 downloader-async = ["downloader", "dep:tokio", "dep:bytes", "dep:futures", "dep:futures-util", "dep:futures-core"]
 resampler = ["dep:rubato"]

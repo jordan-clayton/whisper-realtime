@@ -290,7 +290,7 @@ fn prepare_model_bank() -> (DefaultModelBank, ModelId) {
         // Downloading.
         let url = model_type.url();
 
-        let sync_downloader = sync_download_request(url.as_str());
+        let sync_downloader = sync_download_request(url.as_str(), model_type.to_file_name());
         if let Err(e) = sync_downloader.as_ref() {
             eprintln!("{}", e);
         }
@@ -315,11 +315,11 @@ fn prepare_model_bank() -> (DefaultModelBank, ModelId) {
         let progress_callback = RibbleWhisperCallback::new(progress_callback_closure);
         let mut sync_downloader = sync_downloader.with_progress_callback(progress_callback);
 
-        let model = bank
+        let _model = bank
             .get_model(model_id)
             .expect("Model is expected to exist in default storage.");
 
-        let download = sync_downloader.download(bank.model_directory(), model.file_name());
+        let download = sync_downloader.download(bank.model_directory());
         assert!(download.is_ok());
         let model_in_directory = bank.model_exists_in_storage(model_id);
         assert!(

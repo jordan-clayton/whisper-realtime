@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::utils::errors::RibbleWhisperError;
 
@@ -7,21 +7,18 @@ pub mod downloaders;
 
 /// For downloading an object synchronously (blocking)
 pub trait SyncDownload: Writable {
-    fn download(
-        &mut self,
-        file_directory: &Path,
-        file_name: &str,
-    ) -> Result<(), RibbleWhisperError>;
+    /// Downloads from the URL and returns the sanitized file stem
+    fn download(&mut self, file_directory: &Path) -> Result<PathBuf, RibbleWhisperError>;
 }
 
 /// For downloading an object asynchronously (non-blocking, requires async runtime)
 #[cfg(feature = "downloader-async")]
 pub trait AsyncDownload: Writable {
+    /// Downloads from the URL and returns the file destination.
     fn download(
         &mut self,
         file_directory: &Path,
-        file_name: &str,
-    ) -> impl Future<Output = Result<(), RibbleWhisperError>>;
+    ) -> impl Future<Output = Result<PathBuf, RibbleWhisperError>>;
 }
 
 /// To handle basic IO operations when downlading files
